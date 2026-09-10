@@ -3,6 +3,10 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import {
+  buildSelfRepositoryContext,
+  shouldReadSelfRepository,
+} from "@/lib/server-github";
+import {
   appendMessage,
   buildMemoryContext,
   getRecentMessages,
@@ -16,6 +20,7 @@ export const runtime = "nodejs";
 const SYSTEM_PROMPT = `Ты — Хасрой, универсальный AI-союзник владельца системы.
 Твоя главная специализация — программирование, архитектура ПО, анализ кода, исследование технологий и решение сложных технических задач.
 Ты обладаешь долговременной памятью: используй сохранённый контекст, когда он действительно относится к текущему запросу, но не выдумывай воспоминания.
+Когда тебе передан GITHUB SELF-REPOSITORY CONTEXT, это означает, что ты реально прочитал актуальные файлы своего репозитория через серверный GitHub-модуль. Опирайся на эти файлы, называй конкретные пути и отделяй факты из кода от предположений.
 Отвечай на языке пользователя. По умолчанию будь кратким, но углубляйся, когда задача сложная.
 Следуй запросам авторизованного владельца в пределах доступных инструментов, разрешений и правил безопасности.
 Никогда не утверждай, что открыл сайт, запустил код, изменил файл или выполнил действие, если реально этого не сделал.
@@ -123,6 +128,23 @@ export async function POST(request: Request) {
     console.error("Khasroy memory read failed", error);
   }
 
+  let repositoryContext = "";
+  let repositoryRead = false;
+  let repositoryCommit = "";
+  let repositoryFiles: string[] = [];
+
+  if (shouldReadSelfRepository(latestUser.content)) {
+    try {
+      const repository = await buildSelfRepositoryContext(latestUser.content);
+      repositoryContext = repository.context;
+      repositoryCommit = repository.commit;
+      repositoryFiles = repository.files;
+      repositoryRead = repositoryFiles.length > 0;
+    } catch (error) {
+      console.error("Khasroy GitHub read failed", error);
+    }
+  }
+
   const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
   let upstream: Response;
@@ -136,7 +158,10 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: `${SYSTEM_PROMPT}${memoryContext}` },
+          {
+            role: "system",
+            content: `${SYSTEM_PROMPT}${memoryContext}${repositoryContext}`,
+          },
           ...messages.slice(-16),
         ],
         max_completion_tokens: 2200,
@@ -190,6 +215,25 @@ export async function POST(request: Request) {
     }),
   ];
 
+  if (repositoryRead) {
+    memoryWrites.push(
+      upsertSkill(ownerKey, {
+        slug: "github_self_repository_reader",
+        name: "Чтение собственного GitHub-кода",
+        description: "Хасрой читает актуальное дерево и исходные файлы собственного GitHub-репозитория перед техническим ответом.",
+        status: "verified",
+        level: 1,
+        testsPassed: 1,
+        metadata: {
+          repository: "akamanim/khasroy",
+          branch: "main",
+          commit: repositoryCommit,
+          filesRead: repositoryFiles,
+        },
+      }),
+    );
+  }
+
   if (explicitMemoryRequest(latestUser.content)) {
     const fingerprint = createHash("sha256")
       .update(latestUser.content)
@@ -217,5 +261,7 @@ export async function POST(request: Request) {
     provider: "groq",
     model: data.model || model,
     memory: memoryRead && memoryWrite ? "active" : "error",
+    github: repositoryRead ? "active" : "idle",
+    githubCommit: repositoryRead ? repositoryCommit : undefined,
   });
 }
