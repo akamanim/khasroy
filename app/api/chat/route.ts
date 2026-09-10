@@ -11,6 +11,7 @@ import {
   usedCodeInterpreter,
   usedWebTool,
 } from "@/lib/brain/router";
+import { runCritic, shouldRunCritic, type CriticMode } from "@/lib/brain/critic";
 import {
   appendMessage,
   buildMemoryContext,
@@ -52,6 +53,20 @@ function explicitMemoryRequest(text: string) {
   return /(запомни|запомнить|важно|мы решили|мы договорились|хочу чтобы ты помнил|remember)/iu.test(
     text,
   );
+}
+
+function criticEvidence(args: {
+  repositoryRead: boolean;
+  repositoryContext: string;
+  sources: Array<{ title: string; url: string }>;
+  toolsUsed: string[];
+}) {
+  if (args.repositoryRead) return args.repositoryContext.slice(0, 5_000);
+  const sourceText = args.sources.length
+    ? args.sources.map((source) => `${source.title} — ${source.url}`).join("\n")
+    : "";
+  const toolText = args.toolsUsed.length ? `\nTools: ${args.toolsUsed.join(", ")}` : "";
+  return `${sourceText}${toolText}`.trim();
 }
 
 export async function POST(request: Request) {
@@ -183,9 +198,39 @@ export async function POST(request: Request) {
     return NextResponse.json({ error }, { status });
   }
 
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) {
+  const draftContent = data.choices?.[0]?.message?.content?.trim();
+  if (!draftContent) {
     return NextResponse.json({ error: "Хасрой вернул пустой ответ." }, { status: 502 });
+  }
+
+  let content = draftContent;
+  let criticRan = false;
+  let criticRevised = false;
+  let criticNotes: string[] = [];
+  let criticModel: string | undefined;
+
+  if (shouldRunCritic(latestUser.content, brain.mode, draftContent)) {
+    try {
+      const critic = await runCritic({
+        apiKey,
+        query: latestUser.content,
+        answer: draftContent,
+        mode: (brain.mode === "chat" ? "technical" : brain.mode) as CriticMode,
+        evidence: criticEvidence({
+          repositoryRead,
+          repositoryContext,
+          sources: brain.sources,
+          toolsUsed: brain.toolsUsed,
+        }),
+      });
+      criticRan = critic.ran;
+      criticRevised = critic.revised;
+      criticNotes = critic.notes;
+      criticModel = critic.model;
+      if (critic.ran && critic.answer.trim()) content = critic.answer.trim();
+    } catch (error) {
+      console.error("Khasroy critic failed", error);
+    }
   }
 
   const webVerified = usedWebTool(brain);
@@ -268,6 +313,25 @@ export async function POST(request: Request) {
     );
   }
 
+  if (criticRan) {
+    memoryWrites.push(
+      upsertSkill(ownerKey, {
+        slug: "independent_response_critic",
+        name: "Независимая проверка ответа",
+        description: "Хасрой пропускает технические ответы через отдельный критический проход и при необходимости исправляет их перед показом владельцу.",
+        status: "verified",
+        level: 1,
+        testsPassed: 1,
+        metadata: {
+          model: criticModel,
+          revised: criticRevised,
+          notes: criticNotes,
+          checkedMode: brain.mode,
+        },
+      }),
+    );
+  }
+
   if (explicitMemoryRequest(latestUser.content)) {
     const fingerprint = createHash("sha256")
       .update(latestUser.content)
@@ -301,6 +365,9 @@ export async function POST(request: Request) {
     githubFiles: repositoryRead ? repositoryFiles : undefined,
     internet: webVerified ? "verified" : "idle",
     sandbox: sandboxVerified ? "verified" : "idle",
+    critic: criticRan
+      ? { status: "verified", revised: criticRevised, notes: criticNotes }
+      : { status: "idle" },
     sources: webVerified ? brain.sources : undefined,
   });
 }
