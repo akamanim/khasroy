@@ -4,6 +4,11 @@ export type Message = {
   content: string;
 };
 
+type ChatApiResponse = {
+  content?: string;
+  error?: string;
+};
+
 export class KhasroyAuthError extends Error {
   constructor() {
     super("Требуется доступ владельца.");
@@ -33,14 +38,19 @@ export async function chat(messages: Message[]): Promise<string> {
 
   if (response.status === 401) throw new KhasroyAuthError();
 
-  const data = await response.json().catch(() => ({}));
+  const data: ChatApiResponse = await response
+    .json()
+    .catch(() => ({} as ChatApiResponse));
+
   if (!response.ok) {
     throw new Error(
-      typeof data?.error === "string" ? data.error : "Не удалось получить ответ от Хасроя.",
+      typeof data.error === "string"
+        ? data.error
+        : "Не удалось получить ответ от Хасроя.",
     );
   }
 
-  if (typeof data?.content !== "string" || !data.content.trim()) {
+  if (typeof data.content !== "string" || !data.content.trim()) {
     throw new Error("Хасрой вернул пустой ответ.");
   }
 
