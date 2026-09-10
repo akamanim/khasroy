@@ -1,3 +1,5 @@
+import { searchWebDirect } from "@/lib/server-web";
+
 export type BrainMessage = {
   role: "user" | "assistant";
   content: string;
@@ -168,6 +170,7 @@ export async function runBrain(args: {
   let history = args.history.slice(-16);
   let systemContent = args.systemContent;
   let webToolForced = false;
+  let directSources: Array<{ title: string; url: string }> = [];
 
   if (mode === "repository") {
     maxCompletion = 1100;
@@ -210,9 +213,7 @@ export async function runBrain(args: {
     compoundTools,
   });
 
-  // Internet failover: if Compound web tooling is unavailable, use the native
-  // browser_search tool supported by GPT-OSS on Groq. A required tool choice
-  // makes a successful response proof that real web browsing was invoked.
+  // First internet failover: native browser search on GPT-OSS.
   if (!result.response.ok && (mode === "research" || mode === "agentic")) {
     const browserModel = args.defaultModel.startsWith("openai/gpt-oss")
       ? args.defaultModel
@@ -233,6 +234,31 @@ export async function runBrain(args: {
     webToolForced = result.response.ok;
   }
 
+  // Second internet failover: independent server-side search. This does not
+  // depend on Groq's web-tool entitlement. Real search snippets and URLs are
+  // collected first, then the normal GPT-OSS model synthesizes the answer.
+  if (!result.response.ok && (mode === "research" || mode === "agentic")) {
+    try {
+      const searched = await searchWebDirect(args.query, 6);
+      directSources = searched.sources.map(({ title, url }) => ({ title, url }));
+      const directContext = `\n\nSERVER WEB SEARCH RESULTS\nЭто реальные результаты серверного веб-поиска. Используй только факты, которые видны в этих результатах. Для утверждений о текущих данных укажи названия источников и URL.\n\n${searched.context}`;
+
+      result = await groqRequest({
+        apiKey: args.apiKey,
+        model: args.defaultModel,
+        systemContent: `${args.systemContent.slice(0, 5_500)}${directContext}`,
+        history: args.history.slice(-3),
+        maxCompletion: 800,
+        reasoning: "low",
+      });
+
+      model = args.defaultModel;
+      webToolForced = result.response.ok && directSources.length > 0;
+    } catch (error) {
+      console.error("Khasroy direct web fallback failed", error);
+    }
+  }
+
   // Repository mode can be large on the free standalone model. Retry once with
   // a compact real excerpt instead of failing the whole conversation.
   if (!result.response.ok && mode === "repository" && result.response.status !== 429) {
@@ -248,9 +274,13 @@ export async function runBrain(args: {
   }
 
   const toolsUsed = normalizeTools(result.data);
-  if (webToolForced && !toolsUsed.some((tool) => tool.includes("browser_search"))) {
+  if (webToolForced && directSources.length) {
+    toolsUsed.push("direct_web_search:server");
+  } else if (webToolForced && !toolsUsed.some((tool) => tool.includes("browser_search"))) {
     toolsUsed.push("browser_search:required");
   }
+
+  const extractedSources = extractSources(result.data);
 
   return {
     response: result.response,
@@ -259,7 +289,7 @@ export async function runBrain(args: {
     model: result.data?.model || model,
     mode,
     toolsUsed,
-    sources: extractSources(result.data),
+    sources: directSources.length ? directSources : extractedSources,
     webToolForced,
   };
 }
