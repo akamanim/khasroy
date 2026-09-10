@@ -38,9 +38,15 @@ export async function chat(messages: Message[]): Promise<string> {
 
   if (response.status === 401) throw new KhasroyAuthError();
 
-  const data: ChatApiResponse = await response
-    .json()
-    .catch(() => ({} as ChatApiResponse));
+  let data: ChatApiResponse = {};
+  try {
+    const parsed: unknown = await response.json();
+    if (parsed && typeof parsed === "object") {
+      data = parsed as ChatApiResponse;
+    }
+  } catch {
+    data = {};
+  }
 
   if (!response.ok) {
     throw new Error(
