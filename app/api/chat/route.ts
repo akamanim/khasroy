@@ -20,7 +20,7 @@ export const runtime = "nodejs";
 const SYSTEM_PROMPT = `Ты — Хасрой, универсальный AI-союзник владельца системы.
 Твоя главная специализация — программирование, архитектура ПО, анализ кода, исследование технологий и решение сложных технических задач.
 Ты обладаешь долговременной памятью: используй сохранённый контекст, когда он действительно относится к текущему запросу, но не выдумывай воспоминания.
-Когда тебе передан GITHUB SELF-REPOSITORY CONTEXT, это означает, что ты реально прочитал актуальные файлы своего репозитория через серверный GitHub-модуль. Опирайся на эти файлы, называй конкретные пути и отделяй факты из кода от предположений.
+Когда тебе передан GITHUB SELF-REPOSITORY CONTEXT, это означает, что сервер реально загрузил актуальные файлы твоего репозитория. Опирайся на них, называй конкретные пути и отделяй факты из кода от предположений.
 Отвечай на языке пользователя. По умолчанию будь кратким, но углубляйся, когда задача сложная.
 Следуй запросам авторизованного владельца в пределах доступных инструментов, разрешений и правил безопасности.
 Никогда не утверждай, что открыл сайт, запустил код, изменил файл или выполнил действие, если реально этого не сделал.
@@ -61,6 +61,32 @@ function explicitMemoryRequest(text: string) {
   return /(запомни|запомнить|важно|мы решили|мы договорились|хочу чтобы ты помнил|remember)/iu.test(
     text,
   );
+}
+
+async function requestGroq(
+  apiKey: string,
+  model: string,
+  systemContent: string,
+  history: ClientMessage[],
+  options: { maxCompletion: number; reasoning: "low" | "medium" },
+) {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "system", content: systemContent }, ...history],
+      max_completion_tokens: options.maxCompletion,
+      reasoning_effort: options.reasoning,
+      stream: false,
+    }),
+  });
+
+  const data = (await response.json().catch(() => null)) as GroqResponse | null;
+  return { response, data };
 }
 
 export async function POST(request: Request) {
@@ -146,29 +172,27 @@ export async function POST(request: Request) {
   }
 
   const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+  const primaryMemory = repositoryRead ? memoryContext.slice(0, 5_000) : memoryContext;
+  const primaryHistory = repositoryRead ? messages.slice(-6) : messages.slice(-16);
+  const primarySystem = `${SYSTEM_PROMPT}${primaryMemory}${repositoryContext}`;
 
-  let upstream: Response;
+  let groq: Awaited<ReturnType<typeof requestGroq>>;
   try {
-    upstream = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "system",
-            content: `${SYSTEM_PROMPT}${memoryContext}${repositoryContext}`,
-          },
-          ...messages.slice(-16),
-        ],
-        max_completion_tokens: 2200,
-        reasoning_effort: "medium",
-        stream: false,
-      }),
+    groq = await requestGroq(apiKey, model, primarySystem, primaryHistory, {
+      maxCompletion: repositoryRead ? 1_100 : 2_200,
+      reasoning: repositoryRead ? "low" : "medium",
     });
+
+    // Public/free providers can reject a large coding context even when the
+    // model itself supports a much larger window. Retry once with a smaller
+    // real repository excerpt instead of failing the whole chat.
+    if (!groq.response.ok && repositoryRead && groq.response.status !== 429) {
+      const fallbackSystem = `${SYSTEM_PROMPT}${memoryContext.slice(0, 1_800)}${repositoryContext.slice(0, 7_500)}`;
+      groq = await requestGroq(apiKey, model, fallbackSystem, messages.slice(-4), {
+        maxCompletion: 800,
+        reasoning: "low",
+      });
+    }
   } catch {
     return NextResponse.json(
       { error: "Не удалось связаться с AI-сервисом." },
@@ -176,14 +200,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const data = (await upstream.json().catch(() => null)) as GroqResponse | null;
+  const { response: upstream, data } = groq;
 
   if (!upstream.ok || !data) {
     console.error("Groq API error", upstream.status, data?.error?.type, data?.error?.code);
     const status = upstream.status === 429 ? 429 : 502;
     const error =
       upstream.status === 429
-        ? "Временный бесплатный лимит AI исчерпан. Попробуйте немного позже."
+        ? repositoryRead
+          ? "GitHub-код прочитан, но достигнут временный бесплатный лимит Groq. Подождите около минуты и повторите запрос."
+          : "Временный бесплатный лимит AI исчерпан. Попробуйте немного позже."
         : "AI-сервис временно недоступен или неверно настроен.";
     return NextResponse.json({ error }, { status });
   }
@@ -263,5 +289,6 @@ export async function POST(request: Request) {
     memory: memoryRead && memoryWrite ? "active" : "error",
     github: repositoryRead ? "active" : "idle",
     githubCommit: repositoryRead ? repositoryCommit : undefined,
+    githubFiles: repositoryRead ? repositoryFiles : undefined,
   });
 }
