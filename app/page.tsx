@@ -14,20 +14,21 @@ const welcome: Message = {
   id: "welcome",
   role: "assistant",
   content:
-    "Все системы готовы. Я Хасрой — ваш универсальный AI-союзник. У меня активна долговременная память между сессиями. С чего начнём?",
+    "Все системы готовы. Я Хасрой — ваш универсальный AI-союзник. У меня активны долговременная память и чтение собственного GitHub-кода. С чего начнём?",
 };
 
 // Core Evolution grows only from verified capabilities.
-// v0.3 has three confirmed foundations: intelligence, owner protection and long-term memory.
+// v0.4 has four confirmed foundations: intelligence, owner protection,
+// long-term memory and verified self-repository reading.
 const coreEvolution: CoreEvolution = {
-  level: 3,
-  skills: 3,
+  level: 4,
+  skills: 4,
   knowledge: 0,
-  testsPassed: 1,
+  testsPassed: 2,
   capabilities: {
     intelligence: 1,
     security: 1,
-    code: 0,
+    code: 1,
     memory: 1,
     internet: 0,
     vision: 0,
@@ -143,7 +144,7 @@ export default function Home() {
         <a href="/" className="brand">
           <span className="brand-symbol">Х</span>
           <span>
-            Хасрой<span className="version">v0.3</span>
+            Хасрой<span className="version">v0.4</span>
           </span>
         </a>
         <div className="online">
@@ -175,8 +176,12 @@ export default function Home() {
               <dd>VERIFIED</dd>
             </div>
             <div>
+              <dt>GitHub</dt>
+              <dd>VERIFIED</dd>
+            </div>
+            <div>
               <dt>Эволюция</dt>
-              <dd>LEVEL 03</dd>
+              <dd>LEVEL 04</dd>
             </div>
           </dl>
           <div className="signal">
@@ -184,7 +189,7 @@ export default function Home() {
               <i key={i} />
             ))}
           </div>
-          <p>3 VERIFIED CAPABILITIES</p>
+          <p>4 VERIFIED CAPABILITIES</p>
         </aside>
 
         <div className="core-wrap">
@@ -194,7 +199,7 @@ export default function Home() {
           />
           <span className="core-coordinate coord-left">
             CORE EVOLUTION
-            <br />LEVEL 03
+            <br />LEVEL 04
           </span>
           <span className="core-coordinate coord-right">
             {busy ? "PROCESSING" : "STANDBY"}
@@ -208,12 +213,12 @@ export default function Home() {
               ? "АНАЛИЗИРУЮ ЗАПРОС"
               : focused
                 ? "СЛУШАЮ ВЛАДЕЛЬЦА"
-                : "НА СВЯЗИ. ПАМЯТЬ АКТИВНА."}
+                : "НА СВЯЗИ. MEMORY + GITHUB ACTIVE."}
           </span>
           <h1>Мысль. Код. Развитие.</h1>
           <p>Каждая подтверждённая способность меняет ядро.</p>
         </div>
-        <div className="stage-index">03 / CORE EVOLUTION</div>
+        <div className="stage-index">04 / CORE EVOLUTION</div>
       </section>
 
       <section className="chat" aria-label="Чат с «Хасрой»">
@@ -269,7 +274,7 @@ export default function Home() {
 
         {messages.length === 1 && !busy && (
           <div className="suggestions">
-            {["Что ты помнишь?", "Разбери архитектуру проекта", "Помоги написать код"].map(
+            {["Что ты помнишь?", "Изучи свой собственный код", "Помоги написать код"].map(
               (text) => (
                 <button key={text} onClick={() => send(text)}>
                   {text}
@@ -325,14 +330,14 @@ export default function Home() {
         </form>
 
         <div className="chat-footer">
-          <span>LIVE AI · MEMORY VERIFIED · Доступ владельца</span>
+          <span>LIVE AI · MEMORY VERIFIED · GITHUB VERIFIED · Доступ владельца</span>
           <span>Enter — отправить ↵</span>
         </div>
       </section>
 
       <footer className="page-footer">
-        <span>Хасрой LAB / v0.3</span>
-        <span>CORE EVOLUTION / LEVEL 03</span>
+        <span>Хасрой LAB / v0.4</span>
+        <span>CORE EVOLUTION / LEVEL 04</span>
       </footer>
 
       {authOpen && (
