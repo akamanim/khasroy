@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Khasroy Mobile Audit Fixture</title>
+<style>
+*{box-sizing:border-box} body{margin:0;font:16px system-ui,sans-serif}.page{max-width:1100px;margin:auto;padding:16px}.row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:16px;border:1px solid #bbb;border-radius:12px}.cta{min-height:44px;padding:10px 16px}.broken-wide{width:680px}.tiny-target{width:18px;height:18px;padding:0}.fixed{max-width:100%}@media(max-width:600px){.row{grid-template-columns:1fr}}
+</style>
+<main class="page">
+<h1>Mobile audit training fixture</h1>
+<p>This disposable fixture intentionally contains two detectable mobile defects and corrected equivalents.</p>
+<section id="broken">
+<h2>Broken</h2>
+<div class="broken-wide">This fixed-width block should overflow a 320px viewport.</div>
+<button class="tiny-target" aria-label="Tiny test button">+</button>
+</section>
+<section id="corrected">
+<h2>Corrected</h2>
+<div class="fixed">This block reflows with the viewport.</div>
+<button class="cta">Comfortable test button</button>
+</section>
+<div class="row"><article class="card">A</article><article class="card">B</article><article class="card">C</article></div>
+</main>
