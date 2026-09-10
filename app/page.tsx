@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ArrowUp, Plus, Activity, Sparkles, ShieldCheck } from "lucide-react";
-import { Core } from "@/components/khasroy/core";
+import { Core, type CoreEvolution } from "@/components/khasroy/core";
 import {
   authenticateOwner,
   chat,
@@ -15,6 +15,26 @@ const welcome: Message = {
   role: "assistant",
   content:
     "Все системы готовы. Я Хасрой — ваш универсальный AI-союзник. Можем работать с идеями, кодом и сложными задачами. С чего начнём?",
+};
+
+// Core Evolution grows only from verified capabilities.
+// Today Хасрой has two confirmed foundations: live AI dialogue and owner protection.
+const coreEvolution: CoreEvolution = {
+  level: 2,
+  skills: 2,
+  knowledge: 0,
+  testsPassed: 0,
+  capabilities: {
+    intelligence: 1,
+    security: 1,
+    code: 0,
+    memory: 0,
+    internet: 0,
+    vision: 0,
+    voice: 0,
+    agents: 0,
+    images: 0,
+  },
 };
 
 export default function Home() {
@@ -150,20 +170,27 @@ export default function Home() {
               <dt>AI-модель</dt>
               <dd>GPT-OSS 120B</dd>
             </div>
+            <div>
+              <dt>Эволюция</dt>
+              <dd>LEVEL 02</dd>
+            </div>
           </dl>
           <div className="signal">
             {Array.from({ length: 24 }, (_, i) => (
               <i key={i} />
             ))}
           </div>
-          <p>LIVE SESSION / 001</p>
+          <p>2 VERIFIED CAPABILITIES</p>
         </aside>
 
         <div className="core-wrap">
-          <Core state={busy ? "thinking" : focused ? "listening" : "idle"} />
+          <Core
+            state={busy ? "thinking" : focused ? "listening" : "idle"}
+            evolution={coreEvolution}
+          />
           <span className="core-coordinate coord-left">
-            NEURAL CORE
-            <br />Х — 02
+            CORE EVOLUTION
+            <br />LEVEL 02
           </span>
           <span className="core-coordinate coord-right">
             {busy ? "PROCESSING" : "STANDBY"}
@@ -180,9 +207,9 @@ export default function Home() {
                 : "НА СВЯЗИ. ГОТОВ К РАБОТЕ."}
           </span>
           <h1>Мысль. Код. Развитие.</h1>
-          <p>Интеллект, который мы будем расширять шаг за шагом.</p>
+          <p>Каждая подтверждённая способность меняет ядро.</p>
         </div>
-        <div className="stage-index">02 / INTELLIGENCE CORE</div>
+        <div className="stage-index">02 / CORE EVOLUTION</div>
       </section>
 
       <section className="chat" aria-label="Чат с «Хасрой»">
@@ -301,7 +328,7 @@ export default function Home() {
 
       <footer className="page-footer">
         <span>Хасрой LAB / v0.2</span>
-        <span>EVOLVING CODE INTELLIGENCE</span>
+        <span>CORE EVOLUTION / LEVEL 02</span>
       </footer>
 
       {authOpen && (
