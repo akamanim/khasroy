@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Plus, Activity, Sparkles } from "lucide-react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { ArrowUp, Plus, Activity, Sparkles, ShieldCheck } from "lucide-react";
 import { Core } from "@/components/khasroy/core";
 import {
   authenticateOwner,
@@ -23,12 +23,25 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [focused, setFocused] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [ownerKey, setOwnerKey] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const pendingMessages = useRef<Message[] | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, busy]);
+
+  async function finishChat(next: Message[]) {
+    const content = await chat(next);
+    setMessages([
+      ...next,
+      { id: crypto.randomUUID(), role: "assistant", content },
+    ]);
+  }
 
   async function send(value = input) {
     if (!value.trim() || busy) return;
@@ -44,33 +57,15 @@ export default function Home() {
     setError("");
 
     try {
-      let content: string;
-
-      try {
-        content = await chat(next);
-      } catch (err) {
-        if (!(err instanceof KhasroyAuthError)) throw err;
-
-        const key = window.prompt("Введите ключ владельца Хасроя");
-        if (!key) {
-          setError("Для доступа к AI нужен ключ владельца.");
-          return;
-        }
-
-        const authenticated = await authenticateOwner(key);
-        if (!authenticated) {
-          setError("Неверный ключ владельца.");
-          return;
-        }
-
-        content = await chat(next);
+      await finishChat(next);
+    } catch (err) {
+      if (err instanceof KhasroyAuthError) {
+        pendingMessages.current = next;
+        setAuthError("");
+        setAuthOpen(true);
+        return;
       }
 
-      setMessages([
-        ...next,
-        { id: crypto.randomUUID(), role: "assistant", content },
-      ]);
-    } catch (err) {
       setError(
         err instanceof Error
           ? err.message
@@ -79,6 +74,46 @@ export default function Home() {
     } finally {
       setBusy(false);
       field.current?.focus();
+    }
+  }
+
+  async function submitOwnerKey(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!ownerKey.trim() || authBusy) return;
+
+    setAuthBusy(true);
+    setAuthError("");
+
+    try {
+      const authenticated = await authenticateOwner(ownerKey.trim());
+      if (!authenticated) {
+        setAuthError("Неверный ключ владельца.");
+        return;
+      }
+
+      setAuthOpen(false);
+      setOwnerKey("");
+      const queued = pendingMessages.current;
+      pendingMessages.current = null;
+
+      if (queued) {
+        setBusy(true);
+        try {
+          await finishChat(queued);
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Не удалось получить ответ. Попробуйте ещё раз.",
+          );
+        } finally {
+          setBusy(false);
+        }
+      }
+    } catch {
+      setAuthError("Не удалось проверить ключ. Попробуйте ещё раз.");
+    } finally {
+      setAuthBusy(false);
     }
   }
 
@@ -113,7 +148,7 @@ export default function Home() {
             </div>
             <div>
               <dt>AI-модель</dt>
-              <dd>GPT-5.6</dd>
+              <dd>GPT-OSS 120B</dd>
             </div>
           </dl>
           <div className="signal">
@@ -268,6 +303,87 @@ export default function Home() {
         <span>Хасрой LAB / v0.2</span>
         <span>EVOLVING CODE INTELLIGENCE</span>
       </footer>
+
+      {authOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Вход владельца Хасроя"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "grid",
+            placeItems: "center",
+            padding: 20,
+            background: "rgba(1, 8, 12, 0.82)",
+            backdropFilter: "blur(14px)",
+          }}
+        >
+          <form
+            onSubmit={submitOwnerKey}
+            style={{
+              width: "min(440px, 100%)",
+              border: "1px solid rgba(102, 214, 235, 0.28)",
+              borderRadius: 18,
+              padding: 24,
+              background: "rgba(5, 17, 24, 0.98)",
+              boxShadow: "0 24px 90px rgba(0,0,0,.55), 0 0 45px rgba(69,190,220,.08)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+              <ShieldCheck size={24} />
+              <strong style={{ fontSize: 17, letterSpacing: ".06em" }}>ДОСТУП ВЛАДЕЛЬЦА</strong>
+            </div>
+            <p style={{ margin: "0 0 18px", opacity: 0.66, lineHeight: 1.55, fontSize: 14 }}>
+              Введите ваш личный ключ KHASROY_OWNER_KEY. Он отправляется только на сервер Хасроя и не сохраняется в браузере как обычный текст.
+            </p>
+            <input
+              autoFocus
+              type="password"
+              value={ownerKey}
+              onChange={(event) => setOwnerKey(event.target.value)}
+              placeholder="Ключ владельца"
+              autoComplete="current-password"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                border: "1px solid rgba(113, 213, 235, .28)",
+                borderRadius: 12,
+                background: "rgba(255,255,255,.035)",
+                color: "inherit",
+                padding: "14px 15px",
+                outline: "none",
+                fontSize: 15,
+              }}
+            />
+            {authError && (
+              <p role="alert" style={{ margin: "10px 0 0", color: "#ff8f8f", fontSize: 13 }}>
+                {authError}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={!ownerKey.trim() || authBusy}
+              style={{
+                width: "100%",
+                marginTop: 16,
+                border: 0,
+                borderRadius: 12,
+                padding: "13px 16px",
+                cursor: authBusy ? "wait" : "pointer",
+                background: "#8adbea",
+                color: "#041016",
+                fontWeight: 700,
+                letterSpacing: ".04em",
+                opacity: !ownerKey.trim() || authBusy ? 0.55 : 1,
+              }}
+            >
+              {authBusy ? "ПРОВЕРЯЮ…" : "ВОЙТИ КАК ВЛАДЕЛЕЦ"}
+            </button>
+          </form>
+        </div>
+      )}
     </main>
   );
 }
