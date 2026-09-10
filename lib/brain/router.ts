@@ -1,7 +1,7 @@
 import { searchWebDirect } from "@/lib/server-web";
 import {
-  getSelfHostedConfig,
   selfHostedChat,
+  selfHostedHealth,
 } from "@/lib/brain/providers/self-hosted";
 
 export type BrainMessage = {
@@ -280,8 +280,9 @@ async function preferredTextRequest(args: {
   history: BrainMessage[];
   maxCompletion: number;
   reasoning?: "low" | "medium";
+  selfHostedOnline: boolean;
 }) {
-  if (getSelfHostedConfig()) {
+  if (args.selfHostedOnline) {
     const local = await selfHostedChat({
       messages: [
         { role: "system", content: args.systemContent },
@@ -330,11 +331,16 @@ export async function runBrain(args: {
   repositoryRead: boolean;
 }): Promise<BrainRun> {
   const mode = selectBrainMode(args.query, args.repositoryRead);
+  const selfHostedState = await selfHostedHealth().catch(() => ({
+    configured: false,
+    online: false,
+    model: null as string | null,
+  }));
+  const selfHostedOnline = selfHostedState.online === true;
 
   if (mode === "research") {
-    // With our own brain configured, use independent server-side search first.
-    // Search itself costs no AI tokens; only synthesis is sent to the local model.
-    if (getSelfHostedConfig()) {
+    // Only a genuinely online GPU may enter the self-hosted research branch.
+    if (selfHostedOnline) {
       try {
         const searched = await searchWebDirect(args.query, 5);
         const directSources = searched.sources.map(({ title, url }) => ({ title, url }));
@@ -370,7 +376,6 @@ export async function runBrain(args: {
       }
     }
 
-    // While the local brain is not online, keep the proven Groq browser path.
     const web = await groqResponsesWeb({
       apiKey: args.apiKey,
       query: args.query,
@@ -422,6 +427,7 @@ export async function runBrain(args: {
         history: [{ role: "user", content: args.query.slice(0, 2_000) }],
         maxCompletion: 700,
         reasoning: "low",
+        selfHostedOnline,
       });
 
       if (direct.response.ok && direct.data?.choices?.[0]?.message?.content) {
@@ -454,7 +460,6 @@ export async function runBrain(args: {
     };
   }
 
-  // Chat and repository analysis prefer our own model. Groq stays a fallback.
   if (mode === "chat" || mode === "repository") {
     const systemContent = mode === "repository"
       ? args.systemContent.slice(0, 18_000)
@@ -467,6 +472,7 @@ export async function runBrain(args: {
       history,
       maxCompletion: mode === "repository" ? 1200 : 2200,
       reasoning: mode === "repository" ? "low" : "medium",
+      selfHostedOnline,
     });
 
     return {
@@ -481,7 +487,7 @@ export async function runBrain(args: {
     };
   }
 
-  // Sandbox/agentic still temporarily use Groq's managed code interpreter.
+  // Sandbox/agentic temporarily use Groq's managed code interpreter.
   const model = mode === "sandbox" ? "groq/compound-mini" : "groq/compound";
   const tools = mode === "sandbox"
     ? ["code_interpreter"]
@@ -514,7 +520,11 @@ export async function runBrain(args: {
 }
 
 export function usedWebTool(run: BrainRun) {
-  return run.webToolForced || run.sources.length > 0 || run.toolsUsed.some((tool) => /search|visit|browser/.test(tool));
+  return (
+    run.webToolForced ||
+    run.sources.length > 0 ||
+    run.toolsUsed.some((tool) => /search|visit|browser/.test(tool))
+  );
 }
 
 export function usedCodeInterpreter(run: BrainRun) {
