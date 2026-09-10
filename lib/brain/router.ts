@@ -1,4 +1,8 @@
 import { searchWebDirect } from "@/lib/server-web";
+import {
+  getSelfHostedConfig,
+  selfHostedChat,
+} from "@/lib/brain/providers/self-hosted";
 
 export type BrainMessage = {
   role: "user" | "assistant";
@@ -6,6 +10,7 @@ export type BrainMessage = {
 };
 
 export type BrainMode = "chat" | "repository" | "research" | "sandbox" | "agentic";
+export type BrainProvider = "self-hosted" | "groq";
 
 type ExecutedTool = {
   type?: string;
@@ -75,7 +80,7 @@ type GroqResponsesData = {
 export type BrainRun = {
   response: Response;
   data: BrainResponseData | null;
-  provider: "groq";
+  provider: BrainProvider;
   model: string;
   mode: BrainMode;
   toolsUsed: string[];
@@ -241,8 +246,6 @@ async function groqResponsesWeb(args: {
   query: string;
   systemContent: string;
 }) {
-  // Keep the browser request deliberately compact so it stays comfortably
-  // below the free GPT-OSS token-per-minute limit.
   const response = await fetch("https://api.groq.com/openai/v1/responses", {
     method: "POST",
     headers: {
@@ -270,6 +273,54 @@ async function groqResponsesWeb(args: {
   };
 }
 
+async function preferredTextRequest(args: {
+  apiKey: string;
+  fallbackModel: string;
+  systemContent: string;
+  history: BrainMessage[];
+  maxCompletion: number;
+  reasoning?: "low" | "medium";
+}) {
+  if (getSelfHostedConfig()) {
+    const local = await selfHostedChat({
+      messages: [
+        { role: "system", content: args.systemContent },
+        ...args.history,
+      ],
+      maxTokens: args.maxCompletion,
+    });
+
+    if (local?.response.ok && local.data?.choices?.[0]?.message?.content) {
+      const data: BrainResponseData = {
+        model: local.model,
+        choices: local.data.choices,
+        error: local.data.error,
+      };
+      return {
+        response: local.response,
+        data,
+        provider: "self-hosted" as const,
+        model: local.model,
+      };
+    }
+  }
+
+  const groq = await groqRequest({
+    apiKey: args.apiKey,
+    model: args.fallbackModel,
+    systemContent: args.systemContent,
+    history: args.history,
+    maxCompletion: args.maxCompletion,
+    reasoning: args.reasoning,
+  });
+
+  return {
+    ...groq,
+    provider: "groq" as const,
+    model: groq.data?.model || args.fallbackModel,
+  };
+}
+
 export async function runBrain(args: {
   apiKey: string;
   defaultModel: string;
@@ -280,9 +331,46 @@ export async function runBrain(args: {
 }): Promise<BrainRun> {
   const mode = selectBrainMode(args.query, args.repositoryRead);
 
-  // Research gets its own short official path first: Groq Responses API +
-  // browser_search on GPT-OSS. This avoids coupling web research to Compound.
   if (mode === "research") {
+    // With our own brain configured, use independent server-side search first.
+    // Search itself costs no AI tokens; only synthesis is sent to the local model.
+    if (getSelfHostedConfig()) {
+      try {
+        const searched = await searchWebDirect(args.query, 5);
+        const directSources = searched.sources.map(({ title, url }) => ({ title, url }));
+        const local = await selfHostedChat({
+          messages: [
+            {
+              role: "system",
+              content: `${args.systemContent.slice(0, 3_500)}\n\nSERVER WEB SEARCH RESULTS\n${searched.context.slice(0, 6_000)}\n\nОтветь только по этим реальным результатам и перечисли источники.`,
+            },
+            { role: "user", content: args.query.slice(0, 2_500) },
+          ],
+          maxTokens: 900,
+        });
+
+        if (local?.response.ok && local.data?.choices?.[0]?.message?.content) {
+          return {
+            response: local.response,
+            data: {
+              model: local.model,
+              choices: local.data.choices,
+              error: local.data.error,
+            },
+            provider: "self-hosted",
+            model: local.model,
+            mode,
+            toolsUsed: ["direct_web_search:server"],
+            sources: directSources,
+            webToolForced: true,
+          };
+        }
+      } catch (error) {
+        console.error("Khasroy self-hosted research failed", error);
+      }
+    }
+
+    // While the local brain is not online, keep the proven Groq browser path.
     const web = await groqResponsesWeb({
       apiKey: args.apiKey,
       query: args.query,
@@ -298,11 +386,10 @@ export async function runBrain(args: {
         mode,
         toolsUsed: ["browser_search:responses_api"],
         sources: web.sources,
-        webToolForced: web.usedBrowser || true,
+        webToolForced: true,
       };
     }
 
-    // First fallback: Compound Mini with native web search.
     let compound = await groqRequest({
       apiKey: args.apiKey,
       model: "groq/compound-mini",
@@ -313,7 +400,6 @@ export async function runBrain(args: {
     });
 
     if (compound.response.ok && compound.data?.choices?.[0]?.message?.content) {
-      const sources = extractSources(compound.data);
       return {
         response: compound.response,
         data: compound.data,
@@ -321,19 +407,17 @@ export async function runBrain(args: {
         model: compound.data.model || "groq/compound-mini",
         mode,
         toolsUsed: normalizeTools(compound.data),
-        sources,
+        sources: extractSources(compound.data),
         webToolForced: true,
       };
     }
 
-    // Final fallback: independent server-side search, then a tiny normal model
-    // synthesis request. This path needs no additional search API key.
     try {
       const searched = await searchWebDirect(args.query, 5);
       const directSources = searched.sources.map(({ title, url }) => ({ title, url }));
-      const direct = await groqRequest({
+      const direct = await preferredTextRequest({
         apiKey: args.apiKey,
-        model: args.defaultModel,
+        fallbackModel: args.defaultModel,
         systemContent: `${args.systemContent.slice(0, 2_500)}\n\nSERVER WEB SEARCH RESULTS\n${searched.context.slice(0, 4_500)}\n\nОтветь только по этим реальным результатам и перечисли источники.`,
         history: [{ role: "user", content: args.query.slice(0, 2_000) }],
         maxCompletion: 700,
@@ -344,8 +428,8 @@ export async function runBrain(args: {
         return {
           response: direct.response,
           data: direct.data,
-          provider: "groq",
-          model: direct.data.model || args.defaultModel,
+          provider: direct.provider,
+          model: direct.model,
           mode,
           toolsUsed: ["direct_web_search:server"],
           sources: directSources,
@@ -370,55 +454,52 @@ export async function runBrain(args: {
     };
   }
 
-  let model = args.defaultModel;
-  let maxCompletion = 2200;
-  let reasoning: "low" | "medium" | undefined = "medium";
-  let compoundTools: string[] | undefined;
-  let history = args.history.slice(-16);
-  let systemContent = args.systemContent;
+  // Chat and repository analysis prefer our own model. Groq stays a fallback.
+  if (mode === "chat" || mode === "repository") {
+    const systemContent = mode === "repository"
+      ? args.systemContent.slice(0, 18_000)
+      : args.systemContent;
+    const history = mode === "repository" ? args.history.slice(-6) : args.history.slice(-16);
+    const result = await preferredTextRequest({
+      apiKey: args.apiKey,
+      fallbackModel: args.defaultModel,
+      systemContent,
+      history,
+      maxCompletion: mode === "repository" ? 1200 : 2200,
+      reasoning: mode === "repository" ? "low" : "medium",
+    });
 
-  if (mode === "repository") {
-    maxCompletion = 1100;
-    reasoning = "low";
-    history = args.history.slice(-6);
-  } else if (mode === "sandbox") {
-    model = "groq/compound-mini";
-    compoundTools = ["code_interpreter"];
-    maxCompletion = 1200;
-    reasoning = undefined;
-    history = args.history.slice(-8);
-    systemContent += "\n\nSANDBOX MODE: если задача требует вычисления или проверки кода, используй безопасный облачный code interpreter. Не утверждай, что код выполнен, если инструмент не запускался.";
-  } else if (mode === "agentic") {
-    model = "groq/compound";
-    compoundTools = ["web_search", "visit_website", "code_interpreter"];
-    maxCompletion = 1400;
-    reasoning = undefined;
-    history = args.history.slice(-5);
-    systemContent = args.systemContent.slice(0, 7_000);
-    systemContent += "\n\nAGENTIC MODE: используй веб-поиск и code interpreter только когда они нужны. Чётко отличай найденные факты от вычисленных результатов.";
+    return {
+      response: result.response,
+      data: result.data,
+      provider: result.provider,
+      model: result.model,
+      mode,
+      toolsUsed: [],
+      sources: [],
+      webToolForced: false,
+    };
   }
 
-  let result = await groqRequest({
+  // Sandbox/agentic still temporarily use Groq's managed code interpreter.
+  const model = mode === "sandbox" ? "groq/compound-mini" : "groq/compound";
+  const tools = mode === "sandbox"
+    ? ["code_interpreter"]
+    : ["web_search", "visit_website", "code_interpreter"];
+  const systemContent = `${args.systemContent.slice(0, 7_000)}\n\n${
+    mode === "sandbox"
+      ? "SANDBOX MODE: используй безопасный облачный code interpreter. Не утверждай, что код выполнен, если инструмент не запускался."
+      : "AGENTIC MODE: используй веб-поиск и code interpreter только когда они нужны. Чётко отличай найденные факты от вычисленных результатов."
+  }`;
+
+  const result = await groqRequest({
     apiKey: args.apiKey,
     model,
     systemContent,
-    history,
-    maxCompletion,
-    reasoning,
-    compoundTools,
+    history: args.history.slice(-6),
+    maxCompletion: mode === "sandbox" ? 1200 : 1400,
+    compoundTools: tools,
   });
-
-  if (!result.response.ok && mode === "repository" && result.response.status !== 429) {
-    result = await groqRequest({
-      apiKey: args.apiKey,
-      model: args.defaultModel,
-      systemContent: systemContent.slice(0, 12_000),
-      history: args.history.slice(-4),
-      maxCompletion: 800,
-      reasoning: "low",
-    });
-    model = args.defaultModel;
-  }
 
   return {
     response: result.response,
