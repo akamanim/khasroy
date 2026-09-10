@@ -47,6 +47,11 @@ function seeded(index: number, salt = 0) {
   return value - Math.floor(value);
 }
 
+function smooth(current: number, target: number, dt: number, tau: number) {
+  if (tau <= 0) return target;
+  return current + (target - current) * (1 - Math.exp(-dt / tau));
+}
+
 export function Core({
   state,
   evolution = BASE_EVOLUTION,
@@ -75,243 +80,149 @@ export function Core({
     const ctx: CanvasRenderingContext2D = context;
 
     let frame = 0;
-    let spin = 0;
-    let counterSpin = 0;
     let width = 0;
     let height = 0;
-    let last = 0;
+    let last = performance.now();
+    let spin = 0;
+    let reverseSpin = 0;
+    let energy = 0.18;
 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     const resize = new ResizeObserver(() => {
       width = element.clientWidth;
       height = element.clientHeight;
       const dpr = Math.min(window.devicePixelRatio, 2);
-      element.width = width * dpr;
-      element.height = height * dpr;
+      element.width = Math.max(1, Math.floor(width * dpr));
+      element.height = Math.max(1, Math.floor(height * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     });
-
     resize.observe(element);
 
-    const shellPoints = Array.from({ length: 1450 }, (_, index) => {
-      const y = 1 - (index / 1449) * 2;
-      const ring = Math.sqrt(1 - y * y);
+    const shellPoints = Array.from({ length: 1650 }, (_, index) => {
+      const y = 1 - (index / 1649) * 2;
+      const ring = Math.sqrt(Math.max(0, 1 - y * y));
       const phi = index * Math.PI * (3 - Math.sqrt(5));
       return {
         x: Math.cos(phi) * ring,
         y,
         z: Math.sin(phi) * ring,
-        spark: seeded(index, 2),
+        seed: seeded(index, 2),
       };
     });
 
-    const filaments = Array.from({ length: 92 }, (_, index) => ({
-      rotation: seeded(index, 4) * Math.PI * 2,
-      tilt: (seeded(index, 5) - 0.5) * 1.9,
-      rx: 0.2 + seeded(index, 6) * 0.78,
-      ry: 0.08 + seeded(index, 7) * 0.38,
-      start: seeded(index, 8) * Math.PI * 2,
-      length: 0.18 + seeded(index, 9) * 1.25,
-      speed: (0.25 + seeded(index, 10) * 1.7) * (index % 2 === 0 ? 1 : -1),
-      alpha: 0.07 + seeded(index, 11) * 0.21,
-      lineWidth: 0.35 + seeded(index, 12) * 1.05,
+    const filaments = Array.from({ length: 118 }, (_, index) => ({
+      rot: seeded(index, 10) * Math.PI * 2,
+      tilt: (seeded(index, 11) - 0.5) * 2.5,
+      rx: 0.18 + seeded(index, 12) * 0.92,
+      ry: 0.04 + seeded(index, 13) * 0.4,
+      start: seeded(index, 14) * Math.PI * 2,
+      span: 0.12 + seeded(index, 15) * 1.5,
+      speed: (0.25 + seeded(index, 16) * 2.1) * (index % 2 ? -1 : 1),
+      alpha: 0.06 + seeded(index, 17) * 0.2,
+      width: 0.35 + seeded(index, 18) * 0.95,
+      wobble: seeded(index, 19) * Math.PI * 2,
     }));
 
-    const orbitals = Array.from({ length: 18 }, (_, index) => ({
-      radius: 0.28 + seeded(index, 20) * 0.86,
-      squash: 0.18 + seeded(index, 21) * 0.5,
-      rotation: seeded(index, 22) * Math.PI,
-      start: seeded(index, 23) * Math.PI * 2,
-      length: 0.45 + seeded(index, 24) * 1.9,
-      speed: (0.3 + seeded(index, 25) * 1.5) * (index % 2 ? -1 : 1),
+    const ribbons = Array.from({ length: 26 }, (_, index) => ({
+      rot: seeded(index, 31) * Math.PI * 2,
+      radius: 0.26 + seeded(index, 32) * 0.92,
+      squash: 0.09 + seeded(index, 33) * 0.38,
+      span: 0.55 + seeded(index, 34) * 2.15,
+      phase: seeded(index, 35) * Math.PI * 2,
+      speed: (0.35 + seeded(index, 36) * 1.4) * (index % 2 ? -1 : 1),
     }));
 
-    function drawBackgroundGlow(
-      cx: number,
-      cy: number,
-      radius: number,
-      time: number,
-      active: boolean,
-    ) {
-      const pulse = reduced.matches
-        ? 1
-        : 0.92 + Math.sin(time * (active ? 0.006 : 0.0024)) * 0.08;
-      const glow = ctx.createRadialGradient(
-        cx,
-        cy,
-        radius * 0.08,
-        cx,
-        cy,
-        radius * 1.7,
-      );
-      glow.addColorStop(0, active ? "rgba(255,205,94,.34)" : "rgba(255,145,31,.22)");
-      glow.addColorStop(0.35, `rgba(255,112,17,${active ? 0.15 : 0.09})`);
-      glow.addColorStop(0.72, `rgba(143,48,3,${0.05 * pulse})`);
-      glow.addColorStop(1, "rgba(12,4,1,0)");
+    function drawBackdrop(cx: number, cy: number, radius: number, time: number) {
+      const breath = reduced.matches ? 1 : 1 + Math.sin(time * 0.00155) * 0.045;
+      const glowRadius = radius * (1.5 + energy * 0.3) * breath;
+      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowRadius);
+      glow.addColorStop(0, `rgba(255,214,108,${0.13 + energy * 0.16})`);
+      glow.addColorStop(0.2, `rgba(255,142,28,${0.1 + energy * 0.11})`);
+      glow.addColorStop(0.53, `rgba(170,59,5,${0.045 + energy * 0.055})`);
+      glow.addColorStop(1, "rgba(30,8,0,0)");
       ctx.fillStyle = glow;
       ctx.fillRect(0, 0, width, height);
     }
 
-    function drawNucleus(
-      cx: number,
-      cy: number,
-      radius: number,
-      time: number,
-      active: boolean,
-    ) {
-      const pulse = reduced.matches
+    function organicRadius(theta: number, time: number, layer: number) {
+      const motion = reduced.matches ? 0 : time * 0.00055;
+      return (
+        1 +
+        Math.sin(theta * 3 + motion * (0.65 + layer * 0.07) + layer) * 0.12 +
+        Math.sin(theta * 5 - motion * 0.42 + layer * 1.7) * 0.055 +
+        Math.cos(theta * 2 + motion * 0.31) * 0.035
+      );
+    }
+
+    function drawNucleus(cx: number, cy: number, radius: number, time: number) {
+      const breath = reduced.matches
         ? 1
-        : 1 + Math.sin(time * (active ? 0.009 : 0.0035)) * (active ? 0.09 : 0.045);
-      const nucleus = radius * 0.24 * pulse;
+        : 1 + Math.sin(time * 0.0022) * 0.06 + Math.sin(time * 0.00073) * 0.035;
+      const nucleus = radius * (0.21 + energy * 0.035) * breath;
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.globalCompositeOperation = "lighter";
 
-      const coreGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, nucleus * 2.2);
-      coreGlow.addColorStop(0, active ? "rgba(255,250,191,.92)" : "rgba(255,217,115,.72)");
-      coreGlow.addColorStop(0.28, active ? "rgba(255,184,44,.62)" : "rgba(255,145,24,.42)");
-      coreGlow.addColorStop(1, "rgba(255,80,0,0)");
+      for (let layer = 4; layer >= 0; layer -= 1) {
+        const layerRadius = nucleus * (0.72 + layer * 0.18);
+        const rotation = reverseSpin * (0.42 + layer * 0.09) * (layer % 2 ? -1 : 1);
+        ctx.save();
+        ctx.rotate(rotation + layer * 0.4);
+        ctx.beginPath();
+        for (let i = 0; i <= 96; i += 1) {
+          const theta = (i / 96) * Math.PI * 2;
+          const rr = layerRadius * organicRadius(theta, time, layer);
+          const x = Math.cos(theta) * rr;
+          const y = Math.sin(theta) * rr * (0.76 + layer * 0.02);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = layer === 0
+          ? `rgba(255,247,195,${0.38 + energy * 0.38})`
+          : `rgba(255,149,31,${0.1 + energy * 0.1 + layer * 0.025})`;
+        ctx.lineWidth = layer === 0 ? 1.25 : 0.65;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      const coreGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, nucleus * 2.5);
+      coreGlow.addColorStop(0, `rgba(255,255,221,${0.72 + energy * 0.22})`);
+      coreGlow.addColorStop(0.14, `rgba(255,226,126,${0.58 + energy * 0.24})`);
+      coreGlow.addColorStop(0.42, `rgba(255,143,24,${0.22 + energy * 0.18})`);
+      coreGlow.addColorStop(1, "rgba(255,70,0,0)");
       ctx.fillStyle = coreGlow;
       ctx.beginPath();
-      ctx.arc(0, 0, nucleus * 2.2, 0, Math.PI * 2);
+      ctx.arc(0, 0, nucleus * 2.5, 0, Math.PI * 2);
       ctx.fill();
 
-      for (let index = 0; index < 9; index += 1) {
-        const direction = index % 2 === 0 ? 1 : -1;
-        const localSpin = reduced.matches ? 0 : time * 0.0002 * direction * (index + 2);
-        ctx.save();
-        ctx.rotate(localSpin + index * 0.63);
+      for (let index = 0; index < 20; index += 1) {
+        const a = (index / 20) * Math.PI * 2 + spin * 1.8;
+        const inner = nucleus * (0.2 + (index % 3) * 0.1);
+        const outer = nucleus * (0.82 + (index % 5) * 0.11);
         ctx.beginPath();
-        ctx.ellipse(
-          0,
-          0,
-          nucleus * (0.65 + index * 0.055),
-          nucleus * (0.22 + (index % 3) * 0.05),
-          index * 0.21,
-          0.15,
-          Math.PI * (1.2 + (index % 3) * 0.2),
+        ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner * 0.78);
+        ctx.quadraticCurveTo(
+          Math.cos(a + 0.35) * outer * 0.58,
+          Math.sin(a - 0.2) * outer * 0.4,
+          Math.cos(a + 0.18) * outer,
+          Math.sin(a + 0.18) * outer * 0.78,
         );
-        ctx.strokeStyle = active
-          ? `rgba(255,232,156,${0.34 + index * 0.025})`
-          : `rgba(255,165,48,${0.2 + index * 0.018})`;
-        ctx.lineWidth = index % 3 === 0 ? 1.5 : 0.75;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      for (let index = 0; index < 16; index += 1) {
-        const a = (index / 16) * Math.PI * 2 + counterSpin * 0.8;
-        const inner = nucleus * (0.35 + (index % 4) * 0.09);
-        const outer = nucleus * (0.8 + (index % 5) * 0.1);
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
-        ctx.lineTo(Math.cos(a + 0.18) * outer, Math.sin(a + 0.18) * outer);
-        ctx.strokeStyle = active ? "rgba(255,238,175,.38)" : "rgba(255,135,28,.2)";
-        ctx.lineWidth = 0.7;
+        ctx.strokeStyle = `rgba(255,225,137,${0.12 + energy * 0.24})`;
+        ctx.lineWidth = index % 4 === 0 ? 1.2 : 0.55;
         ctx.stroke();
       }
 
       ctx.restore();
     }
 
-    function drawFilaments(
-      cx: number,
-      cy: number,
-      radius: number,
-      time: number,
-      active: boolean,
-    ) {
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.globalCompositeOperation = "lighter";
-
-      for (const filament of filaments) {
-        const drift = reduced.matches
-          ? 0
-          : time * 0.000055 * filament.speed * (active ? 2.15 : 1);
-        ctx.save();
-        ctx.rotate(filament.rotation + drift + spin * 0.16);
-        ctx.beginPath();
-        ctx.ellipse(
-          0,
-          0,
-          radius * filament.rx,
-          radius * filament.ry,
-          filament.tilt,
-          filament.start + drift * 0.7,
-          filament.start + filament.length + drift * 0.7,
-        );
-        ctx.strokeStyle = active
-          ? `rgba(255,202,86,${Math.min(0.48, filament.alpha * 1.65)})`
-          : `rgba(255,133,27,${filament.alpha})`;
-        ctx.lineWidth = filament.lineWidth;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      ctx.restore();
-    }
-
-    function drawOrbitals(
-      cx: number,
-      cy: number,
-      radius: number,
-      time: number,
-      active: boolean,
-    ) {
-      ctx.save();
-      ctx.translate(cx, cy);
-
-      for (let index = 0; index < orbitals.length; index += 1) {
-        const orbital = orbitals[index];
-        const drift = reduced.matches
-          ? 0
-          : time * 0.000045 * orbital.speed * (active ? 2.4 : 1);
-        ctx.save();
-        ctx.rotate(orbital.rotation + drift);
-        ctx.beginPath();
-        ctx.ellipse(
-          0,
-          0,
-          radius * orbital.radius,
-          radius * orbital.radius * orbital.squash,
-          index * 0.19,
-          orbital.start + drift,
-          orbital.start + orbital.length + drift,
-        );
-        ctx.strokeStyle = index % 4 === 0
-          ? active
-            ? "rgba(255,229,147,.58)"
-            : "rgba(255,178,68,.34)"
-          : active
-            ? "rgba(255,167,47,.35)"
-            : "rgba(214,92,12,.2)";
-        ctx.lineWidth = index % 5 === 0 ? 1.35 : 0.65;
-        ctx.stroke();
-
-        if (index % 3 === 0) {
-          const marker = orbital.start + orbital.length + drift;
-          const mx = Math.cos(marker) * radius * orbital.radius;
-          const my = Math.sin(marker) * radius * orbital.radius * orbital.squash;
-          ctx.fillStyle = active ? "rgba(255,247,202,.9)" : "rgba(255,177,72,.58)";
-          ctx.fillRect(mx - 1.2, my - 1.2, 2.4, 2.4);
-        }
-        ctx.restore();
-      }
-
-      ctx.restore();
-    }
-
-    function drawShell(
-      cx: number,
-      cy: number,
-      radius: number,
-      time: number,
-      active: boolean,
-    ) {
-      const shellSpin = spin * 0.88;
-      const tilt = 0.36 + Math.sin(time * 0.00025) * 0.04;
+    function drawShell(cx: number, cy: number, radius: number, time: number) {
+      const breath = reduced.matches
+        ? 1
+        : 1 + Math.sin(time * 0.00155) * 0.04 + Math.sin(time * 0.00043) * 0.02;
+      const tilt = 0.31 + Math.sin(time * 0.00021) * 0.07;
+      const shellSpin = spin * 0.76;
 
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
@@ -319,189 +230,226 @@ export function Core({
       for (const point of shellPoints) {
         const x1 = point.x * Math.cos(shellSpin) - point.z * Math.sin(shellSpin);
         const z1 = point.x * Math.sin(shellSpin) + point.z * Math.cos(shellSpin);
-        const y2 = point.y * Math.cos(tilt) - z1 * Math.sin(tilt);
-        const z2 = point.y * Math.sin(tilt) + z1 * Math.cos(tilt);
-        const perspective = 2.9 / (3.05 - z2 * 0.46);
-        const ripple = reduced.matches
+        const y1 = point.y;
+        const y2 = y1 * Math.cos(tilt) - z1 * Math.sin(tilt);
+        const z2 = y1 * Math.sin(tilt) + z1 * Math.cos(tilt);
+
+        const longitude = Math.atan2(z1, x1);
+        const latitude = Math.asin(clamp(y1, -1, 1));
+        const livingDistortion = reduced.matches
           ? 1
-          : 1 + Math.sin(point.y * 15 + time * 0.0017 + point.spark * 8) * (active ? 0.026 : 0.012);
-        const px = cx + x1 * radius * perspective * ripple;
-        const py = cy + y2 * radius * perspective * ripple;
+          : 1 +
+            Math.sin(longitude * 3 + time * 0.00072 + point.seed * 3) * 0.095 +
+            Math.cos(latitude * 5 - time * 0.00053 + point.seed * 5) * 0.055 +
+            Math.sin((x1 + y1) * 6 + time * 0.0009) * 0.025 * energy;
+
+        const sideBias = 1 + 0.055 * Math.sin(longitude + 0.9) - 0.035 * y1;
+        const rx = livingDistortion * sideBias * breath;
+        const perspective = 2.85 / (3.05 - z2 * 0.5);
+        const px = cx + x1 * radius * 1.08 * perspective * rx;
+        const py = cy + y2 * radius * 0.9 * perspective * rx;
         const depth = (z2 + 1) / 2;
         const flicker = reduced.matches
           ? 1
-          : 0.74 + Math.sin(time * 0.004 + point.spark * 24) * 0.26;
-        const alpha = clamp((0.08 + depth * 0.48) * flicker * (active ? 1.22 : 1), 0.05, 0.72);
+          : 0.7 + Math.sin(time * 0.0042 + point.seed * 31) * 0.3;
+        const alpha = clamp((0.055 + depth * 0.32) * flicker * (0.78 + energy * 0.65), 0.025, 0.6);
 
-        ctx.fillStyle = depth > 0.72
-          ? `rgba(255,210,115,${alpha})`
-          : `rgba(255,118,24,${alpha})`;
+        ctx.fillStyle = depth > 0.68
+          ? `rgba(255,194,91,${alpha})`
+          : `rgba(224,96,12,${alpha})`;
         ctx.beginPath();
-        ctx.arc(px, py, 0.35 + depth * 0.72, 0, Math.PI * 2);
+        ctx.arc(px, py, 0.28 + depth * 0.62, 0, Math.PI * 2);
         ctx.fill();
       }
 
       ctx.restore();
     }
 
-    function drawOuterArchitecture(
-      cx: number,
-      cy: number,
-      radius: number,
-      time: number,
-      active: boolean,
-    ) {
+    function drawFilaments(cx: number, cy: number, radius: number, time: number) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalCompositeOperation = "lighter";
+
+      for (const filament of filaments) {
+        const drift = reduced.matches ? 0 : time * 0.00005 * filament.speed * (0.7 + energy * 2.15);
+        const wobble = reduced.matches ? 0 : Math.sin(time * 0.0012 + filament.wobble) * 0.05;
+        ctx.save();
+        ctx.rotate(filament.rot + drift + spin * 0.12);
+        ctx.beginPath();
+        ctx.ellipse(
+          0,
+          0,
+          radius * filament.rx * (1 + wobble),
+          radius * filament.ry * (1 - wobble * 0.6),
+          filament.tilt + wobble,
+          filament.start + drift,
+          filament.start + filament.span + drift,
+        );
+        ctx.strokeStyle = `rgba(255,139,25,${Math.min(0.5, filament.alpha * (0.75 + energy * 1.5))})`;
+        ctx.lineWidth = filament.width * (0.85 + energy * 0.3);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.restore();
+    }
+
+    function drawRibbons(cx: number, cy: number, radius: number, time: number) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalCompositeOperation = "lighter";
+
+      for (let index = 0; index < ribbons.length; index += 1) {
+        const ribbon = ribbons[index];
+        const drift = reduced.matches ? 0 : time * 0.000045 * ribbon.speed * (0.8 + energy * 1.8);
+        ctx.save();
+        ctx.rotate(ribbon.rot + drift + reverseSpin * 0.1);
+        ctx.beginPath();
+        ctx.ellipse(
+          0,
+          0,
+          radius * ribbon.radius,
+          radius * ribbon.radius * ribbon.squash,
+          ribbon.phase * 0.3,
+          ribbon.phase + drift,
+          ribbon.phase + ribbon.span + drift,
+        );
+        ctx.strokeStyle = index % 4 === 0
+          ? `rgba(255,232,157,${0.13 + energy * 0.35})`
+          : `rgba(255,122,17,${0.09 + energy * 0.22})`;
+        ctx.lineWidth = index % 5 === 0 ? 1.4 : 0.65;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.restore();
+    }
+
+    function drawEvolution(cx: number, cy: number, radius: number, time: number) {
       const e = progress.current;
-      const detailCount = clamp(12 + e.level * 3 + e.skills * 2, 12, 64);
+      const detailCount = clamp(10 + e.level * 3 + e.skills * 2, 10, 72);
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.globalCompositeOperation = "lighter";
 
       for (let index = 0; index < detailCount; index += 1) {
-        const lane = index % 6;
-        const ringRadius = radius * (1.02 + lane * 0.045);
-        const direction = index % 2 === 0 ? 1 : -1;
-        const drift = reduced.matches ? 0 : time * 0.000035 * direction * (active ? 2.2 : 1);
-        const start = (index / detailCount) * Math.PI * 2 + drift + lane * 0.31;
-        const length = 0.045 + (index % 5) * 0.035;
-
+        const lane = index % 7;
+        const ringRadius = radius * (1.03 + lane * 0.038);
+        const direction = index % 2 ? -1 : 1;
+        const drift = reduced.matches ? 0 : time * 0.000035 * direction * (0.7 + energy * 1.8);
+        const start = (index / detailCount) * Math.PI * 2 + lane * 0.37 + drift;
+        const span = 0.035 + (index % 6) * 0.032;
         ctx.beginPath();
-        ctx.arc(0, 0, ringRadius, start, start + length);
-        ctx.strokeStyle = active
-          ? "rgba(255,199,91,.62)"
-          : "rgba(244,119,26,.34)";
-        ctx.lineWidth = index % 7 === 0 ? 1.45 : 0.62;
+        ctx.arc(0, 0, ringRadius, start, start + span);
+        ctx.strokeStyle = `rgba(255,133,28,${0.15 + energy * 0.28})`;
+        ctx.lineWidth = index % 7 === 0 ? 1.3 : 0.55;
         ctx.stroke();
-
-        if (index % 4 === 0) {
-          const x = Math.cos(start + length) * ringRadius;
-          const y = Math.sin(start + length) * ringRadius;
-          ctx.fillStyle = active ? "rgba(255,241,187,.88)" : "rgba(255,158,55,.58)";
-          ctx.fillRect(x - 1, y - 1, 2, 2);
-        }
       }
 
       if (e.capabilities.security > 0) {
         ctx.save();
-        ctx.setLineDash([5, 8, 2, 10]);
-        ctx.lineDashOffset = reduced.matches ? 0 : -time * 0.008;
+        ctx.setLineDash([6, 11]);
+        ctx.lineDashOffset = reduced.matches ? 0 : -time * 0.009 * (0.55 + energy);
         ctx.beginPath();
         ctx.arc(0, 0, radius * 1.31, 0, Math.PI * 2);
-        ctx.strokeStyle = active ? "rgba(255,183,70,.48)" : "rgba(201,78,10,.26)";
-        ctx.lineWidth = 0.8 + Math.min(e.capabilities.security, 4) * 0.12;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      const codeNodes = clamp(e.capabilities.code * 8, 0, 44);
-      for (let index = 0; index < codeNodes; index += 1) {
-        const a = (index / Math.max(codeNodes, 1)) * Math.PI * 2 + counterSpin * 0.6;
-        const rr = radius * (0.78 + (index % 4) * 0.09);
-        const x = Math.cos(a) * rr;
-        const y = Math.sin(a) * rr * 0.73;
-        ctx.strokeStyle = active ? "rgba(255,220,135,.62)" : "rgba(255,142,38,.38)";
-        ctx.strokeRect(x - 2.1, y - 2.1, 4.2, 4.2);
-      }
-
-      if (e.capabilities.memory > 0) {
-        ctx.beginPath();
-        ctx.arc(0, 0, radius * 0.43, 0, Math.PI * 2);
-        ctx.strokeStyle = active ? "rgba(255,226,151,.38)" : "rgba(255,132,28,.2)";
-        ctx.lineWidth = 1.4;
-        ctx.stroke();
-      }
-
-      if (e.capabilities.internet > 0) {
-        const sweep = reduced.matches ? -0.55 : -0.55 + Math.sin(time * 0.0007) * 0.18;
-        ctx.save();
-        ctx.rotate(sweep);
-        ctx.beginPath();
-        ctx.moveTo(-radius * 1.46, 0);
-        ctx.lineTo(radius * 1.46, 0);
-        ctx.strokeStyle = active ? "rgba(255,213,120,.3)" : "rgba(255,117,20,.16)";
+        ctx.strokeStyle = `rgba(255,124,25,${0.12 + energy * 0.2})`;
         ctx.lineWidth = 0.8;
         ctx.stroke();
         ctx.restore();
       }
 
+      const codeNodes = clamp(e.capabilities.code * 8, 0, 40);
+      for (let index = 0; index < codeNodes; index += 1) {
+        const a = (index / Math.max(1, codeNodes)) * Math.PI * 2 + reverseSpin * 0.22;
+        const rr = radius * (0.83 + (index % 4) * 0.075);
+        const x = Math.cos(a) * rr;
+        const y = Math.sin(a) * rr * 0.68;
+        ctx.strokeStyle = `rgba(255,189,82,${0.16 + energy * 0.28})`;
+        ctx.strokeRect(x - 2, y - 2, 4, 4);
+      }
+
+      if (e.capabilities.memory > 0) {
+        ctx.beginPath();
+        ctx.ellipse(0, 0, radius * 0.47, radius * 0.31, -0.35 + spin * 0.08, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,211,119,${0.12 + energy * 0.24})`;
+        ctx.lineWidth = 1.1;
+        ctx.stroke();
+      }
+
+      if (e.capabilities.internet > 0) {
+        for (let index = 0; index < 3; index += 1) {
+          const a = -0.55 + index * 1.7 + spin * 0.08;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * radius * 0.8, Math.sin(a) * radius * 0.8);
+          ctx.lineTo(Math.cos(a) * radius * 1.48, Math.sin(a) * radius * 1.48);
+          ctx.strokeStyle = `rgba(255,163,55,${0.08 + energy * 0.2})`;
+          ctx.stroke();
+        }
+      }
+
       if (e.capabilities.vision > 0 || e.capabilities.images > 0) {
         ctx.beginPath();
-        ctx.arc(0, 0, radius * 0.19, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255,239,185,.52)";
-        ctx.lineWidth = 1.25;
+        ctx.ellipse(0, 0, radius * 0.28, radius * 0.12, spin * 0.18, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,239,183,${0.2 + energy * 0.28})`;
         ctx.stroke();
       }
 
       if (e.capabilities.voice > 0) {
         for (let index = 0; index < 3; index += 1) {
           ctx.beginPath();
-          ctx.arc(0, 0, radius * (1.4 + index * 0.075), -0.4, 0.4);
-          ctx.strokeStyle = `rgba(255,146,40,${0.22 - index * 0.05})`;
+          ctx.arc(0, 0, radius * (1.37 + index * 0.065), -0.42, 0.42);
+          ctx.strokeStyle = `rgba(255,145,36,${0.15 - index * 0.03 + energy * 0.08})`;
           ctx.stroke();
         }
       }
 
-      const knowledgeRays = clamp(Math.floor(e.knowledge / 18), 0, 38);
-      for (let index = 0; index < knowledgeRays; index += 1) {
-        const a = (index / Math.max(knowledgeRays, 1)) * Math.PI * 2 + spin * 0.18;
-        const inner = radius * 1.08;
-        const outer = radius * (1.15 + (index % 5) * 0.035);
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
-        ctx.lineTo(Math.cos(a) * outer, Math.sin(a) * outer);
-        ctx.strokeStyle = "rgba(255,126,22,.28)";
-        ctx.lineWidth = 0.7;
-        ctx.stroke();
+      if (e.capabilities.agents > 0) {
+        const satellites = clamp(e.capabilities.agents * 3, 0, 12);
+        for (let index = 0; index < satellites; index += 1) {
+          const a = (index / satellites) * Math.PI * 2 + spin * 0.4;
+          const rr = radius * 1.18;
+          ctx.fillStyle = `rgba(255,226,142,${0.4 + energy * 0.35})`;
+          ctx.beginPath();
+          ctx.arc(Math.cos(a) * rr, Math.sin(a) * rr, 1.7, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
 
       ctx.restore();
     }
 
-    function drawScanFlash(
-      cx: number,
-      cy: number,
-      radius: number,
-      time: number,
-      active: boolean,
-    ) {
-      if (reduced.matches) return;
-      const cycle = (time * (active ? 0.00042 : 0.00013)) % 1;
-      if (cycle > 0.24) return;
-
-      const alpha = (1 - cycle / 0.24) * (active ? 0.34 : 0.12);
-      const scanRadius = radius * (0.28 + cycle * 4.6);
-      ctx.beginPath();
-      ctx.arc(cx, cy, scanRadius, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,216,126,${alpha})`;
-      ctx.lineWidth = 1.1;
-      ctx.stroke();
-    }
-
     function draw(time: number) {
-      const dt = Math.min(time - last, 50);
+      const dt = Math.min(50, Math.max(0, time - last));
       last = time;
-      const active = current.current === "thinking";
-      const listening = current.current === "listening";
+
+      const target = reduced.matches
+        ? 0.12
+        : current.current === "thinking"
+          ? 1
+          : current.current === "listening"
+            ? 0.42
+            : 0.18;
+
+      const tau = target > energy ? 180 : 1450;
+      energy = smooth(energy, target, dt, tau);
 
       if (!reduced.matches) {
-        spin += dt * (active ? 0.00086 : listening ? 0.00038 : 0.0002);
-        counterSpin -= dt * (active ? 0.00062 : 0.00014);
+        spin += dt * (0.00008 + energy * 0.00042);
+        reverseSpin -= dt * (0.000055 + energy * 0.00027);
       }
 
       ctx.clearRect(0, 0, width, height);
-
       const cx = width / 2;
       const cy = height / 2;
-      const radius = Math.min(width, height) * 0.31;
+      const radius = Math.min(width, height) * (0.295 + energy * 0.006);
 
-      drawBackgroundGlow(cx, cy, radius, time, active);
-      drawFilaments(cx, cy, radius, time, active);
-      drawNucleus(cx, cy, radius, time, active);
-      drawOrbitals(cx, cy, radius, time, active);
-      drawShell(cx, cy, radius, time, active);
-      drawOuterArchitecture(cx, cy, radius, time, active);
-      drawScanFlash(cx, cy, radius, time, active);
+      drawBackdrop(cx, cy, radius, time);
+      drawShell(cx, cy, radius, time);
+      drawFilaments(cx, cy, radius, time);
+      drawRibbons(cx, cy, radius, time);
+      drawNucleus(cx, cy, radius, time);
+      drawEvolution(cx, cy, radius, time);
 
       frame = requestAnimationFrame(draw);
     }
