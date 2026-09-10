@@ -25,6 +25,7 @@ export async function GET() {
 
     const repository = has("github_self_repository_reader");
     const sandbox = has("cloud_code_sandbox");
+    const critic = has("independent_response_critic");
 
     return NextResponse.json({
       level: Math.max(1, verified.length),
@@ -41,7 +42,7 @@ export async function GET() {
         internet: has("internet_research") ? 1 : 0,
         vision: 0,
         voice: 0,
-        agents: 0,
+        agents: critic ? 1 : 0,
         images: 0,
       },
       modules: {
@@ -49,6 +50,7 @@ export async function GET() {
         github: repository ? "VERIFIED" : "LOCKED",
         internet: has("internet_research") ? "VERIFIED" : "LOCKED",
         sandbox: sandbox ? "VERIFIED" : "LOCKED",
+        critic: critic ? "VERIFIED" : "LOCKED",
       },
       verifiedSkills: verified.map((skill) => ({
         slug: skill.slug,
