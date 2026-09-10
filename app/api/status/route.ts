@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import { getSkills } from "@/lib/server-memory";
+import { selfHostedHealth } from "@/lib/brain/providers/self-hosted";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,10 @@ export async function GET() {
   }
 
   try {
-    const skills = await getSkills(ownerKey);
+    const [skills, brain] = await Promise.all([
+      getSkills(ownerKey),
+      selfHostedHealth(),
+    ]);
     const verified = skills.filter((skill) => skill.status === "verified");
     const has = (slug: string) => verified.some((skill) => skill.slug === slug);
 
@@ -51,6 +55,12 @@ export async function GET() {
         internet: has("internet_research") ? "VERIFIED" : "LOCKED",
         sandbox: sandbox ? "VERIFIED" : "LOCKED",
         critic: critic ? "VERIFIED" : "LOCKED",
+      },
+      brain: {
+        preferred: brain.configured ? "self-hosted" : "groq-fallback",
+        selfHostedConfigured: brain.configured,
+        selfHostedOnline: brain.online,
+        selfHostedModel: brain.model,
       },
       verifiedSkills: verified.map((skill) => ({
         slug: skill.slug,
