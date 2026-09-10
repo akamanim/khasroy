@@ -44,6 +44,7 @@ export type BrainRun = {
   mode: BrainMode;
   toolsUsed: string[];
   sources: Array<{ title: string; url: string }>;
+  webToolForced: boolean;
 };
 
 function wantsWeb(text: string) {
@@ -108,12 +109,15 @@ async function groqRequest(args: {
   maxCompletion: number;
   reasoning?: "low" | "medium";
   compoundTools?: string[];
+  nativeTools?: string[];
+  toolChoice?: "required" | "auto";
 }) {
   const body: Record<string, unknown> = {
     model: args.model,
     messages: [{ role: "system", content: args.systemContent }, ...args.history],
     max_completion_tokens: args.maxCompletion,
     stream: false,
+    citation_options: "enabled",
   };
 
   if (args.reasoning && !args.model.startsWith("groq/compound")) {
@@ -124,6 +128,11 @@ async function groqRequest(args: {
     body.compound_custom = {
       tools: { enabled_tools: args.compoundTools },
     };
+  }
+
+  if (args.nativeTools?.length) {
+    body.tools = args.nativeTools.map((type) => ({ type }));
+    body.tool_choice = args.toolChoice || "required";
   }
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -149,7 +158,7 @@ export async function runBrain(args: {
   history: BrainMessage[];
   query: string;
   repositoryRead: boolean;
-}) : Promise<BrainRun> {
+}): Promise<BrainRun> {
   const mode = selectBrainMode(args.query, args.repositoryRead);
 
   let model = args.defaultModel;
@@ -158,6 +167,7 @@ export async function runBrain(args: {
   let compoundTools: string[] | undefined;
   let history = args.history.slice(-16);
   let systemContent = args.systemContent;
+  let webToolForced = false;
 
   if (mode === "repository") {
     maxCompletion = 1100;
@@ -168,10 +178,11 @@ export async function runBrain(args: {
     const deep = wantsDeepResearch(args.query);
     model = deep ? "groq/compound" : "groq/compound-mini";
     compoundTools = urls.length ? ["visit_website"] : ["web_search"];
-    maxCompletion = deep ? 1800 : 1200;
+    maxCompletion = deep ? 1600 : 1000;
     reasoning = undefined;
-    history = args.history.slice(-8);
-    systemContent += "\n\nWEB RESEARCH MODE: используй разрешённый веб-инструмент, опирайся на свежие источники и не выдавай сведения из памяти модели за найденные в интернете.";
+    history = args.history.slice(-6);
+    systemContent = args.systemContent.slice(0, 10_000);
+    systemContent += "\n\nWEB RESEARCH MODE: обязательно используй разрешённый веб-инструмент, опирайся на свежие источники и не выдавай сведения из памяти модели за найденные в интернете.";
   } else if (mode === "sandbox") {
     model = "groq/compound-mini";
     compoundTools = ["code_interpreter"];
@@ -182,9 +193,10 @@ export async function runBrain(args: {
   } else if (mode === "agentic") {
     model = "groq/compound";
     compoundTools = ["web_search", "visit_website", "code_interpreter"];
-    maxCompletion = 1800;
+    maxCompletion = 1600;
     reasoning = undefined;
-    history = args.history.slice(-8);
+    history = args.history.slice(-6);
+    systemContent = args.systemContent.slice(0, 10_000);
     systemContent += "\n\nAGENTIC MODE: при необходимости используй веб-поиск, посещение страниц и безопасный code interpreter. Чётко отличай найденные факты от вычисленных результатов.";
   }
 
@@ -197,6 +209,29 @@ export async function runBrain(args: {
     reasoning,
     compoundTools,
   });
+
+  // Internet failover: if Compound web tooling is unavailable, use the native
+  // browser_search tool supported by GPT-OSS on Groq. A required tool choice
+  // makes a successful response proof that real web browsing was invoked.
+  if (!result.response.ok && (mode === "research" || mode === "agentic")) {
+    const browserModel = args.defaultModel.startsWith("openai/gpt-oss")
+      ? args.defaultModel
+      : "openai/gpt-oss-120b";
+
+    result = await groqRequest({
+      apiKey: args.apiKey,
+      model: browserModel,
+      systemContent: `${args.systemContent.slice(0, 6_500)}\n\nBROWSER SEARCH FALLBACK: обязательно используй browser_search и отвечай только на основе реально найденных веб-источников.`,
+      history: args.history.slice(-4),
+      maxCompletion: 800,
+      reasoning: "low",
+      nativeTools: ["browser_search"],
+      toolChoice: "required",
+    });
+
+    model = browserModel;
+    webToolForced = result.response.ok;
+  }
 
   // Repository mode can be large on the free standalone model. Retry once with
   // a compact real excerpt instead of failing the whole conversation.
@@ -212,19 +247,25 @@ export async function runBrain(args: {
     model = args.defaultModel;
   }
 
+  const toolsUsed = normalizeTools(result.data);
+  if (webToolForced && !toolsUsed.some((tool) => tool.includes("browser_search"))) {
+    toolsUsed.push("browser_search:required");
+  }
+
   return {
     response: result.response,
     data: result.data,
     provider: "groq",
     model: result.data?.model || model,
     mode,
-    toolsUsed: normalizeTools(result.data),
+    toolsUsed,
     sources: extractSources(result.data),
+    webToolForced,
   };
 }
 
 export function usedWebTool(run: BrainRun) {
-  return run.sources.length > 0 || run.toolsUsed.some((tool) => /search|visit|browser/.test(tool));
+  return run.webToolForced || run.sources.length > 0 || run.toolsUsed.some((tool) => /search|visit|browser/.test(tool));
 }
 
 export function usedCodeInterpreter(run: BrainRun) {
