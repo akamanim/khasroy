@@ -53,7 +53,7 @@ function parseMessage(value: unknown): ClientMessage | null {
 }
 
 function explicitMemoryRequest(text: string) {
-  return /\b(запомни|запомнить|важно|мы решили|мы договорились|хочу чтобы ты помнил|remember)\b/i.test(
+  return /(запомни|запомнить|важно|мы решили|мы договорились|хочу чтобы ты помнил|remember)/iu.test(
     text,
   );
 }
