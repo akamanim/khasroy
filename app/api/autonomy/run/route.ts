@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import {
   finishAutonomyRun,
   getNextAutonomyGoal,
-  getRecentAutonomyRuns,
   startAutonomyRun,
 } from "@/lib/server-autonomy";
 import {
@@ -11,13 +10,64 @@ import {
   selfHostedHealth,
 } from "@/lib/brain/providers/self-hosted";
 import { runBrain, usedWebTool } from "@/lib/brain/router";
-import { getSkills, rememberKnowledge, upsertSkill } from "@/lib/server-memory";
+import { rememberKnowledge, upsertSkill } from "@/lib/server-memory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const AUTONOMY_SIGNATURE_CONTEXT = "khasroy-autonomy-v1";
+
+const ZERO_COST_TOPICS = [
+  {
+    searchQuery: "idempotency retry backoff distributed API best practices",
+    learningGoal: "Разобраться, как делать повторные запросы и операции идемпотентными без дублирования побочных эффектов.",
+  },
+  {
+    searchQuery: "property based testing TypeScript modern best practices",
+    learningGoal: "Изучить, где property-based тесты находят ошибки лучше обычных example-based тестов.",
+  },
+  {
+    searchQuery: "PostgreSQL EXPLAIN ANALYZE index query performance best practices",
+    learningGoal: "Улучшить понимание диагностики медленных SQL-запросов и выбора индексов.",
+  },
+  {
+    searchQuery: "TypeScript discriminated unions exhaustive checking best practices",
+    learningGoal: "Изучить способы делать состояния приложения типобезопасными и проверять исчерпывающие ветки.",
+  },
+  {
+    searchQuery: "Next.js caching revalidation server components current best practices",
+    learningGoal: "Разобраться в современных правилах кеширования и ревалидации Next.js.",
+  },
+  {
+    searchQuery: "OpenTelemetry tracing logs metrics software observability best practices",
+    learningGoal: "Понять, как связывать трассировки, метрики и логи для диагностики распределённых приложений.",
+  },
+  {
+    searchQuery: "PostgreSQL transaction isolation concurrency anomalies practical guide",
+    learningGoal: "Улучшить понимание уровней изоляции транзакций и безопасной работы с конкуренцией.",
+  },
+  {
+    searchQuery: "LLM evaluation retrieval RAG groundedness test methodology",
+    learningGoal: "Изучить способы объективно проверять качество retrieval/RAG и подтверждённость ответов источниками.",
+  },
+  {
+    searchQuery: "prompt injection defense tool using AI agents untrusted content best practices",
+    learningGoal: "Изучить защитные методы обработки недоверенного веб-контента AI-агентами.",
+  },
+  {
+    searchQuery: "software architecture modular boundaries dependency inversion practical",
+    learningGoal: "Разобраться, как проектировать сменные модули и уменьшать связанность системы.",
+  },
+  {
+    searchQuery: "race condition testing concurrent code deterministic techniques",
+    learningGoal: "Изучить безопасные способы воспроизводить и тестировать ошибки конкурентного выполнения.",
+  },
+  {
+    searchQuery: "LLM agent memory architecture episodic semantic procedural memory",
+    learningGoal: "Изучить архитектурные подходы к разделению эпизодической, семантической и процедурной памяти AI-агентов.",
+  },
+] as const;
 
 type AiResult = {
   ok: boolean;
@@ -72,18 +122,19 @@ function extractJson(text: string) {
   }
 }
 
-function safeSearchQuery(value: unknown, fallback: string) {
-  if (typeof value !== "string") return fallback;
-  const query = value.replace(/\s+/g, " ").trim().slice(0, 300);
-  return query || fallback;
-}
-
 function compactSources(sources: Array<{ title: string; url: string }>) {
   return sources
     .slice(0, 8)
     .map((source, index) => `[${index + 1}] ${source.title}\n${source.url}`)
     .join("\n\n")
     .slice(0, 4_000);
+}
+
+function chooseTopic() {
+  // Six scheduled runs/day. Rotating by four-hour slots makes the choice
+  // deterministic, free, and naturally progresses through the backlog.
+  const slot = Math.floor(Date.now() / (4 * 60 * 60 * 1000));
+  return ZERO_COST_TOPICS[slot % ZERO_COST_TOPICS.length];
 }
 
 async function groqChat(args: {
@@ -223,61 +274,10 @@ export async function GET(request: Request) {
   let currentModel = preferredModel;
 
   try {
-    const [skills, recentRuns] = await Promise.all([
-      getSkills(ownerKey).catch(() => []),
-      getRecentAutonomyRuns(ownerKey, 6).catch(() => []),
-    ]);
+    const topic = chooseTopic();
+    const searchQuery = topic.searchQuery;
+    const learningGoal = topic.learningGoal;
 
-    const verifiedSkills = skills
-      .filter((skill) => skill.status === "verified")
-      .map((skill) => skill.name)
-      .slice(0, 20)
-      .join(", ");
-
-    const recentSummary = recentRuns
-      .filter((item) => item.id !== run.id && item.summary)
-      .map((item) => item.summary)
-      .slice(0, 5)
-      .join("\n---\n")
-      .slice(0, 3_000);
-
-    const planner = await aiChat({
-      groqKey,
-      selfHostedOnline,
-      system:
-        "Ты Planner автономного обучения Хасроя. Выбери ОДНУ небольшую полезную техническую тему: программирование, архитектура ПО, тестирование, базы данных, web, AI-системы, производительность, инструменты разработчика или открытые стандарты. Не выбирай эксплуатацию уязвимостей, вредоносный код, обход контроля доступа, кражу секретов или изменение Security Core. Не повторяй недавние темы. Верни только JSON: {\"searchQuery\":\"короткий веб-запрос\",\"learningGoal\":\"что выяснить\"}.",
-      user: `Главная цель:\n${goal.title}\n${goal.description}\n\nУже VERIFIED:\n${verifiedSkills || "нет списка"}\n\nНедавние результаты:\n${recentSummary || "пока нет"}`,
-      maxTokens: 300,
-      jsonMode: true,
-    });
-    currentProvider = planner.provider;
-    currentModel = planner.model;
-
-    if (planner.rateLimited) {
-      await finishAutonomyRun(ownerKey, {
-        runId: run.id,
-        goalId: goal.id,
-        status: "failed",
-        phase: "rate_limit",
-        provider: planner.provider,
-        model: planner.model,
-        error: "free AI quota temporarily exhausted",
-      });
-      return NextResponse.json({ ok: true, autonomy: "rate_limited", retryLater: true });
-    }
-    if (!planner.ok || !planner.content) {
-      throw new Error("planner returned no usable answer");
-    }
-
-    const plan = extractJson(planner.content);
-    const fallbackQuery = "software engineering testing architecture best practices";
-    const searchQuery = safeSearchQuery(plan?.searchQuery, fallbackQuery);
-    const learningGoal =
-      typeof plan?.learningGoal === "string" && plan.learningGoal.trim()
-        ? plan.learningGoal.trim().slice(0, 600)
-        : "Найти один практический технический вывод, который можно позже проверить экспериментом.";
-
-    // Use the same proven web-capable Brain Router as the interactive Internet module.
     const researchQuery = `Исследуй в интернете тему: ${searchQuery}. Цель: ${learningGoal}. Дай компактный технический вывод, один безопасный эксперимент для будущей проверки и назови реальные источники.`;
     const research = await runBrain({
       apiKey: groqKey,
@@ -315,8 +315,8 @@ export async function GET(request: Request) {
       selfHostedOnline,
       system:
         "Ты Verifier автономного обучения Хасроя. Проверь, что учебный вывод осторожный, технически связный, не выдаёт непроверенный эксперимент за выполненный и опирается на перечисленные реальные источники. Эксперимент должен быть безопасным и не менять production. Верни только JSON: {\"passed\":true|false,\"reason\":\"кратко\"}.",
-      user: `Вывод:\n${draft.slice(0, 5_000)}\n\nИсточники, реально полученные веб-модулем:\n${evidence || "источники не извлечены"}`,
-      maxTokens: 250,
+      user: `Вывод:\n${draft.slice(0, 4_500)}\n\nИсточники, реально полученные веб-модулем:\n${evidence || "источники не извлечены"}`,
+      maxTokens: 180,
       jsonMode: true,
     });
     currentProvider = verifier.provider;
@@ -380,7 +380,7 @@ export async function GET(request: Request) {
       slug: "autonomous_learning_loop",
       name: "Автономный цикл обучения",
       description:
-        "Хасрой сам запускает Planner → Web Research → Verifier по расписанию и сохраняет только прошедшие проверку знания.",
+        "Хасрой сам запускает Web Research → Verifier по расписанию и сохраняет только прошедшие проверку знания.",
       status: "verified",
       level: 1,
       testsPassed: 1,
@@ -391,6 +391,7 @@ export async function GET(request: Request) {
         model: verifier.model,
         researchModel: research.model,
         schedule: "every_4_hours_zero_cost",
+        aiCallsPerCycle: 2,
         productionWrites: false,
         lastSearchQuery: searchQuery,
       },
