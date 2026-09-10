@@ -35,7 +35,13 @@ const FALLBACK_EVOLUTION: CoreEvolution = {
   },
 };
 
-type ModuleState = "VERIFIED" | "LOCKED";
+type ModuleState =
+  | "VERIFIED"
+  | "LOCKED"
+  | "WAITING"
+  | "READY"
+  | "ONLINE"
+  | "OFFLINE";
 
 type StatusResponse = {
   level: number;
@@ -47,6 +53,9 @@ type StatusResponse = {
     github: ModuleState;
     internet: ModuleState;
     sandbox: ModuleState;
+    critic: ModuleState;
+    selfHosted: ModuleState;
+    autonomy: ModuleState;
   };
 };
 
@@ -55,6 +64,9 @@ const FALLBACK_MODULES: StatusResponse["modules"] = {
   github: "VERIFIED",
   internet: "LOCKED",
   sandbox: "LOCKED",
+  critic: "LOCKED",
+  selfHosted: "WAITING",
+  autonomy: "WAITING",
 };
 
 export default function Home() {
@@ -216,6 +228,9 @@ export default function Home() {
             <div><dt>GitHub</dt><dd>{modules.github}</dd></div>
             <div><dt>Интернет</dt><dd>{modules.internet}</dd></div>
             <div><dt>Sandbox</dt><dd>{modules.sandbox}</dd></div>
+            <div><dt>Critic</dt><dd>{modules.critic}</dd></div>
+            <div><dt>Self‑Hosted</dt><dd>{modules.selfHosted}</dd></div>
+            <div><dt>Автономия</dt><dd>{modules.autonomy}</dd></div>
             <div><dt>Эволюция</dt><dd>LEVEL {levelLabel}</dd></div>
           </dl>
           <div className="signal">
@@ -348,7 +363,7 @@ export default function Home() {
         </form>
 
         <div className="chat-footer">
-          <span>LIVE AI · DYNAMIC VERIFIED CORE · Доступ владельца</span>
+          <span>LIVE AI · DYNAMIC VERIFIED CORE · AUTONOMY HEARTBEAT · Доступ владельца</span>
           <span>Enter — отправить ↵</span>
         </div>
       </section>
