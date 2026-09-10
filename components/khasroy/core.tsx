@@ -65,8 +65,9 @@ export function Core({
     const element = canvas.current;
     if (!element) return;
 
-    const ctx = element.getContext("2d");
-    if (!ctx) return;
+    const context = element.getContext("2d");
+    if (!context) return;
+    const ctx: CanvasRenderingContext2D = context;
 
     let frame = 0;
     let angle = 0;
@@ -78,7 +79,7 @@ export function Core({
     const resize = new ResizeObserver(() => {
       width = element.clientWidth;
       height = element.clientHeight;
-      const dpr = Math.min(devicePixelRatio, 2);
+      const dpr = Math.min(window.devicePixelRatio, 2);
       element.width = width * dpr;
       element.height = height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -106,7 +107,6 @@ export function Core({
       ctx.save();
       ctx.translate(cx, cy);
 
-      // Permanent technical fragments: every verified skill makes the shell denser.
       for (let index = 0; index < detailCount; index += 1) {
         const lane = index % 5;
         const ringRadius = radius * (1.03 + lane * 0.045);
@@ -117,23 +117,28 @@ export function Core({
 
         ctx.beginPath();
         ctx.arc(0, 0, ringRadius, start, start + length);
-        ctx.strokeStyle = active ? "rgba(170,238,248,.62)" : "rgba(105,202,229,.38)";
+        ctx.strokeStyle = active
+          ? "rgba(170,238,248,.62)"
+          : "rgba(105,202,229,.38)";
         ctx.lineWidth = index % 6 === 0 ? 1.3 : 0.7;
         ctx.stroke();
 
         if (index % 4 === 0) {
           const nodeX = Math.cos(start + length) * ringRadius;
           const nodeY = Math.sin(start + length) * ringRadius;
-          ctx.fillStyle = active ? "rgba(210,248,255,.82)" : "rgba(120,216,235,.52)";
+          ctx.fillStyle = active
+            ? "rgba(210,248,255,.82)"
+            : "rgba(120,216,235,.52)";
           ctx.fillRect(nodeX - 1, nodeY - 1, 2, 2);
         }
       }
 
-      // Intelligence creates internal rotating logic rings.
       const intelligenceRings = clamp(e.capabilities.intelligence, 0, 6);
       for (let index = 0; index < intelligenceRings; index += 1) {
         ctx.save();
-        const spin = reduced.matches ? 0 : time * 0.00006 * (index % 2 === 0 ? 1 : -1);
+        const spin = reduced.matches
+          ? 0
+          : time * 0.00006 * (index % 2 === 0 ? 1 : -1);
         ctx.rotate(spin + index * 0.7);
         ctx.beginPath();
         ctx.ellipse(
@@ -145,29 +150,32 @@ export function Core({
           0,
           Math.PI * 1.55,
         );
-        ctx.strokeStyle = active ? "rgba(181,241,250,.46)" : "rgba(99,196,220,.29)";
+        ctx.strokeStyle = active
+          ? "rgba(181,241,250,.46)"
+          : "rgba(99,196,220,.29)";
         ctx.lineWidth = 0.8;
         ctx.stroke();
         ctx.restore();
       }
 
-      // Security becomes a persistent segmented shield outside the core.
       if (e.capabilities.security > 0) {
         ctx.save();
         ctx.setLineDash([7, 9]);
         ctx.lineDashOffset = reduced.matches ? 0 : -time * 0.006;
         ctx.beginPath();
         ctx.arc(0, 0, radius * 1.29, 0, Math.PI * 2);
-        ctx.strokeStyle = active ? "rgba(139,230,241,.45)" : "rgba(81,166,189,.27)";
+        ctx.strokeStyle = active
+          ? "rgba(139,230,241,.45)"
+          : "rgba(81,166,189,.27)";
         ctx.lineWidth = 0.7 + Math.min(e.capabilities.security, 4) * 0.15;
         ctx.stroke();
         ctx.restore();
       }
 
-      // Code mastery grows circuit nodes around the shell.
       const codeNodes = clamp(e.capabilities.code * 6, 0, 36);
       for (let index = 0; index < codeNodes; index += 1) {
-        const a = (index / Math.max(codeNodes, 1)) * Math.PI * 2 + angle * 0.22;
+        const a =
+          (index / Math.max(codeNodes, 1)) * Math.PI * 2 + angle * 0.22;
         const rr = radius * (0.88 + (index % 3) * 0.08);
         const x = Math.cos(a) * rr;
         const y = Math.sin(a) * rr * 0.72;
@@ -175,7 +183,6 @@ export function Core({
         ctx.strokeRect(x - 2.2, y - 2.2, 4.4, 4.4);
       }
 
-      // Knowledge creates outward rays only after real knowledge units exist.
       const rayCount = clamp(Math.floor(e.knowledge / 25), 0, 32);
       for (let index = 0; index < rayCount; index += 1) {
         const a = (index / rayCount) * Math.PI * 2 + angle * 0.08;
@@ -189,7 +196,6 @@ export function Core({
         ctx.stroke();
       }
 
-      // Future capability signatures. They appear only when the capability exists.
       if (e.capabilities.memory > 0) {
         ctx.beginPath();
         ctx.arc(0, 0, radius * 0.43, 0, Math.PI * 2);
@@ -244,7 +250,14 @@ export function Core({
       const cx = width / 2;
       const cy = height / 2;
       const radius = Math.min(width, height) * 0.315;
-      const glow = ctx.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius * 1.65);
+      const glow = ctx.createRadialGradient(
+        cx,
+        cy,
+        radius * 0.2,
+        cx,
+        cy,
+        radius * 1.65,
+      );
       glow.addColorStop(0, active ? "#164c5760" : "#083e5345");
       glow.addColorStop(0.6, "#0b66882d");
       glow.addColorStop(1, "#07101800");
@@ -272,13 +285,17 @@ export function Core({
       ctx.restore();
 
       for (const point of points) {
-        const x = point.x * Math.cos(angle) - point.z * Math.sin(angle);
-        const z = point.x * Math.sin(angle) + point.z * Math.cos(angle);
+        const x =
+          point.x * Math.cos(angle) - point.z * Math.sin(angle);
+        const z =
+          point.x * Math.sin(angle) + point.z * Math.cos(angle);
         const y = point.y * 0.94 - z * 0.34;
         const depth = point.y * 0.34 + z * 0.94;
         const ripple = reduced.matches
           ? 1
-          : 1 + Math.sin(point.y * 9 + angle * 5) * (active ? 0.055 : 0.018);
+          : 1 +
+            Math.sin(point.y * 9 + angle * 5) *
+              (active ? 0.055 : 0.018);
         const scale = 3 / (3 - depth * 0.4);
         ctx.fillStyle = `rgba(${active ? "154,231,244" : "98,204,239"},${0.18 + (depth + 1) * 0.36})`;
         ctx.beginPath();
