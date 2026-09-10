@@ -2,6 +2,12 @@ const MEMORY_ENDPOINT =
   process.env.KHASROY_MEMORY_ENDPOINT ||
   "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-memory";
 
+// Supabase publishable keys are intentionally safe to expose. We still use it only
+// server-side here so the memory gateway receives a valid apikey header.
+const MEMORY_API_KEY =
+  process.env.KHASROY_SUPABASE_PUBLISHABLE_KEY ||
+  "sb_publishable_cQzfru6dR7_T4myYO1c_fA_r-iFXOtn";
+
 type MemoryMessage = {
   role: "user" | "assistant" | "system";
   content: string;
@@ -19,7 +25,10 @@ type KnowledgeItem = {
 async function memoryCall<T>(body: Record<string, unknown>): Promise<T> {
   const response = await fetch(MEMORY_ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      apikey: MEMORY_API_KEY,
+    },
     body: JSON.stringify(body),
     cache: "no-store",
   });
