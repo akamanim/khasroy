@@ -30,6 +30,17 @@ export async function GET() {
     const repository = has("github_self_repository_reader");
     const sandbox = has("cloud_code_sandbox");
     const critic = has("independent_response_critic");
+    const autonomy = has("autonomous_learning_loop");
+    const selfHostedState = brain.online
+      ? "ONLINE"
+      : brain.configured
+        ? "OFFLINE"
+        : "WAITING";
+    const autonomyState = autonomy
+      ? "VERIFIED"
+      : brain.online
+        ? "READY"
+        : "WAITING";
 
     return NextResponse.json({
       level: Math.max(1, verified.length),
@@ -46,7 +57,7 @@ export async function GET() {
         internet: has("internet_research") ? 1 : 0,
         vision: 0,
         voice: 0,
-        agents: critic ? 1 : 0,
+        agents: (critic ? 1 : 0) + (autonomy ? 1 : 0),
         images: 0,
       },
       modules: {
@@ -55,6 +66,8 @@ export async function GET() {
         internet: has("internet_research") ? "VERIFIED" : "LOCKED",
         sandbox: sandbox ? "VERIFIED" : "LOCKED",
         critic: critic ? "VERIFIED" : "LOCKED",
+        selfHosted: selfHostedState,
+        autonomy: autonomyState,
       },
       brain: {
         preferred: brain.configured ? "self-hosted" : "groq-fallback",
