@@ -7,10 +7,10 @@ const CORE_PATHS = [
   "lib/server-memory.ts",
   "lib/server-github.ts",
   "components/khasroy/core.tsx",
-  "app/page.tsx",
 ];
 
 const EXTRA_PATHS = [
+  "app/page.tsx",
   "README.md",
   "app/api/auth/route.ts",
   "lib/chat.ts",
@@ -89,7 +89,7 @@ function queryTerms(query: string) {
     .replace(/[^a-zа-яё0-9_./-]+/giu, " ")
     .split(/\s+/)
     .filter((term) => term.length >= 3)
-    .slice(0, 16);
+    .slice(0, 14);
 }
 
 function scorePath(path: string, terms: string[]) {
@@ -120,11 +120,11 @@ async function githubJson<T>(url: string): Promise<T> {
 
 function compactSource(source: string) {
   const normalized = source.trim();
-  if (normalized.length <= 4_600) return normalized;
+  if (normalized.length <= 2_500) return normalized;
 
-  const head = normalized.slice(0, 3_100);
-  const tail = normalized.slice(-1_300);
-  return `${head}\n\n/* ... middle omitted by Khasroy GitHub reader ... */\n\n${tail}`;
+  const head = normalized.slice(0, 1_650);
+  const tail = normalized.slice(-650);
+  return `${head}\n\n/* ... middle omitted to fit AI context budget ... */\n\n${tail}`;
 }
 
 async function fetchFile(path: string) {
@@ -169,17 +169,12 @@ export async function buildSelfRepositoryContext(query: string): Promise<Reposit
       .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
 
     for (const item of ranked) {
-      if (selected.size >= 7) break;
+      if (selected.size >= 5) break;
       selected.add(item.path);
-    }
-  } else {
-    for (const path of EXTRA_PATHS) {
-      if (selected.size >= 7) break;
-      selected.add(path);
     }
   }
 
-  const candidates = [...selected].slice(0, 7);
+  const candidates = [...selected].slice(0, 5);
   const loaded = await Promise.allSettled(
     candidates.map(async (path) => ({ path, content: await fetchFile(path) })),
   );
@@ -201,17 +196,17 @@ export async function buildSelfRepositoryContext(query: string): Promise<Reposit
     ? entries
         .map((entry) => entry.path)
         .filter((path) => CORE_PATHS.includes(path) || EXTRA_PATHS.includes(path) || path.startsWith("app/api/") || path.startsWith("lib/") || path.startsWith("components/khasroy/"))
-        .slice(0, 60)
+        .slice(0, 35)
         .join("\n")
     : loadedFiles.join("\n");
 
-  const context = `\n\nGITHUB SELF-REPOSITORY CONTEXT\nИсточник: реальные файлы публичного репозитория ${SELF_REPOSITORY}, ветка ${SELF_BRANCH}.\nCommit: ${commit?.sha || "metadata-unavailable"}. Tree SHA: ${tree?.sha || "metadata-unavailable"}.\nФайлы ниже были фактически загружены серверным GitHub-модулем. Часть длинных файлов намеренно сокращена, чтобы не переполнять контекст AI. Не придумывай невидимые части кода.\n\nФАКТИЧЕСКИ ПРОЧИТАННЫЕ ФАЙЛЫ:\n${loadedFiles.map((path) => `- ${path}`).join("\n")}\n\nРелевантное дерево проекта:\n${treePreview}\n${sections.join("\n")}`;
+  const context = `\n\nGITHUB SELF-REPOSITORY CONTEXT\nИсточник: реальные файлы публичного репозитория ${SELF_REPOSITORY}, ветка ${SELF_BRANCH}.\nCommit: ${commit?.sha || "metadata-unavailable"}. Tree SHA: ${tree?.sha || "metadata-unavailable"}.\nФайлы ниже были фактически загружены серверным GitHub-модулем. Длинные файлы сокращены ради лимита контекста. Не придумывай невидимые части кода.\n\nФАКТИЧЕСКИ ПРОЧИТАННЫЕ ФАЙЛЫ:\n${loadedFiles.map((path) => `- ${path}`).join("\n")}\n\nРелевантное дерево проекта:\n${treePreview}\n${sections.join("\n")}`;
 
   return {
     repository: SELF_REPOSITORY,
     branch: SELF_BRANCH,
     commit: commit?.sha || "metadata-unavailable",
     files: loadedFiles,
-    context: context.slice(0, 30_000),
+    context: context.slice(0, 15_000),
   };
 }
