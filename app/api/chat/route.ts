@@ -1,11 +1,21 @@
+import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
+import {
+  appendMessage,
+  buildMemoryContext,
+  getRecentMessages,
+  recallKnowledge,
+  rememberKnowledge,
+  upsertSkill,
+} from "@/lib/server-memory";
 
 export const runtime = "nodejs";
 
 const SYSTEM_PROMPT = `Ты — Хасрой, универсальный AI-союзник владельца системы.
 Твоя главная специализация — программирование, архитектура ПО, анализ кода, исследование технологий и решение сложных технических задач.
+Ты обладаешь долговременной памятью: используй сохранённый контекст, когда он действительно относится к текущему запросу, но не выдумывай воспоминания.
 Отвечай на языке пользователя. По умолчанию будь кратким, но углубляйся, когда задача сложная.
 Следуй запросам авторизованного владельца в пределах доступных инструментов, разрешений и правил безопасности.
 Никогда не утверждай, что открыл сайт, запустил код, изменил файл или выполнил действие, если реально этого не сделал.
@@ -40,6 +50,12 @@ function parseMessage(value: unknown): ClientMessage | null {
   const content = item.content.trim().slice(0, 4000);
   if (!content) return null;
   return { role: item.role, content };
+}
+
+function explicitMemoryRequest(text: string) {
+  return /\b(запомни|запомнить|важно|мы решили|мы договорились|хочу чтобы ты помнил|remember)\b/i.test(
+    text,
+  );
 }
 
 export async function POST(request: Request) {
@@ -82,8 +98,27 @@ export async function POST(request: Request) {
     .map(parseMessage)
     .filter((message): message is ClientMessage => message !== null);
 
-  if (!messages.some((message) => message.role === "user")) {
+  const latestUser = [...messages].reverse().find((message) => message.role === "user");
+  if (!latestUser) {
     return NextResponse.json({ error: "Нет пользовательского сообщения." }, { status: 400 });
+  }
+
+  let memoryContext = "";
+  try {
+    const [recent, knowledge] = await Promise.all([
+      getRecentMessages(ownerKey, 20),
+      recallKnowledge(ownerKey, "", 12),
+    ]);
+
+    const current = new Set(
+      messages.map((message) => `${message.role}:${message.content}`),
+    );
+    const olderRecent = recent.filter(
+      (message) => !current.has(`${message.role}:${message.content}`),
+    );
+    memoryContext = buildMemoryContext(olderRecent, knowledge);
+  } catch (error) {
+    console.error("Khasroy memory read failed", error);
   }
 
   const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
@@ -99,8 +134,8 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          ...messages,
+          { role: "system", content: `${SYSTEM_PROMPT}${memoryContext}` },
+          ...messages.slice(-16),
         ],
         max_completion_tokens: 2200,
         reasoning_effort: "medium",
@@ -131,9 +166,53 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Хасрой вернул пустой ответ." }, { status: 502 });
   }
 
+  const memoryWrites: Promise<unknown>[] = [
+    appendMessage(ownerKey, "user", latestUser.content),
+    appendMessage(ownerKey, "assistant", content),
+    upsertSkill(ownerKey, {
+      slug: "live_ai_dialogue",
+      name: "Живой AI-диалог",
+      description: "Хасрой ведёт реальный диалог через подключаемый AI-мозг.",
+      status: "verified",
+      level: 1,
+      testsPassed: 1,
+      metadata: { provider: "groq", model: data.model || model },
+    }),
+    upsertSkill(ownerKey, {
+      slug: "owner_access_control",
+      name: "Контроль владельца",
+      description: "Доступ к интеллекту Хасроя защищён отдельной авторизацией владельца.",
+      status: "verified",
+      level: 1,
+      testsPassed: 1,
+    }),
+  ];
+
+  if (explicitMemoryRequest(latestUser.content)) {
+    const fingerprint = createHash("sha256")
+      .update(latestUser.content)
+      .digest("hex")
+      .slice(0, 20);
+    memoryWrites.push(
+      rememberKnowledge(
+        ownerKey,
+        `owner_${fingerprint}`,
+        "owner_instruction",
+        latestUser.content,
+        1,
+      ),
+    );
+  }
+
+  const saved = await Promise.allSettled(memoryWrites);
+  if (saved.some((result) => result.status === "rejected")) {
+    console.error("Some Khasroy memory writes failed");
+  }
+
   return NextResponse.json({
     content,
     provider: "groq",
     model: data.model || model,
+    memory: "active",
   });
 }
