@@ -14,13 +14,10 @@ const welcome: Message = {
   id: "welcome",
   role: "assistant",
   content:
-    "Все системы готовы. Я Хасрой — ваш универсальный AI-союзник. У меня активны долговременная память и чтение собственного GitHub-кода. С чего начнём?",
+    "Все системы готовы. Я Хасрой — ваш универсальный AI-союзник. Мои подтверждённые способности хранятся в памяти и напрямую меняют ядро. С чего начнём?",
 };
 
-// Core Evolution grows only from verified capabilities.
-// v0.4 has four confirmed foundations: intelligence, owner protection,
-// long-term memory and verified self-repository reading.
-const coreEvolution: CoreEvolution = {
+const FALLBACK_EVOLUTION: CoreEvolution = {
   level: 4,
   skills: 4,
   knowledge: 0,
@@ -38,6 +35,28 @@ const coreEvolution: CoreEvolution = {
   },
 };
 
+type ModuleState = "VERIFIED" | "LOCKED";
+
+type StatusResponse = {
+  level: number;
+  skills: number;
+  testsPassed: number;
+  capabilities: CoreEvolution["capabilities"];
+  modules: {
+    memory: ModuleState;
+    github: ModuleState;
+    internet: ModuleState;
+    sandbox: ModuleState;
+  };
+};
+
+const FALLBACK_MODULES: StatusResponse["modules"] = {
+  memory: "VERIFIED",
+  github: "VERIFIED",
+  internet: "LOCKED",
+  sandbox: "LOCKED",
+};
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([welcome]);
   const [input, setInput] = useState("");
@@ -48,13 +67,43 @@ export default function Home() {
   const [ownerKey, setOwnerKey] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [evolution, setEvolution] = useState<CoreEvolution>(FALLBACK_EVOLUTION);
+  const [modules, setModules] = useState(FALLBACK_MODULES);
   const pendingMessages = useRef<Message[] | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
 
+  const levelLabel = String(evolution.level).padStart(2, "0");
+
+  async function refreshStatus() {
+    try {
+      const response = await fetch("/api/status", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as StatusResponse;
+      if (!data || typeof data.level !== "number" || !data.capabilities) return;
+      setEvolution({
+        level: data.level,
+        skills: data.skills,
+        knowledge: 0,
+        testsPassed: data.testsPassed,
+        capabilities: data.capabilities,
+      });
+      if (data.modules) setModules(data.modules);
+    } catch {
+      // The visual core keeps its last verified state if status is temporarily unavailable.
+    }
+  }
+
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, busy]);
+
+  useEffect(() => {
+    void refreshStatus();
+  }, []);
 
   async function finishChat(next: Message[]) {
     const content = await chat(next);
@@ -62,6 +111,7 @@ export default function Home() {
       ...next,
       { id: crypto.randomUUID(), role: "assistant", content },
     ]);
+    await refreshStatus();
   }
 
   async function send(value = input) {
@@ -114,6 +164,7 @@ export default function Home() {
 
       setAuthOpen(false);
       setOwnerKey("");
+      await refreshStatus();
       const queued = pendingMessages.current;
       pendingMessages.current = null;
 
@@ -159,51 +210,30 @@ export default function Home() {
             <Activity size={14} /> SYSTEM STATUS
           </div>
           <dl>
-            <div>
-              <dt>Ядро</dt>
-              <dd>Активно</dd>
-            </div>
-            <div>
-              <dt>Режим</dt>
-              <dd>Облачный</dd>
-            </div>
-            <div>
-              <dt>AI-модель</dt>
-              <dd>GPT-OSS 120B</dd>
-            </div>
-            <div>
-              <dt>Память</dt>
-              <dd>VERIFIED</dd>
-            </div>
-            <div>
-              <dt>GitHub</dt>
-              <dd>VERIFIED</dd>
-            </div>
-            <div>
-              <dt>Эволюция</dt>
-              <dd>LEVEL 04</dd>
-            </div>
+            <div><dt>Ядро</dt><dd>Активно</dd></div>
+            <div><dt>Режим</dt><dd>Brain Router</dd></div>
+            <div><dt>Память</dt><dd>{modules.memory}</dd></div>
+            <div><dt>GitHub</dt><dd>{modules.github}</dd></div>
+            <div><dt>Интернет</dt><dd>{modules.internet}</dd></div>
+            <div><dt>Sandbox</dt><dd>{modules.sandbox}</dd></div>
+            <div><dt>Эволюция</dt><dd>LEVEL {levelLabel}</dd></div>
           </dl>
           <div className="signal">
-            {Array.from({ length: 24 }, (_, i) => (
-              <i key={i} />
-            ))}
+            {Array.from({ length: 24 }, (_, i) => <i key={i} />)}
           </div>
-          <p>4 VERIFIED CAPABILITIES</p>
+          <p>{evolution.skills} VERIFIED CAPABILITIES</p>
         </aside>
 
         <div className="core-wrap">
           <Core
             state={busy ? "thinking" : focused ? "listening" : "idle"}
-            evolution={coreEvolution}
+            evolution={evolution}
           />
           <span className="core-coordinate coord-left">
-            CORE EVOLUTION
-            <br />LEVEL 04
+            CORE EVOLUTION<br />LEVEL {levelLabel}
           </span>
           <span className="core-coordinate coord-right">
-            {busy ? "PROCESSING" : "STANDBY"}
-            <br />● ACTIVE
+            {busy ? "PROCESSING" : "STANDBY"}<br />● ACTIVE
           </span>
         </div>
 
@@ -213,12 +243,12 @@ export default function Home() {
               ? "АНАЛИЗИРУЮ ЗАПРОС"
               : focused
                 ? "СЛУШАЮ ВЛАДЕЛЬЦА"
-                : "НА СВЯЗИ. MEMORY + GITHUB ACTIVE."}
+                : "НА СВЯЗИ. VERIFIED CORE ACTIVE."}
           </span>
           <h1>Мысль. Код. Развитие.</h1>
-          <p>Каждая подтверждённая способность меняет ядро.</p>
+          <p>Ядро строится из реально подтверждённых навыков.</p>
         </div>
-        <div className="stage-index">04 / CORE EVOLUTION</div>
+        <div className="stage-index">{levelLabel} / CORE EVOLUTION</div>
       </section>
 
       <section className="chat" aria-label="Чат с «Хасрой»">
@@ -263,10 +293,7 @@ export default function Home() {
           ))}
           {busy && (
             <div className="typing" role="status">
-              <i />
-              <i />
-              <i />
-              <span>Хасрой думает</span>
+              <i /><i /><i /><span>Хасрой думает</span>
             </div>
           )}
           <div ref={bottom} />
@@ -274,22 +301,17 @@ export default function Home() {
 
         {messages.length === 1 && !busy && (
           <div className="suggestions">
-            {["Что ты помнишь?", "Изучи свой собственный код", "Помоги написать код"].map(
+            {["Найди свежие новости об ИИ", "Изучи свой собственный код", "Запусти Python и вычисли √101"].map(
               (text) => (
                 <button key={text} onClick={() => send(text)}>
-                  {text}
-                  <span>↗</span>
+                  {text}<span>↗</span>
                 </button>
               ),
             )}
           </div>
         )}
 
-        {error && (
-          <p role="alert" className="error">
-            {error}
-          </p>
-        )}
+        {error && <p role="alert" className="error">{error}</p>}
 
         <form
           className="composer"
@@ -309,11 +331,7 @@ export default function Home() {
             onBlur={() => setFocused(false)}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                !event.shiftKey &&
-                !event.nativeEvent.isComposing
-              ) {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 send();
               }
@@ -330,14 +348,14 @@ export default function Home() {
         </form>
 
         <div className="chat-footer">
-          <span>LIVE AI · MEMORY VERIFIED · GITHUB VERIFIED · Доступ владельца</span>
+          <span>LIVE AI · DYNAMIC VERIFIED CORE · Доступ владельца</span>
           <span>Enter — отправить ↵</span>
         </div>
       </section>
 
       <footer className="page-footer">
         <span>Хасрой LAB / v0.4</span>
-        <span>CORE EVOLUTION / LEVEL 04</span>
+        <span>CORE EVOLUTION / LEVEL {levelLabel}</span>
       </footer>
 
       {authOpen && (
