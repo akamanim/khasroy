@@ -1,3 +1,8 @@
+import {
+  getSelfHostedConfig,
+  selfHostedChat,
+} from "@/lib/brain/providers/self-hosted";
+
 export type CriticMode = "repository" | "sandbox" | "research" | "agentic" | "technical";
 
 export type CriticResult = {
@@ -63,6 +68,27 @@ async function callCritic(args: {
   user: string;
   maxCompletion: number;
 }) {
+  if (getSelfHostedConfig()) {
+    const local = await selfHostedChat({
+      messages: [
+        { role: "system", content: args.system },
+        { role: "user", content: args.user },
+      ],
+      maxTokens: args.maxCompletion,
+      temperature: 0.1,
+    });
+
+    const raw = local?.data?.choices?.[0]?.message?.content?.trim() || "";
+    const parsed = raw ? extractJson(raw) : null;
+    if (local?.response.ok && parsed) {
+      return {
+        response: local.response,
+        data: local.data as CriticApiResponse,
+        parsed,
+      };
+    }
+  }
+
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
