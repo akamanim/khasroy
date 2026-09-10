@@ -7,6 +7,11 @@ import {
   shouldReadSelfRepository,
 } from "@/lib/server-github";
 import {
+  runBrain,
+  usedCodeInterpreter,
+  usedWebTool,
+} from "@/lib/brain/router";
+import {
   appendMessage,
   buildMemoryContext,
   getRecentMessages,
@@ -33,20 +38,6 @@ type ClientMessage = {
   content: string;
 };
 
-type GroqResponse = {
-  model?: string;
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-    };
-  }>;
-  error?: {
-    message?: string;
-    type?: string;
-    code?: string;
-  };
-};
-
 function parseMessage(value: unknown): ClientMessage | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Record<string, unknown>;
@@ -61,32 +52,6 @@ function explicitMemoryRequest(text: string) {
   return /(запомни|запомнить|важно|мы решили|мы договорились|хочу чтобы ты помнил|remember)/iu.test(
     text,
   );
-}
-
-async function requestGroq(
-  apiKey: string,
-  model: string,
-  systemContent: string,
-  history: ClientMessage[],
-  options: { maxCompletion: number; reasoning: "low" | "medium" },
-) {
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "system", content: systemContent }, ...history],
-      max_completion_tokens: options.maxCompletion,
-      reasoning_effort: options.reasoning,
-      stream: false,
-    }),
-  });
-
-  const data = (await response.json().catch(() => null)) as GroqResponse | null;
-  return { response, data };
 }
 
 export async function POST(request: Request) {
@@ -171,46 +136,50 @@ export async function POST(request: Request) {
     }
   }
 
-  const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
-  const primaryMemory = repositoryRead ? memoryContext.slice(0, 5_000) : memoryContext;
-  const primaryHistory = repositoryRead ? messages.slice(-6) : messages.slice(-16);
-  const primarySystem = `${SYSTEM_PROMPT}${primaryMemory}${repositoryContext}`;
+  const defaultModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+  const memoryForBrain = repositoryRead ? memoryContext.slice(0, 5_000) : memoryContext;
+  const systemContent = `${SYSTEM_PROMPT}${memoryForBrain}${repositoryContext}`;
 
-  let groq: Awaited<ReturnType<typeof requestGroq>>;
+  let brain: Awaited<ReturnType<typeof runBrain>>;
   try {
-    groq = await requestGroq(apiKey, model, primarySystem, primaryHistory, {
-      maxCompletion: repositoryRead ? 1_100 : 2_200,
-      reasoning: repositoryRead ? "low" : "medium",
+    brain = await runBrain({
+      apiKey,
+      defaultModel,
+      systemContent,
+      history: messages,
+      query: latestUser.content,
+      repositoryRead,
     });
-
-    // Public/free providers can reject a large coding context even when the
-    // model itself supports a much larger window. Retry once with a smaller
-    // real repository excerpt instead of failing the whole chat.
-    if (!groq.response.ok && repositoryRead && groq.response.status !== 429) {
-      const fallbackSystem = `${SYSTEM_PROMPT}${memoryContext.slice(0, 1_800)}${repositoryContext.slice(0, 7_500)}`;
-      groq = await requestGroq(apiKey, model, fallbackSystem, messages.slice(-4), {
-        maxCompletion: 800,
-        reasoning: "low",
-      });
-    }
-  } catch {
+  } catch (error) {
+    console.error("Khasroy Brain Router failed", error);
     return NextResponse.json(
       { error: "Не удалось связаться с AI-сервисом." },
       { status: 502 },
     );
   }
 
-  const { response: upstream, data } = groq;
+  const { response: upstream, data } = brain;
 
   if (!upstream.ok || !data) {
-    console.error("Groq API error", upstream.status, data?.error?.type, data?.error?.code);
+    console.error(
+      "Brain API error",
+      brain.mode,
+      upstream.status,
+      data?.error?.type,
+      data?.error?.code,
+    );
+
     const status = upstream.status === 429 ? 429 : 502;
     const error =
       upstream.status === 429
-        ? repositoryRead
-          ? "GitHub-код прочитан, но достигнут временный бесплатный лимит Groq. Подождите около минуты и повторите запрос."
+        ? brain.mode === "repository"
+          ? "GitHub-код прочитан, но достигнут временный бесплатный лимит AI. Подождите около минуты и повторите запрос."
           : "Временный бесплатный лимит AI исчерпан. Попробуйте немного позже."
-        : "AI-сервис временно недоступен или неверно настроен.";
+        : brain.mode === "research" || brain.mode === "agentic"
+          ? "Интернет-модуль временно недоступен. Попробуйте ещё раз чуть позже."
+          : brain.mode === "sandbox"
+            ? "Облачная песочница временно недоступна."
+            : "AI-сервис временно недоступен или неверно настроен.";
     return NextResponse.json({ error }, { status });
   }
 
@@ -218,6 +187,9 @@ export async function POST(request: Request) {
   if (!content) {
     return NextResponse.json({ error: "Хасрой вернул пустой ответ." }, { status: 502 });
   }
+
+  const webVerified = usedWebTool(brain);
+  const sandboxVerified = usedCodeInterpreter(brain);
 
   const memoryWrites: Promise<unknown>[] = [
     appendMessage(ownerKey, "user", latestUser.content),
@@ -229,7 +201,7 @@ export async function POST(request: Request) {
       status: "verified",
       level: 1,
       testsPassed: 1,
-      metadata: { provider: "groq", model: data.model || model },
+      metadata: { provider: brain.provider, model: brain.model },
     }),
     upsertSkill(ownerKey, {
       slug: "owner_access_control",
@@ -260,6 +232,42 @@ export async function POST(request: Request) {
     );
   }
 
+  if (webVerified) {
+    memoryWrites.push(
+      upsertSkill(ownerKey, {
+        slug: "internet_research",
+        name: "Интернет-исследование",
+        description: "Хасрой использует реальный веб-поиск или посещение сайта и отвечает на основе найденных источников.",
+        status: "verified",
+        level: 1,
+        testsPassed: 1,
+        metadata: {
+          provider: brain.provider,
+          model: brain.model,
+          sources: brain.sources,
+        },
+      }),
+    );
+  }
+
+  if (sandboxVerified) {
+    memoryWrites.push(
+      upsertSkill(ownerKey, {
+        slug: "cloud_code_sandbox",
+        name: "Облачная песочница кода",
+        description: "Хасрой может запускать Python-код в изолированной облачной среде для вычислений и проверки решений.",
+        status: "verified",
+        level: 1,
+        testsPassed: 1,
+        metadata: {
+          provider: brain.provider,
+          model: brain.model,
+          environment: "groq_compound_code_interpreter",
+        },
+      }),
+    );
+  }
+
   if (explicitMemoryRequest(latestUser.content)) {
     const fingerprint = createHash("sha256")
       .update(latestUser.content)
@@ -284,11 +292,15 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     content,
-    provider: "groq",
-    model: data.model || model,
+    provider: brain.provider,
+    model: brain.model,
+    brainMode: brain.mode,
     memory: memoryRead && memoryWrite ? "active" : "error",
     github: repositoryRead ? "active" : "idle",
     githubCommit: repositoryRead ? repositoryCommit : undefined,
     githubFiles: repositoryRead ? repositoryFiles : undefined,
+    internet: webVerified ? "verified" : "idle",
+    sandbox: sandboxVerified ? "verified" : "idle",
+    sources: webVerified ? brain.sources : undefined,
   });
 }
