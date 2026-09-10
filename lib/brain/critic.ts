@@ -190,15 +190,12 @@ ${evidence || "Дополнительных доказательств не пе
       : "";
 
   if (!repair.response.ok || !repair.parsed || !repairedAnswer) {
-    // The review itself was valid, so Critic did run. If the repair call fails,
-    // do not silently pretend the draft was verified. Return a concise warning
-    // with the original answer so the owner can see what the critic found.
-    const warning = `\n\n---\nПроверка Хасроя обнаружила возможную ошибку:\n${issues
+    const warning = `\n\n---\nПроверка Хасроя обнаружила возможную ошибку, но автоматическое исправление не завершилось:\n${issues
       .map((issue) => `- ${issue}`)
       .join("\n")}`;
 
     return {
-      ran: true,
+      ran: false,
       passed: false,
       revised: true,
       answer: `${args.answer}${warning}`,
