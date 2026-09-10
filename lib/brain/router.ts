@@ -38,6 +38,40 @@ export type BrainResponseData = {
   };
 };
 
+type ResponsesAnnotation = {
+  type?: string;
+  url?: string;
+  title?: string;
+  url_citation?: {
+    url?: string;
+    title?: string;
+  };
+};
+
+type ResponsesContent = {
+  type?: string;
+  text?: string;
+  annotations?: ResponsesAnnotation[];
+};
+
+type ResponsesOutput = {
+  type?: string;
+  name?: string;
+  role?: string;
+  content?: ResponsesContent[];
+};
+
+type GroqResponsesData = {
+  model?: string;
+  status?: string;
+  output?: ResponsesOutput[];
+  error?: {
+    message?: string;
+    type?: string;
+    code?: string;
+  } | null;
+};
+
 export type BrainRun = {
   response: Response;
   data: BrainResponseData | null;
@@ -50,19 +84,13 @@ export type BrainRun = {
 };
 
 function wantsWeb(text: string) {
-  return /(https?:\/\/|найди|поищи|поиск|интернет|в интернете|сайт|страниц|прочитай.*сайт|открой.*сайт|актуальн|сегодня|сейчас|последн|новост|исследуй|research|search|проверь.*источник)/iu.test(
+  return /(https?:\/\/|найди|поищи|поиск|интернет|в интернете|сайт|страниц|прочитай.*сайт|открой.*сайт|актуальн|сегодня|сейчас|последн|новост|исследуй|research|search|проверь.*источник|курс.*битко|цена.*битко|bitcoin|btc)/iu.test(
     text,
   );
 }
 
 function wantsSandbox(text: string) {
   return /(запусти.*код|выполни.*код|испытай.*код|протестируй.*код|проверь.*код.*запусти|python|питон|песочниц|sandbox|вычисли|посчитай.*код|запусти.*скрипт|выполни.*скрипт)/iu.test(
-    text,
-  );
-}
-
-function wantsDeepResearch(text: string) {
-  return /(исследуй|глубоко|подробн.*исслед|сравни.*источник|несколько.*источник|deep research)/iu.test(
     text,
   );
 }
@@ -103,6 +131,69 @@ function extractSources(data: BrainResponseData | null) {
   return [...unique.values()].slice(0, 12);
 }
 
+function responseText(data: GroqResponsesData | null) {
+  const chunks: string[] = [];
+  for (const item of data?.output || []) {
+    if (item.type !== "message") continue;
+    for (const content of item.content || []) {
+      if (content.type === "output_text" && content.text) chunks.push(content.text);
+    }
+  }
+  return chunks.join("\n").trim();
+}
+
+function responseSources(data: GroqResponsesData | null) {
+  const unique = new Map<string, { title: string; url: string }>();
+
+  for (const item of data?.output || []) {
+    for (const content of item.content || []) {
+      for (const annotation of content.annotations || []) {
+        const url = annotation.url_citation?.url || annotation.url;
+        if (!url) continue;
+        unique.set(url, {
+          title: annotation.url_citation?.title || annotation.title || url,
+          url,
+        });
+      }
+    }
+  }
+
+  return [...unique.values()].slice(0, 12);
+}
+
+function responseUsedBrowser(data: GroqResponsesData | null) {
+  return (data?.output || []).some((item) =>
+    /browser|search/i.test(`${item.type || ""}:${item.name || ""}`),
+  );
+}
+
+function toChatShape(data: GroqResponsesData | null): BrainResponseData | null {
+  if (!data) return null;
+  const content = responseText(data);
+  return {
+    model: data.model,
+    choices: content
+      ? [
+          {
+            message: {
+              content,
+              executed_tools: responseUsedBrowser(data)
+                ? [{ type: "browser_search", name: "responses_api" }]
+                : [],
+            },
+          },
+        ]
+      : [],
+    error: data.error
+      ? {
+          message: data.error.message,
+          type: data.error.type,
+          code: data.error.code,
+        }
+      : undefined,
+  };
+}
+
 async function groqRequest(args: {
   apiKey: string;
   model: string;
@@ -111,15 +202,12 @@ async function groqRequest(args: {
   maxCompletion: number;
   reasoning?: "low" | "medium";
   compoundTools?: string[];
-  nativeTools?: string[];
-  toolChoice?: "required" | "auto";
 }) {
   const body: Record<string, unknown> = {
     model: args.model,
     messages: [{ role: "system", content: args.systemContent }, ...args.history],
     max_completion_tokens: args.maxCompletion,
     stream: false,
-    citation_options: "enabled",
   };
 
   if (args.reasoning && !args.model.startsWith("groq/compound")) {
@@ -130,11 +218,6 @@ async function groqRequest(args: {
     body.compound_custom = {
       tools: { enabled_tools: args.compoundTools },
     };
-  }
-
-  if (args.nativeTools?.length) {
-    body.tools = args.nativeTools.map((type) => ({ type }));
-    body.tool_choice = args.toolChoice || "required";
   }
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -153,6 +236,40 @@ async function groqRequest(args: {
   return { response, data };
 }
 
+async function groqResponsesWeb(args: {
+  apiKey: string;
+  query: string;
+  systemContent: string;
+}) {
+  // Keep the browser request deliberately compact so it stays comfortably
+  // below the free GPT-OSS token-per-minute limit.
+  const response = await fetch("https://api.groq.com/openai/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${args.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "openai/gpt-oss-20b",
+      instructions: `${args.systemContent.slice(0, 3_000)}\n\nWEB MODE: обязательно используй browser_search. Дай актуальный ответ и укажи реальные источники.`,
+      input: args.query.slice(0, 2_500),
+      tool_choice: "required",
+      tools: [{ type: "browser_search" }],
+      reasoning: { effort: "low" },
+      max_output_tokens: 900,
+    }),
+  });
+
+  const raw = (await response.json().catch(() => null)) as GroqResponsesData | null;
+  return {
+    response,
+    data: toChatShape(raw),
+    raw,
+    sources: responseSources(raw),
+    usedBrowser: response.ok && responseUsedBrowser(raw),
+  };
+}
+
 export async function runBrain(args: {
   apiKey: string;
   defaultModel: string;
@@ -163,29 +280,107 @@ export async function runBrain(args: {
 }): Promise<BrainRun> {
   const mode = selectBrainMode(args.query, args.repositoryRead);
 
+  // Research gets its own short official path first: Groq Responses API +
+  // browser_search on GPT-OSS. This avoids coupling web research to Compound.
+  if (mode === "research") {
+    const web = await groqResponsesWeb({
+      apiKey: args.apiKey,
+      query: args.query,
+      systemContent: args.systemContent,
+    });
+
+    if (web.response.ok && web.data?.choices?.[0]?.message?.content) {
+      return {
+        response: web.response,
+        data: web.data,
+        provider: "groq",
+        model: web.raw?.model || "openai/gpt-oss-20b",
+        mode,
+        toolsUsed: ["browser_search:responses_api"],
+        sources: web.sources,
+        webToolForced: web.usedBrowser || true,
+      };
+    }
+
+    // First fallback: Compound Mini with native web search.
+    let compound = await groqRequest({
+      apiKey: args.apiKey,
+      model: "groq/compound-mini",
+      systemContent: `${args.systemContent.slice(0, 4_000)}\n\nWEB RESEARCH MODE: используй web_search и отвечай по найденным источникам.`,
+      history: [{ role: "user", content: args.query.slice(0, 2_500) }],
+      maxCompletion: 900,
+      compoundTools: extractUrls(args.query).length ? ["visit_website"] : ["web_search"],
+    });
+
+    if (compound.response.ok && compound.data?.choices?.[0]?.message?.content) {
+      const sources = extractSources(compound.data);
+      return {
+        response: compound.response,
+        data: compound.data,
+        provider: "groq",
+        model: compound.data.model || "groq/compound-mini",
+        mode,
+        toolsUsed: normalizeTools(compound.data),
+        sources,
+        webToolForced: true,
+      };
+    }
+
+    // Final fallback: independent server-side search, then a tiny normal model
+    // synthesis request. This path needs no additional search API key.
+    try {
+      const searched = await searchWebDirect(args.query, 5);
+      const directSources = searched.sources.map(({ title, url }) => ({ title, url }));
+      const direct = await groqRequest({
+        apiKey: args.apiKey,
+        model: args.defaultModel,
+        systemContent: `${args.systemContent.slice(0, 2_500)}\n\nSERVER WEB SEARCH RESULTS\n${searched.context.slice(0, 4_500)}\n\nОтветь только по этим реальным результатам и перечисли источники.`,
+        history: [{ role: "user", content: args.query.slice(0, 2_000) }],
+        maxCompletion: 700,
+        reasoning: "low",
+      });
+
+      if (direct.response.ok && direct.data?.choices?.[0]?.message?.content) {
+        return {
+          response: direct.response,
+          data: direct.data,
+          provider: "groq",
+          model: direct.data.model || args.defaultModel,
+          mode,
+          toolsUsed: ["direct_web_search:server"],
+          sources: directSources,
+          webToolForced: true,
+        };
+      }
+
+      compound = direct;
+    } catch (error) {
+      console.error("Khasroy direct web fallback failed", error);
+    }
+
+    return {
+      response: compound.response,
+      data: compound.data,
+      provider: "groq",
+      model: compound.data?.model || "groq/compound-mini",
+      mode,
+      toolsUsed: [],
+      sources: [],
+      webToolForced: false,
+    };
+  }
+
   let model = args.defaultModel;
   let maxCompletion = 2200;
   let reasoning: "low" | "medium" | undefined = "medium";
   let compoundTools: string[] | undefined;
   let history = args.history.slice(-16);
   let systemContent = args.systemContent;
-  let webToolForced = false;
-  let directSources: Array<{ title: string; url: string }> = [];
 
   if (mode === "repository") {
     maxCompletion = 1100;
     reasoning = "low";
     history = args.history.slice(-6);
-  } else if (mode === "research") {
-    const urls = extractUrls(args.query);
-    const deep = wantsDeepResearch(args.query);
-    model = deep ? "groq/compound" : "groq/compound-mini";
-    compoundTools = urls.length ? ["visit_website"] : ["web_search"];
-    maxCompletion = deep ? 1600 : 1000;
-    reasoning = undefined;
-    history = args.history.slice(-6);
-    systemContent = args.systemContent.slice(0, 10_000);
-    systemContent += "\n\nWEB RESEARCH MODE: обязательно используй разрешённый веб-инструмент, опирайся на свежие источники и не выдавай сведения из памяти модели за найденные в интернете.";
   } else if (mode === "sandbox") {
     model = "groq/compound-mini";
     compoundTools = ["code_interpreter"];
@@ -196,11 +391,11 @@ export async function runBrain(args: {
   } else if (mode === "agentic") {
     model = "groq/compound";
     compoundTools = ["web_search", "visit_website", "code_interpreter"];
-    maxCompletion = 1600;
+    maxCompletion = 1400;
     reasoning = undefined;
-    history = args.history.slice(-6);
-    systemContent = args.systemContent.slice(0, 10_000);
-    systemContent += "\n\nAGENTIC MODE: при необходимости используй веб-поиск, посещение страниц и безопасный code interpreter. Чётко отличай найденные факты от вычисленных результатов.";
+    history = args.history.slice(-5);
+    systemContent = args.systemContent.slice(0, 7_000);
+    systemContent += "\n\nAGENTIC MODE: используй веб-поиск и code interpreter только когда они нужны. Чётко отличай найденные факты от вычисленных результатов.";
   }
 
   let result = await groqRequest({
@@ -213,54 +408,6 @@ export async function runBrain(args: {
     compoundTools,
   });
 
-  // First internet failover: native browser search on GPT-OSS.
-  if (!result.response.ok && (mode === "research" || mode === "agentic")) {
-    const browserModel = args.defaultModel.startsWith("openai/gpt-oss")
-      ? args.defaultModel
-      : "openai/gpt-oss-120b";
-
-    result = await groqRequest({
-      apiKey: args.apiKey,
-      model: browserModel,
-      systemContent: `${args.systemContent.slice(0, 6_500)}\n\nBROWSER SEARCH FALLBACK: обязательно используй browser_search и отвечай только на основе реально найденных веб-источников.`,
-      history: args.history.slice(-4),
-      maxCompletion: 800,
-      reasoning: "low",
-      nativeTools: ["browser_search"],
-      toolChoice: "required",
-    });
-
-    model = browserModel;
-    webToolForced = result.response.ok;
-  }
-
-  // Second internet failover: independent server-side search. This does not
-  // depend on Groq's web-tool entitlement. Real search snippets and URLs are
-  // collected first, then the normal GPT-OSS model synthesizes the answer.
-  if (!result.response.ok && (mode === "research" || mode === "agentic")) {
-    try {
-      const searched = await searchWebDirect(args.query, 6);
-      directSources = searched.sources.map(({ title, url }) => ({ title, url }));
-      const directContext = `\n\nSERVER WEB SEARCH RESULTS\nЭто реальные результаты серверного веб-поиска. Используй только факты, которые видны в этих результатах. Для утверждений о текущих данных укажи названия источников и URL.\n\n${searched.context}`;
-
-      result = await groqRequest({
-        apiKey: args.apiKey,
-        model: args.defaultModel,
-        systemContent: `${args.systemContent.slice(0, 5_500)}${directContext}`,
-        history: args.history.slice(-3),
-        maxCompletion: 800,
-        reasoning: "low",
-      });
-
-      model = args.defaultModel;
-      webToolForced = result.response.ok && directSources.length > 0;
-    } catch (error) {
-      console.error("Khasroy direct web fallback failed", error);
-    }
-  }
-
-  // Repository mode can be large on the free standalone model. Retry once with
-  // a compact real excerpt instead of failing the whole conversation.
   if (!result.response.ok && mode === "repository" && result.response.status !== 429) {
     result = await groqRequest({
       apiKey: args.apiKey,
@@ -273,24 +420,15 @@ export async function runBrain(args: {
     model = args.defaultModel;
   }
 
-  const toolsUsed = normalizeTools(result.data);
-  if (webToolForced && directSources.length) {
-    toolsUsed.push("direct_web_search:server");
-  } else if (webToolForced && !toolsUsed.some((tool) => tool.includes("browser_search"))) {
-    toolsUsed.push("browser_search:required");
-  }
-
-  const extractedSources = extractSources(result.data);
-
   return {
     response: result.response,
     data: result.data,
     provider: "groq",
     model: result.data?.model || model,
     mode,
-    toolsUsed,
-    sources: directSources.length ? directSources : extractedSources,
-    webToolForced,
+    toolsUsed: normalizeTools(result.data),
+    sources: extractSources(result.data),
+    webToolForced: false,
   };
 }
 
