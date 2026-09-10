@@ -104,6 +104,7 @@ export async function POST(request: Request) {
   }
 
   let memoryContext = "";
+  let memoryRead = false;
   try {
     const [recent, knowledge] = await Promise.all([
       getRecentMessages(ownerKey, 20),
@@ -117,6 +118,7 @@ export async function POST(request: Request) {
       (message) => !current.has(`${message.role}:${message.content}`),
     );
     memoryContext = buildMemoryContext(olderRecent, knowledge);
+    memoryRead = true;
   } catch (error) {
     console.error("Khasroy memory read failed", error);
   }
@@ -205,7 +207,8 @@ export async function POST(request: Request) {
   }
 
   const saved = await Promise.allSettled(memoryWrites);
-  if (saved.some((result) => result.status === "rejected")) {
+  const memoryWrite = saved.every((result) => result.status === "fulfilled");
+  if (!memoryWrite) {
     console.error("Some Khasroy memory writes failed");
   }
 
@@ -213,6 +216,6 @@ export async function POST(request: Request) {
     content,
     provider: "groq",
     model: data.model || model,
-    memory: "active",
+    memory: memoryRead && memoryWrite ? "active" : "error",
   });
 }
