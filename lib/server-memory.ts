@@ -1,5 +1,3 @@
-import "server-only";
-
 const MEMORY_ENDPOINT =
   process.env.KHASROY_MEMORY_ENDPOINT ||
   "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-memory";
