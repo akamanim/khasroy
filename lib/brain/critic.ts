@@ -53,7 +53,38 @@ function normalizeNotes(value: unknown) {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean)
-    .slice(0, 5);
+    .slice(0, 6);
+}
+
+async function callCritic(args: {
+  apiKey: string;
+  model: string;
+  system: string;
+  user: string;
+  maxCompletion: number;
+}) {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${args.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: args.model,
+      messages: [
+        { role: "system", content: args.system },
+        { role: "user", content: args.user },
+      ],
+      max_completion_tokens: args.maxCompletion,
+      reasoning_effort: "low",
+      stream: false,
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  const data = (await response.json().catch(() => null)) as CriticApiResponse | null;
+  const raw = data?.choices?.[0]?.message?.content?.trim() || "";
+  return { response, data, parsed: raw ? extractJson(raw) : null };
 }
 
 export async function runCritic(args: {
@@ -65,93 +96,123 @@ export async function runCritic(args: {
 }): Promise<CriticResult> {
   const model = process.env.GROQ_CRITIC_MODEL || "openai/gpt-oss-20b";
   const evidence = (args.evidence || "").slice(0, 5_000);
-  const answer = args.answer.slice(0, 8_000);
+  const draft = args.answer.slice(0, 10_000);
 
-  const system = `Ты — независимый технический критик Хасроя.
-Твоя задача — проверить черновой ответ перед показом владельцу.
-Проверяй только то, что реально можно проверить из запроса и переданных доказательств.
-Не придумывай ошибки ради критики. Если ответ корректен — оставь его.
-Если есть фактическая, логическая или техническая ошибка — исправь её.
-Не раскрывай секреты, API-ключи и внутренние токены.
+  const reviewSystem = `Ты — независимый технический критик Хасроя.
+Проверь черновой ответ до показа владельцу.
+Ищи только реальные фактические, логические, алгоритмические и технические ошибки.
+Особенно проверяй код, граничные случаи, сложность алгоритма и утверждения о том, что решение было реально запущено/проверено.
+Не придумывай ошибки ради критики.
 
-Верни ТОЛЬКО JSON без markdown в формате:
-{"passed":true|false,"revised":true|false,"answer":"финальный ответ пользователю","notes":["краткая причина"]}
+Верни ТОЛЬКО компактный JSON:
+{"passed":true|false,"issues":["конкретная ошибка и как её исправить"]}
 
-passed=true означает, что финальный answer пригоден к отправке владельцу.
-revised=true только если ты реально изменил исходный ответ.`;
+Если существенных ошибок нет, верни passed=true и пустой issues.`;
 
-  const user = `Режим: ${args.mode}
+  const reviewUser = `Режим: ${args.mode}
 Запрос владельца:
 ${args.query.slice(0, 3_500)}
 
 Черновой ответ Хасроя:
-${answer}
+${draft}
 
 Проверяемые доказательства/контекст:
 ${evidence || "Дополнительных доказательств не передано."}`;
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${args.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      max_completion_tokens: 850,
-      reasoning_effort: "low",
-      stream: false,
-    }),
+  const review = await callCritic({
+    apiKey: args.apiKey,
+    model,
+    system: reviewSystem,
+    user: reviewUser,
+    maxCompletion: 500,
   });
 
-  if (!response.ok) {
+  if (!review.response.ok || !review.parsed) {
     return {
       ran: false,
       passed: true,
       revised: false,
       answer: args.answer,
-      notes: [`critic_http_${response.status}`],
+      notes: [
+        !review.response.ok
+          ? `critic_review_http_${review.response.status}`
+          : "critic_review_invalid_json",
+      ],
+      model: review.data?.model || model,
     };
   }
 
-  const data = (await response.json().catch(() => null)) as CriticApiResponse | null;
-  const raw = data?.choices?.[0]?.message?.content?.trim();
-  if (!raw) {
+  const issues = normalizeNotes(review.parsed.issues);
+  const reviewPassed = review.parsed.passed !== false && issues.length === 0;
+
+  if (reviewPassed) {
     return {
-      ran: false,
+      ran: true,
       passed: true,
       revised: false,
       answer: args.answer,
-      notes: ["critic_empty_response"],
+      notes: [],
+      model: review.data?.model || model,
     };
   }
 
-  const parsed = extractJson(raw);
-  if (!parsed) {
+  const repairSystem = `Ты — редактор технического ответа Хасроя.
+Независимый критик уже нашёл конкретные ошибки.
+Исправь только реальные ошибки, сохрани полезную часть исходного ответа и не добавляй неподтверждённых утверждений.
+Если исходный ответ говорил, что код был реально выполнен, но доказательства этого нет — замени это на честное описание статической/логической проверки.
+
+Верни ТОЛЬКО JSON:
+{"answer":"полностью исправленный финальный ответ владельцу"}`;
+
+  const repairUser = `Запрос владельца:
+${args.query.slice(0, 3_500)}
+
+Исходный ответ:
+${draft}
+
+Ошибки, найденные критиком:
+${issues.map((issue, index) => `${index + 1}. ${issue}`).join("\n")}
+
+Доказательства/контекст:
+${evidence || "Дополнительных доказательств не передано."}`;
+
+  const repair = await callCritic({
+    apiKey: args.apiKey,
+    model,
+    system: repairSystem,
+    user: repairUser,
+    maxCompletion: 1_800,
+  });
+
+  const repairedAnswer =
+    typeof repair.parsed?.answer === "string" && repair.parsed.answer.trim()
+      ? repair.parsed.answer.trim()
+      : "";
+
+  if (!repair.response.ok || !repair.parsed || !repairedAnswer) {
+    // The review itself was valid, so Critic did run. If the repair call fails,
+    // do not silently pretend the draft was verified. Return a concise warning
+    // with the original answer so the owner can see what the critic found.
+    const warning = `\n\n---\nПроверка Хасроя обнаружила возможную ошибку:\n${issues
+      .map((issue) => `- ${issue}`)
+      .join("\n")}`;
+
     return {
-      ran: false,
-      passed: true,
-      revised: false,
-      answer: args.answer,
-      notes: ["critic_invalid_json"],
+      ran: true,
+      passed: false,
+      revised: true,
+      answer: `${args.answer}${warning}`,
+      notes: issues,
+      model: review.data?.model || model,
     };
   }
-
-  const finalAnswer =
-    typeof parsed.answer === "string" && parsed.answer.trim()
-      ? parsed.answer.trim()
-      : args.answer;
 
   return {
     ran: true,
-    passed: parsed.passed !== false,
-    revised: parsed.revised === true && finalAnswer !== args.answer,
-    answer: finalAnswer,
-    notes: normalizeNotes(parsed.notes),
-    model: data?.model || model,
+    passed: true,
+    revised: repairedAnswer !== args.answer,
+    answer: repairedAnswer,
+    notes: issues,
+    model: repair.data?.model || review.data?.model || model,
   };
 }
