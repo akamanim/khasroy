@@ -22,6 +22,18 @@ type KnowledgeItem = {
   updated_at: string;
 };
 
+export type SkillItem = {
+  slug: string;
+  name: string;
+  description: string;
+  status: "learning" | "verified" | "disabled";
+  level: number;
+  tests_passed: number;
+  tests_failed: number;
+  metadata: Record<string, unknown>;
+  updated_at: string;
+};
+
 async function memoryCall<T>(body: Record<string, unknown>): Promise<T> {
   const response = await fetch(MEMORY_ENDPOINT, {
     method: "POST",
@@ -131,6 +143,13 @@ export async function upsertSkill(
     action: "upsert_skill",
     ownerKey,
     ...skill,
+  });
+}
+
+export async function getSkills(ownerKey: string): Promise<SkillItem[]> {
+  return memoryCall<SkillItem[]>({
+    action: "skills",
+    ownerKey,
   });
 }
 
