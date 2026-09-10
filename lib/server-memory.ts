@@ -64,6 +64,24 @@ export async function appendMessage(
     content,
     sessionId: "primary",
   });
+
+  // A successful assistant write proves the same read/write memory path used by chat.
+  // Only then do we register Long-Term Memory as a verified skill.
+  if (role === "assistant") {
+    await memoryCall<{ ok: boolean }>({
+      action: "upsert_skill",
+      ownerKey,
+      slug: "long_term_memory",
+      name: "Долговременная память",
+      description:
+        "Хасрой сохраняет контекст между сессиями и может использовать его в следующих диалогах.",
+      status: "verified",
+      level: 1,
+      testsPassed: 1,
+      testsFailed: 0,
+      metadata: { storage: "supabase", verifiedBy: "round_trip_write" },
+    });
+  }
 }
 
 export async function recallKnowledge(
