@@ -7,6 +7,13 @@ function safeHref(value: string) {
   return null;
 }
 
+function safeImageSrc(value: string) {
+  const src = value.trim();
+  if (/^https?:\/\//i.test(src)) return src;
+  if (/^data:image\/(?:png|jpeg|jpg|webp);base64,/i.test(src)) return src;
+  return null;
+}
+
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const tokens: ReactNode[] = [];
   const pattern = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^\)\n]+\)|\*[^*\n]+\*)/g;
@@ -71,6 +78,10 @@ function isListLine(line: string) {
   return /^\s*[-+*]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line);
 }
 
+function isImageLine(line: string) {
+  return /^!\[[^\]\n]*\]\(.+\)$/.test(line.trim());
+}
+
 function isBlockStart(lines: string[], index: number) {
   const line = lines[index] ?? "";
   const next = lines[index + 1] ?? "";
@@ -81,6 +92,7 @@ function isBlockStart(lines: string[], index: number) {
     /^\s*>\s?/.test(line) ||
     isHorizontalRule(line) ||
     isListLine(line) ||
+    isImageLine(line) ||
     (line.includes("|") && isTableDivider(next))
   );
 }
@@ -116,6 +128,53 @@ export function MarkdownMessage({ content }: { content: string }) {
         </pre>,
       );
       continue;
+    }
+
+    const image = line.trim().match(/^!\[([^\]\n]*)\]\((.+)\)$/);
+    if (image) {
+      const src = safeImageSrc(image[2]);
+      if (src) {
+        blocks.push(
+          <figure
+            key={`image-${block++}`}
+            style={{
+              margin: "14px 0 10px",
+              width: "100%",
+              maxWidth: 760,
+            }}
+          >
+            {/* Generated images may arrive as data URLs, so Next/Image is not appropriate here. */}
+            <img
+              src={src}
+              alt={image[1] || "Сгенерированное изображение"}
+              loading="eager"
+              style={{
+                display: "block",
+                width: "100%",
+                height: "auto",
+                maxHeight: "72vh",
+                objectFit: "contain",
+                borderRadius: 18,
+                border: "1px solid rgba(118, 215, 235, 0.22)",
+                boxShadow: "0 18px 58px rgba(0, 0, 0, 0.36)",
+                background: "rgba(2, 8, 12, 0.76)",
+              }}
+            />
+            <figcaption
+              style={{
+                marginTop: 8,
+                color: "rgba(190, 222, 232, 0.56)",
+                fontSize: 11,
+                letterSpacing: ".04em",
+              }}
+            >
+              KHASROY IMAGE LAB
+            </figcaption>
+          </figure>,
+        );
+        index += 1;
+        continue;
+      }
     }
 
     const heading = line.match(/^\s{0,3}(#{1,3})\s+(.+)$/);
