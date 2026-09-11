@@ -104,6 +104,20 @@ function parseBody(init?: RequestInit): JsonBody | null {
   }
 }
 
+function usesGroqManagedTools(body: JsonBody) {
+  const model = typeof body.model === "string" ? body.model.toLowerCase() : "";
+  if (model.startsWith("groq/compound") || body.compound_custom) return true;
+
+  const tools = Array.isArray(body.tools) ? body.tools : [];
+  return tools.some((tool) => {
+    if (!tool || typeof tool !== "object") return false;
+    const value = tool as Record<string, unknown>;
+    const type = typeof value.type === "string" ? value.type : "";
+    const name = typeof value.name === "string" ? value.name : "";
+    return /(browser_search|web_search|visit_website|code_interpreter)/iu.test(`${type}:${name}`);
+  });
+}
+
 function gatewayBody(input: RequestInfo | URL, body: JsonBody) {
   const models = fallbackModels(body);
   const next: JsonBody = { ...body, model: models[0] };
@@ -141,6 +155,16 @@ function boundedSignal(existing: AbortSignal | null | undefined, timeoutMs: numb
   }
 }
 
+function markGatewayResponse(response: Response) {
+  const headers = new Headers(response.headers);
+  headers.set("x-khasroy-ai-provider", "gateway");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 async function callGateway(
   state: FailoverState,
   input: RequestInfo | URL,
@@ -167,7 +191,7 @@ async function callGateway(
       status: response.status,
       vision: hasVisionPayload(body),
     });
-    return response;
+    return markGatewayResponse(response);
   }
 
   console.error("Khasroy AI Gateway fallback failed", response.status);
@@ -182,6 +206,7 @@ export function providerFailoverInfo() {
     gatewayStaticKeyConfigured: Boolean(process.env.AI_GATEWAY_API_KEY?.trim()),
     oidcRuntimeEnabled: Boolean(process.env.VERCEL),
     groqCoolingDown: state.groqCooldownUntil > Date.now(),
+    managedGroqToolsProtected: true,
     fallbackTextModels: fallbackModels({}),
     fallbackVisionModels: fallbackModels({ messages: [{ content: [{ type: "image_url" }] }] }),
   };
@@ -219,15 +244,17 @@ export function installProviderFailover() {
     if (!isGroqAiRequest(input)) return state.originalFetch(input, init);
 
     const body = parseBody(init);
-    const credential = body ? await gatewayCredential() : "";
-    const gatewayReady = Boolean(body && credential);
+    const gatewayEligible = Boolean(body && !usesGroqManagedTools(body));
 
-    if (gatewayReady && state.groqCooldownUntil > Date.now()) {
-      try {
-        const gateway = await callGateway(state, input, init, body!, credential);
-        if (gateway) return gateway;
-      } catch (error) {
-        console.error("Khasroy AI Gateway cooldown route failed", error);
+    if (gatewayEligible && state.groqCooldownUntil > Date.now()) {
+      const credential = await gatewayCredential();
+      if (credential) {
+        try {
+          const gateway = await callGateway(state, input, init, body!, credential);
+          if (gateway) return gateway;
+        } catch (error) {
+          console.error("Khasroy AI Gateway cooldown route failed", error);
+        }
       }
     }
 
@@ -247,12 +274,15 @@ export function installProviderFailover() {
       state.groqCooldownUntil = Date.now() + ERROR_COOLDOWN_MS;
     }
 
-    if (gatewayReady) {
-      try {
-        const gateway = await callGateway(state, input, init, body!, credential);
-        if (gateway) return gateway;
-      } catch (error) {
-        console.error("Khasroy AI Gateway failover request failed", error);
+    if (gatewayEligible) {
+      const credential = await gatewayCredential();
+      if (credential) {
+        try {
+          const gateway = await callGateway(state, input, init, body!, credential);
+          if (gateway) return gateway;
+        } catch (error) {
+          console.error("Khasroy AI Gateway failover request failed", error);
+        }
       }
     }
 
