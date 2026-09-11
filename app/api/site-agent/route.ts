@@ -47,9 +47,14 @@ export async function POST(request: Request) {
       targetUrl: resolvedUrl,
       goal: typeof body.goal === "string" ? body.goal.slice(0, 1200) : query.slice(0, 1200),
     });
-    await recordVerifiedSiteAgentSkills(ownerKey, result);
+    const comparison = result.repair.comparison;
+    const verified = comparison.improved && comparison.overallDelta > 0;
+    if (verified) {
+      await recordVerifiedSiteAgentSkills(ownerKey, result);
+    }
     return NextResponse.json({
       ok: true,
+      verified,
       content: formatSiteAgentChatResponse(result),
       result,
     });
