@@ -124,24 +124,37 @@ export async function POST(request: Request) {
     );
   }
 
-  const cookieStore = await cookies();
-  const session = cookieStore.get(OWNER_COOKIE)?.value;
-  if (!session || !safeEqual(session, ownerSessionToken(ownerKey))) {
-    return NextResponse.json({ error: "Требуется доступ владельца." }, { status: 401 });
-  }
-
-  let body: { action?: unknown } = {};
+  let body: { action?: unknown; runnerRelease?: unknown } = {};
   try {
     body = await request.json();
   } catch {
-    // Empty body means status/ensure.
+    // Empty body means status/ensure for an authenticated owner.
   }
   const action = body.action === "step" ? "step" : body.action === "status" ? "status" : "ensure";
+  const release = currentRelease();
+  const releaseRunner =
+    (action === "ensure" || action === "step") &&
+    typeof body.runnerRelease === "string" &&
+    body.runnerRelease === release;
+
+  if (!releaseRunner) {
+    const cookieStore = await cookies();
+    const session = cookieStore.get(OWNER_COOKIE)?.value;
+    if (!session || !safeEqual(session, ownerSessionToken(ownerKey))) {
+      if (typeof body.runnerRelease === "string") {
+        return NextResponse.json(
+          { error: "release_not_live", release },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ error: "Требуется доступ владельца." }, { status: 401 });
+    }
+  }
 
   try {
     let state = action === "status" ? await loadState(ownerKey) : await ensureState(ownerKey, new URL(request.url).origin);
     if (!state) {
-      return NextResponse.json({ ok: true, status: "idle", release: currentRelease() });
+      return NextResponse.json({ ok: true, status: "idle", release });
     }
 
     if (action !== "step" || state.status !== "running") {
