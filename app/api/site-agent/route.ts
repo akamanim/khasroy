@@ -5,7 +5,7 @@ import {
   createSiteAgentJob,
   extractSiteUrl,
   stepSiteAgentJob,
-} from "@/lib/site-agent-job-v7";
+} from "@/lib/site-agent-job-v8";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, ...job });
   } catch (error) {
-    console.error("Khasroy Site Intelligence v7 failed", error);
+    console.error("Khasroy Site Intelligence v8 failed", error);
     return errorResponse(error);
   }
 }
