@@ -7,6 +7,29 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+async function runEmergencyImage(prompt: string) {
+  const seed = Date.now() % 2147483647;
+  const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?model=flux&width=1024&height=1024&nologo=true&seed=${seed}`;
+  const upstream = await fetch(imageUrl, {
+    headers: { "user-agent": "Khasroy-Image-Lab/1.0" },
+    signal: AbortSignal.timeout(55_000),
+    cache: "no-store",
+  });
+
+  const mediaType = upstream.headers.get("content-type") || "";
+  if (!upstream.ok || !mediaType.startsWith("image/")) {
+    const text = await upstream.text().catch(() => "");
+    throw new Error(`emergency image provider ${upstream.status}: ${text.slice(0, 180)}`);
+  }
+
+  const bytes = Buffer.from(await upstream.arrayBuffer());
+  return {
+    image: `data:${mediaType};base64,${bytes.toString("base64")}`,
+    model: "flux-emergency",
+    mediaType,
+  };
+}
+
 export async function POST(request: Request) {
   const ownerKey = process.env.KHASROY_OWNER_KEY?.trim();
   if (!ownerKey) {
@@ -19,10 +42,39 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const body = (await request.json().catch(() => null)) as { prompt?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as {
+    prompt?: unknown;
+    fast?: unknown;
+  } | null;
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+  const fast = body?.fast === true;
+
   if (!prompt) {
     return NextResponse.json({ error: "prompt_required" }, { status: 400 });
+  }
+
+  if (fast) {
+    try {
+      const emergency = await runEmergencyImage(prompt);
+      return NextResponse.json({
+        ok: true,
+        lab: "Khasroy Image Generation Lab",
+        mode: "fast_emergency",
+        image: emergency.image,
+        model: emergency.model,
+        baseline: null,
+        repaired: null,
+        delta: 0,
+        improved: false,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown emergency image error";
+      console.error("Khasroy emergency image generation failed", error);
+      return NextResponse.json(
+        { ok: false, error: "image_generation_failed", detail: message.slice(0, 400) },
+        { status: 502 },
+      );
+    }
   }
 
   try {
@@ -32,6 +84,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       lab: "Khasroy Image Generation Lab",
+      mode: "audited",
       image: `data:${finalImage.mediaType};base64,${finalImage.base64}`,
       model: finalImage.model,
       baseline: {
@@ -50,11 +103,33 @@ export async function POST(request: Request) {
       improved: result.improved,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown image lab error";
-    console.error("Khasroy Image Lab failed", error);
-    return NextResponse.json(
-      { ok: false, error: "image_lab_failed", detail: message.slice(0, 400) },
-      { status: 502 },
-    );
+    console.error("Khasroy audited Image Lab failed, trying emergency fallback", error);
+
+    try {
+      const emergency = await runEmergencyImage(prompt);
+      return NextResponse.json({
+        ok: true,
+        lab: "Khasroy Image Generation Lab",
+        mode: "emergency_fallback",
+        image: emergency.image,
+        model: emergency.model,
+        baseline: null,
+        repaired: null,
+        delta: 0,
+        improved: false,
+      });
+    } catch (fallbackError) {
+      const primary = error instanceof Error ? error.message : "unknown image lab error";
+      const fallback = fallbackError instanceof Error ? fallbackError.message : "unknown fallback error";
+      console.error("Khasroy Image Lab fallback failed", fallbackError);
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "image_lab_failed",
+          detail: `${primary}; fallback: ${fallback}`.slice(0, 400),
+        },
+        { status: 502 },
+      );
+    }
   }
 }
