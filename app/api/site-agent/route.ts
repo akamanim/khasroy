@@ -6,7 +6,7 @@ import {
   formatSiteAgentChatResponse,
   recordVerifiedSiteAgentSkills,
   runFullSiteAgent,
-} from "@/lib/site-agent";
+} from "@/lib/site-agent-v2";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,25 +14,30 @@ export const maxDuration = 60;
 
 function friendlySiteAgentError(error: unknown) {
   const raw = error instanceof Error ? error.message : "Site Agent failed.";
+  const stage = raw.match(/^\[([A-Z_]+)\]/u)?.[1] || "UNKNOWN";
+
   if (/(429|rate limit|tokens per minute|otpm|quota|request too large)/iu.test(raw)) {
     return {
       status: 429,
-      message: "Vision-модель временно упёрлась в бесплатный лимит Groq. Token budget уже снижен; если лимит занят предыдущим запросом, подождите около минуты и повторите.",
+      message: `Site Agent остановился на этапе ${stage}: vision-модель временно упёрлась в лимит Groq. Подождите около минуты и повторите. Незавершённый прогон не станет VERIFIED.`,
     };
   }
   if (/invalid compact JSON|invalid JSON/iu.test(raw)) {
     return {
       status: 502,
-      message: "Vision-модель оборвала компактный JSON. Повторите аудит — незавершённый прогон не будет записан как VERIFIED.",
+      message: `Site Agent остановился на этапе ${stage}: vision-модель оборвала компактный JSON. Повторите аудит; незавершённый прогон не станет VERIFIED.`,
     };
   }
   if (/(URL|адрес|http|локальн|приватн)/iu.test(raw)) return { status: 400, message: raw };
   if (/screenshot provider/iu.test(raw)) {
-    return { status: 502, message: "Сервис скриншотов временно не подготовил страницу. Повторите запрос через несколько секунд." };
+    return {
+      status: 502,
+      message: `Site Agent остановился на этапе ${stage}: сервис скриншотов ещё не подготовил страницу. Повторите через несколько секунд.`,
+    };
   }
   return {
     status: 502,
-    message: "Site Agent не смог завершить полный цикл. Незавершённые навыки останутся LEARNING; попробуйте ещё раз.",
+    message: `Site Agent остановился на этапе ${stage}. Незавершённые навыки останутся LEARNING; повторите запрос.`,
   };
 }
 
@@ -71,7 +76,14 @@ export async function POST(request: Request) {
       targetUrl: resolvedUrl,
       goal: typeof body.goal === "string" ? body.goal.slice(0, 1200) : query.slice(0, 1200),
     });
-    await recordVerifiedSiteAgentSkills(ownerKey, result);
+
+    // All six Site Agent skills are promoted together only after a real
+    // screenshot → audit → redesign → screenshot → before/after cycle
+    // demonstrates measurable improvement without visual regressions.
+    if (result.repair.success) {
+      await recordVerifiedSiteAgentSkills(ownerKey, result);
+    }
+
     return NextResponse.json({
       ok: true,
       verified: result.repair.success,
