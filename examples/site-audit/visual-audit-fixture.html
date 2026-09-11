@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Khasroy Visual Audit Fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: rgb(255,255,255); color: rgb(170,170,170); font: 18px/1.55 Arial, sans-serif; }
+    .shell { width: min(1100px, calc(100% - 24px)); margin: 0 auto; }
+    h1 { margin: 0 0 16px; font-size: 20px; font-weight: 500; }
+    [data-audit-section]:nth-of-type(1) { padding-block: 8px; }
+    [data-audit-section]:nth-of-type(2) { padding-block: 28px; }
+    [data-audit-section]:nth-of-type(3) { padding-block: 60px; }
+    [data-audit-section]:nth-of-type(4) { padding-block: 96px; }
+    .long-copy { width: 100%; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .actions button { min-width: 110px; min-height: 40px; }
+    .r0 { border-radius: 0; }
+    .r8 { border-radius: 8px; }
+    .r32 { border-radius: 32px; }
+    [data-primary-cta] { display: inline-flex; margin-top: 900px; padding: 14px 22px; border-radius: 10px; background: rgb(17,17,17); color: rgb(255,255,255); text-decoration: none; }
+    .hero-image { width: 240px; height: 240px; }
+    [data-audit-align-group] > * { display: block; }
+    [data-audit-align-group] > :nth-child(2) { margin-left: 26px; }
+    [data-audit-align-group] > :nth-child(3) { margin-left: 52px; }
+    .trust { display: none; }
+    .mobile-only-bad { display: none; }
+
+    body.fixed { color: rgb(31,41,55); font-size: 16px; }
+    body.fixed h1 { font-size: 48px; font-weight: 750; line-height: 1.08; }
+    body.fixed [data-audit-section] { padding-block: 48px; }
+    body.fixed .long-copy { width: min(65ch, 100%); }
+    body.fixed [data-primary-cta] { margin-top: 18px; }
+    body.fixed .hero-image { width: 240px; height: 120px; }
+    body.fixed .actions button { border-radius: 12px; }
+    body.fixed [data-audit-align-group] > * { margin-left: 0; }
+    body.fixed .trust { display: block; margin-top: 12px; }
+
+    @media (max-width: 600px) {
+      body:not(.fixed) .mobile-only-bad { display: block; color: rgb(205,205,205); }
+      body.fixed h1 { font-size: 38px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section data-audit-section>
+      <h1>Build a site that earns trust</h1>
+      <p class="long-copy" data-audit-copy>This deliberately long paragraph exists to test whether Khasroy can identify copy that stretches too far across a wide screen and becomes harder to scan, especially when a page ignores a readable text measure and simply fills the full content container.</p>
+      <p class="mobile-only-bad">Mobile-only contrast regression.</p>
+      <a href="#contact" data-primary-cta>Get a proposal</a>
+      <div class="trust" data-trust-signal>Verified business · clear warranty · real contacts</div>
+    </section>
+
+    <section data-audit-section>
+      <img class="hero-image" alt="Audit ratio fixture" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='200' viewBox='0 0 400 200'%3E%3Crect width='400' height='200' fill='%23111'/%3E%3C/svg%3E" />
+    </section>
+
+    <section data-audit-section>
+      <div class="actions">
+        <button class="r0" data-button>Primary</button>
+        <button class="r8" data-button>Secondary</button>
+        <button class="r32" data-button>Details</button>
+      </div>
+    </section>
+
+    <section data-audit-section id="contact">
+      <div data-audit-align-group data-audit-role="alignment-fixture">
+        <span>Phone</span>
+        <span>Email</span>
+        <span>Address</span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    if (new URLSearchParams(location.search).get('mode') === 'fixed') document.body.classList.add('fixed');
+  </script>
+  <script src="../../scripts/visual-audit-runtime.js"></script>
+</body>
+</html>

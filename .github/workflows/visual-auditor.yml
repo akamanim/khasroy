@@ -1,0 +1,47 @@
+name: Visual Auditor Verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/visual-audit-*'
+      - 'examples/site-audit/visual-audit-fixture.html'
+      - 'tests/visual-audit-playwright.mjs'
+      - '.github/workflows/visual-auditor.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install browser driver only
+        shell: bash
+        run: |
+          mkdir -p .ci-visual
+          cd .ci-visual
+          npm init -y >/dev/null
+          npm install --save-exact --package-lock=false playwright-core@1.55.0
+
+      - name: Resolve system Chrome
+        shell: bash
+        run: |
+          CHROME_PATH="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME_PATH"
+          echo "CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
+
+      - name: Run real Chromium visual audit verification
+        env:
+          PLAYWRIGHT_CORE_PATH: .ci-visual/node_modules/playwright-core/index.mjs
+        run: node tests/visual-audit-playwright.mjs
