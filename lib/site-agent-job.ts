@@ -5,6 +5,10 @@ const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const VISION_MODEL = "qwen/qwen3.6-27b";
 const AUDIT_TOKENS = 340;
 const COMPARE_TOKENS = 160;
+const SCREENSHOT_FETCH_TIMEOUT_MS = 8_000;
+const PREVIEW_FETCH_TIMEOUT_MS = 10_000;
+const VISION_FETCH_TIMEOUT_MS = 25_000;
+const MEMORY_STEP_TIMEOUT_MS = 12_000;
 
 type Severity = "high" | "medium" | "low";
 export type VisualScores = { visual: number; trust: number; conversion: number; mobile: number; overall: number };
@@ -43,6 +47,7 @@ type JobStage =
   | "COMPARE_MOBILE"
   | "COMPARE_DESKTOP"
   | "FINALIZE"
+  | "VERIFY_SKILLS"
   | "DONE";
 
 type SiteAgentJob = {
@@ -65,6 +70,7 @@ type SiteAgentJob = {
   comparison?: SiteComparison;
   success?: boolean;
   content?: string;
+  verifyIndex?: number;
 };
 
 export type SiteAgentJobResponse = {
@@ -77,6 +83,15 @@ export type SiteAgentJobResponse = {
 };
 
 type GroqMessage = { role: "system" | "user"; content: string | Array<Record<string, unknown>> };
+
+const VERIFIED_SKILLS = [
+  ["screenshot_vision", "Screenshot Vision", "Captures and analyses mobile/desktop screenshots."],
+  ["visual_before_after_comparison", "Before / After Visual Comparison", "Compares original and redesign independently on mobile and desktop."],
+  ["visual_site_scoring", "Visual Site Scoring", "Scores visual quality, trust, conversion and mobile usability."],
+  ["site_design_agent", "Site Design Agent", "Builds a responsive redesign demo from audit findings."],
+  ["site_repair_loop", "Site Repair Loop", "Runs resumable screenshot → audit → redesign → screenshot → comparison."],
+  ["commercial_site_audit", "Commercial Site Audit", "Produces a client-readable audit and demo."],
+] as const;
 
 function jobKey(id: string) { return `site_agent_job_${id}`; }
 function clamp(value: unknown) { const n = Number(value); return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0; }
@@ -111,14 +126,36 @@ export function extractSiteUrl(input: string) {
 }
 function mshot(url: string, width: number, height: number) { return `https://s.wordpress.com/mshots/v1/${encodeURIComponent(url)}?w=${width}&h=${height}`; }
 
+function timeoutSignal(ms: number) {
+  return AbortSignal.timeout(ms);
+}
+
+async function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function saveJob(ownerKey: string, job: SiteAgentJob) {
   job.updatedAt = new Date().toISOString();
-  await rememberKnowledge(ownerKey, jobKey(job.id), "site_agent_job", JSON.stringify(job), 1);
+  await withDeadline(
+    rememberKnowledge(ownerKey, jobKey(job.id), "site_agent_job", JSON.stringify(job), 1),
+    MEMORY_STEP_TIMEOUT_MS,
+    "memory save",
+  );
 }
 async function loadJob(ownerKey: string, id: string): Promise<SiteAgentJob> {
   if (!/^[0-9a-f-]{36}$/iu.test(id)) throw new Error("Некорректный jobId.");
   const key = jobKey(id);
-  const items = await recallKnowledge(ownerKey, key, 10);
+  const items = await withDeadline(recallKnowledge(ownerKey, key, 10), MEMORY_STEP_TIMEOUT_MS, "memory load");
   const item = items.find((x) => x.memory_key === key && x.category === "site_agent_job");
   if (!item) throw new Error("Site Agent job не найден.");
   try { return JSON.parse(item.content) as SiteAgentJob; }
@@ -126,7 +163,20 @@ async function loadJob(ownerKey: string, id: string): Promise<SiteAgentJob> {
 }
 
 async function probeScreenshot(url: string) {
-  const response = await fetch(url, { cache: "no-store", redirect: "manual", headers: { "user-agent": "Khasroy-Site-Agent/4.0" } });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      cache: "no-store",
+      redirect: "manual",
+      headers: { "user-agent": "Khasroy-Site-Agent/4.1" },
+      signal: timeoutSignal(SCREENSHOT_FETCH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new Error("screenshot provider timeout");
+    }
+    throw error;
+  }
   const location = response.headers.get("location") || "";
   const waiting = response.status >= 300 && response.status < 400 && /mshots\/v1\/default/i.test(location);
   await response.body?.cancel().catch(() => undefined);
@@ -136,7 +186,20 @@ async function probeScreenshot(url: string) {
 }
 
 async function warmPage(url: string) {
-  const response = await fetch(url, { cache: "no-store", redirect: "follow", headers: { "user-agent": "Khasroy-Site-Agent/4.0" } });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      cache: "no-store",
+      redirect: "follow",
+      headers: { "user-agent": "Khasroy-Site-Agent/4.1" },
+      signal: timeoutSignal(PREVIEW_FETCH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new Error("preview timeout");
+    }
+    throw error;
+  }
   const type = response.headers.get("content-type") || "";
   const ok = response.ok && /text\/html/i.test(type);
   await response.body?.cancel().catch(() => undefined);
@@ -144,19 +207,28 @@ async function warmPage(url: string) {
 }
 
 async function groqJson(apiKey: string, messages: GroqMessage[], maxTokens: number) {
-  const response = await fetch(GROQ_ENDPOINT, {
-    method: "POST",
-    cache: "no-store",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: process.env.GROQ_VISION_MODEL || VISION_MODEL,
-      messages,
-      response_format: { type: "json_object" },
-      reasoning_effort: "none",
-      temperature: 0.15,
-      max_completion_tokens: Math.min(maxTokens, 900),
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(GROQ_ENDPOINT, {
+      method: "POST",
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      signal: timeoutSignal(VISION_FETCH_TIMEOUT_MS),
+      body: JSON.stringify({
+        model: process.env.GROQ_VISION_MODEL || VISION_MODEL,
+        messages,
+        response_format: { type: "json_object" },
+        reasoning_effort: "none",
+        temperature: 0.15,
+        max_completion_tokens: Math.min(maxTokens, 900),
+      }),
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new Error("vision upstream timeout");
+    }
+    throw error;
+  }
   const data = await response.json().catch(() => null) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } } | null;
   if (!response.ok) throw new Error(data?.error?.message || `Groq ${response.status}`);
   const content = data?.choices?.[0]?.message?.content?.trim();
@@ -216,7 +288,11 @@ function makeDemo(target: string, audit: SiteAudit, design: SiteDesignPlan) {
 function sign(ownerKey: string, id: string, expires: number) { return createHmac("sha256", ownerKey).update(`${id}.${expires}`).digest("hex"); }
 async function savePreview(ownerKey: string, origin: string, html: string) {
   const id = randomUUID();
-  await rememberKnowledge(ownerKey, `site_demo_${id}`, "site_agent_demo", html.slice(0, 15000), 1);
+  await withDeadline(
+    rememberKnowledge(ownerKey, `site_demo_${id}`, "site_agent_demo", html.slice(0, 15000), 1),
+    MEMORY_STEP_TIMEOUT_MS,
+    "preview save",
+  );
   const expires = Date.now() + 7 * 24 * 60 * 60 * 1000;
   return `${origin}/api/site-preview?id=${encodeURIComponent(id)}&expires=${expires}&sig=${sign(ownerKey, id, expires)}`;
 }
@@ -246,23 +322,43 @@ function mergeComparison(before: VisualScores, mobile: ViewCompare, desktop: Vie
   return { summary: "Mobile and desktop before/after comparison complete.", before, after, overallDelta, improved: mobile.improved && desktop.improved && overallDelta > 0, regressions, remainingProblems: [...mobile.remainingProblems, ...desktop.remainingProblems].slice(0, 2) };
 }
 
-async function verifySkills(ownerKey: string, job: SiteAgentJob) {
-  if (!job.success || !job.audit || !job.comparison) return;
-  const evidence = {
-    testedAt: new Date().toISOString(), targetUrl: job.targetUrl,
-    beforeOverall: job.audit.scores.overall, afterOverall: job.comparison.after.overall,
-    delta: job.comparison.overallDelta, execution: "resumable_job_v1", maxImagesPerVisionCall: 2,
+function verificationEvidence(job: SiteAgentJob) {
+  return {
+    testedAt: new Date().toISOString(),
+    targetUrl: job.targetUrl,
+    beforeOverall: job.audit!.scores.overall,
+    afterOverall: job.comparison!.after.overall,
+    delta: job.comparison!.overallDelta,
+    execution: "resumable_job_v2_timeout_safe",
+    maxImagesPerVisionCall: 2,
+    upstreamTimeoutsMs: {
+      screenshot: SCREENSHOT_FETCH_TIMEOUT_MS,
+      preview: PREVIEW_FETCH_TIMEOUT_MS,
+      vision: VISION_FETCH_TIMEOUT_MS,
+      memory: MEMORY_STEP_TIMEOUT_MS,
+    },
     tokenBudget: { audit: AUDIT_TOKENS, mobileCompare: COMPARE_TOKENS, desktopCompare: COMPARE_TOKENS },
   };
-  const skills = [
-    ["screenshot_vision", "Screenshot Vision", "Captures and analyses mobile/desktop screenshots."],
-    ["visual_before_after_comparison", "Before / After Visual Comparison", "Compares original and redesign independently on mobile and desktop."],
-    ["visual_site_scoring", "Visual Site Scoring", "Scores visual quality, trust, conversion and mobile usability."],
-    ["site_design_agent", "Site Design Agent", "Builds a responsive redesign demo from audit findings."],
-    ["site_repair_loop", "Site Repair Loop", "Runs resumable screenshot → audit → redesign → screenshot → comparison."],
-    ["commercial_site_audit", "Commercial Site Audit", "Produces a client-readable audit and demo."],
-  ] as const;
-  await Promise.all(skills.map(([slug, name, description]) => upsertSkill(ownerKey, { slug, name, description, status: "verified", level: 1, testsPassed: 1, testsFailed: 0, metadata: evidence })));
+}
+
+async function verifyOneSkill(ownerKey: string, job: SiteAgentJob, index: number) {
+  const item = VERIFIED_SKILLS[index];
+  if (!item) return;
+  const [slug, name, description] = item;
+  await withDeadline(
+    upsertSkill(ownerKey, {
+      slug,
+      name,
+      description,
+      status: "verified",
+      level: 1,
+      testsPassed: 1,
+      testsFailed: 0,
+      metadata: verificationEvidence(job),
+    }),
+    MEMORY_STEP_TIMEOUT_MS,
+    `verify skill ${slug}`,
+  );
 }
 
 function finalContent(job: SiteAgentJob) {
@@ -275,14 +371,19 @@ function finalContent(job: SiteAgentJob) {
     "### Выполнено", "- mobile + desktop screenshots", "- vision-аудит", "- responsive demo", "- mobile before/after", "- desktop before/after",
     `- repair loop: ${job.success ? "**VERIFIED — улучшение подтверждено**" : "**LEARNING — улучшение пока недостаточно**"}`, "",
     `### Demo\n[Открыть редизайн](${job.previewUrl})`, "",
-    `_Resumable Site Agent: каждый этап выполнялся отдельным коротким запросом, без длинного Vercel runtime._`,
+    `_Timeout-safe resumable Site Agent: каждый внешний вызов ограничен собственным deadline, а каждый этап можно повторить без потери прогресса._`,
   ].join("\n");
 }
 
 export async function createSiteAgentJob(args: { ownerKey: string; origin: string; targetUrl: string; goal?: string }): Promise<SiteAgentJobResponse> {
   const job: SiteAgentJob = {
-    id: randomUUID(), targetUrl: normalizePublicSiteUrl(args.targetUrl), goal: (args.goal || "").slice(0, 1200), origin: args.origin,
-    stage: "SCREENSHOT_ORIGINAL", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    id: randomUUID(),
+    targetUrl: normalizePublicSiteUrl(args.targetUrl),
+    goal: (args.goal || "").slice(0, 1200),
+    origin: args.origin,
+    stage: "SCREENSHOT_ORIGINAL",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
   job.originalMobile = mshot(job.targetUrl, 390, 844);
   job.originalDesktop = mshot(job.targetUrl, 1280, 900);
@@ -353,10 +454,34 @@ export async function stepSiteAgentJob(args: { ownerKey: string; apiKey: string;
     job.comparison = mergeComparison(job.audit!.scores, job.mobileCompare!, job.desktopCompare!);
     job.success = job.comparison.improved && job.comparison.overallDelta >= 3 && job.comparison.regressions.length === 0;
     job.content = finalContent(job);
-    if (job.success) await verifySkills(args.ownerKey, job);
-    job.stage = "DONE";
+    job.verifyIndex = 0;
+    job.stage = job.success ? "VERIFY_SKILLS" : "DONE";
     await saveJob(args.ownerKey, job);
-    return { jobId: job.id, stage: "DONE", done: true, progress: "Аудит завершён.", content: job.content };
+    if (job.stage === "DONE") {
+      return { jobId: job.id, stage: "DONE", done: true, progress: "Аудит завершён.", content: job.content };
+    }
+    return { jobId: job.id, stage: job.stage, done: false, progress: "Улучшение подтверждено. Фиксирую VERIFIED-навыки по одному.", retryAfterMs: 100 };
+  }
+
+  if (job.stage === "VERIFY_SKILLS") {
+    const index = Math.max(0, job.verifyIndex || 0);
+    if (index < VERIFIED_SKILLS.length) {
+      await verifyOneSkill(args.ownerKey, job, index);
+      job.verifyIndex = index + 1;
+    }
+    if ((job.verifyIndex || 0) >= VERIFIED_SKILLS.length) {
+      job.stage = "DONE";
+      await saveJob(args.ownerKey, job);
+      return { jobId: job.id, stage: "DONE", done: true, progress: "Аудит и верификация завершены.", content: job.content };
+    }
+    await saveJob(args.ownerKey, job);
+    return {
+      jobId: job.id,
+      stage: job.stage,
+      done: false,
+      progress: `Фиксирую VERIFIED-навыки: ${job.verifyIndex}/${VERIFIED_SKILLS.length}.`,
+      retryAfterMs: 100,
+    };
   }
 
   throw new Error(`Неизвестный этап Site Agent: ${job.stage}`);
