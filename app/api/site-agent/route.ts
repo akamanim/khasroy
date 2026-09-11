@@ -5,7 +5,7 @@ import {
   createSiteAgentJob,
   extractSiteUrl,
   stepSiteAgentJob,
-} from "@/lib/site-agent-job-v5";
+} from "@/lib/site-agent-job-v6";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,7 +49,7 @@ function errorResponse(error: unknown) {
     );
   }
 
-  if (/(invalid compact JSON|SPA intelligence response)/iu.test(message)) {
+  if (/(invalid compact JSON|SPA intelligence response|calibrated visual score)/iu.test(message)) {
     return NextResponse.json(
       {
         error: "AI-модель вернула незавершённый структурированный ответ. Этап можно повторить без потери прогресса.",
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, ...job });
   } catch (error) {
-    console.error("Khasroy Site Intelligence v5 failed", error);
+    console.error("Khasroy Site Intelligence v6 failed", error);
     return errorResponse(error);
   }
 }
