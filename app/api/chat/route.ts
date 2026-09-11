@@ -22,6 +22,7 @@ import {
 } from "@/lib/server-memory";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const SYSTEM_PROMPT = `Ты — Хасрой, универсальный AI-союзник владельца системы.
 Твоя главная специализация — программирование, архитектура ПО, анализ кода, исследование технологий и решение сложных технических задач.
@@ -300,14 +301,17 @@ export async function POST(request: Request) {
       upsertSkill(ownerKey, {
         slug: "cloud_code_sandbox",
         name: "Облачная песочница кода",
-        description: "Хасрой может запускать Python-код в изолированной облачной среде для вычислений и проверки решений.",
+        description: "Хасрой может запускать Python/Node.js-код в изолированной облачной среде для вычислений и проверки решений.",
         status: "verified",
         level: 1,
         testsPassed: 1,
         metadata: {
           provider: brain.provider,
           model: brain.model,
-          environment: "groq_compound_code_interpreter",
+          environment: brain.toolsUsed.some((tool) => /vercel_sandbox/iu.test(tool))
+            ? "vercel_sandbox_firecracker"
+            : "groq_compound_code_interpreter",
+          toolsUsed: brain.toolsUsed,
         },
       }),
     );

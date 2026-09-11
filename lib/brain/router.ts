@@ -1,81 +1,26 @@
+import {
+  runBrain as runLegacyBrain,
+  selectBrainMode,
+  type BrainMessage,
+  type BrainMode,
+  type BrainResponseData,
+} from "@/lib/brain/router-legacy";
 import { searchWebDirect } from "@/lib/server-web";
 import {
-  selfHostedChat,
-  selfHostedHealth,
-} from "@/lib/brain/providers/self-hosted";
+  runCodeSandbox,
+  type SandboxExecution,
+  type SandboxLanguage,
+} from "@/lib/server-sandbox";
 
-export type BrainMessage = {
-  role: "user" | "assistant";
-  content: string;
-};
+export { selectBrainMode };
+export type { BrainMessage, BrainMode, BrainResponseData };
 
-export type BrainMode = "chat" | "repository" | "research" | "sandbox" | "agentic";
-export type BrainProvider = "self-hosted" | "groq";
-
-type ExecutedTool = {
-  type?: string;
-  name?: string;
-  arguments?: string;
-  output?: string;
-  search_results?: {
-    results?: Array<{
-      title?: string;
-      url?: string;
-      content?: string;
-      score?: number;
-    }>;
-  };
-  code_results?: Array<{ text?: string }>;
-};
-
-export type BrainResponseData = {
-  model?: string;
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-      executed_tools?: ExecutedTool[];
-    };
-  }>;
-  error?: {
-    message?: string;
-    type?: string;
-    code?: string;
-  };
-};
-
-type ResponsesAnnotation = {
-  type?: string;
-  url?: string;
-  title?: string;
-  url_citation?: {
-    url?: string;
-    title?: string;
-  };
-};
-
-type ResponsesContent = {
-  type?: string;
-  text?: string;
-  annotations?: ResponsesAnnotation[];
-};
-
-type ResponsesOutput = {
-  type?: string;
-  name?: string;
-  role?: string;
-  content?: ResponsesContent[];
-};
-
-type GroqResponsesData = {
-  model?: string;
-  status?: string;
-  output?: ResponsesOutput[];
-  error?: {
-    message?: string;
-    type?: string;
-    code?: string;
-  } | null;
-};
+export type BrainProvider =
+  | "self-hosted"
+  | "groq"
+  | "groq-fallback"
+  | "gateway"
+  | "vercel-sandbox";
 
 export type BrainRun = {
   response: Response;
@@ -88,445 +33,357 @@ export type BrainRun = {
   webToolForced: boolean;
 };
 
-function wantsWeb(text: string) {
-  return /(https?:\/\/|найди|поищи|поиск|интернет|в интернете|сайт|страниц|прочитай.*сайт|открой.*сайт|актуальн|сегодня|сейчас|последн|новост|исследуй|research|search|проверь.*источник|курс.*битко|цена.*битко|bitcoin|btc)/iu.test(
-    text,
-  );
-}
-
-function wantsSandbox(text: string) {
-  return /(запусти.*код|выполни.*код|испытай.*код|протестируй.*код|проверь.*код.*запусти|python|питон|песочниц|sandbox|вычисли|посчитай.*код|запусти.*скрипт|выполни.*скрипт)/iu.test(
-    text,
-  );
-}
-
-function extractUrls(text: string) {
-  return text.match(/https?:\/\/[^\s)\]}>"']+/giu) || [];
-}
-
-export function selectBrainMode(query: string, repositoryRead: boolean): BrainMode {
-  if (repositoryRead) return "repository";
-  const web = wantsWeb(query);
-  const sandbox = wantsSandbox(query);
-  if (web && sandbox) return "agentic";
-  if (web) return "research";
-  if (sandbox) return "sandbox";
-  return "chat";
-}
-
-function normalizeTools(data: BrainResponseData | null) {
-  const tools = data?.choices?.[0]?.message?.executed_tools || [];
-  return tools.map((tool) => `${tool.type || ""}:${tool.name || ""}`.toLowerCase());
-}
-
-function extractSources(data: BrainResponseData | null) {
-  const tools = data?.choices?.[0]?.message?.executed_tools || [];
-  const unique = new Map<string, { title: string; url: string }>();
-
-  for (const tool of tools) {
-    for (const result of tool.search_results?.results || []) {
-      if (!result.url) continue;
-      unique.set(result.url, {
-        title: result.title || result.url,
-        url: result.url,
-      });
-    }
-  }
-
-  return [...unique.values()].slice(0, 12);
-}
-
-function responseText(data: GroqResponsesData | null) {
-  const chunks: string[] = [];
-  for (const item of data?.output || []) {
-    if (item.type !== "message") continue;
-    for (const content of item.content || []) {
-      if (content.type === "output_text" && content.text) chunks.push(content.text);
-    }
-  }
-  return chunks.join("\n").trim();
-}
-
-function responseSources(data: GroqResponsesData | null) {
-  const unique = new Map<string, { title: string; url: string }>();
-
-  for (const item of data?.output || []) {
-    for (const content of item.content || []) {
-      for (const annotation of content.annotations || []) {
-        const url = annotation.url_citation?.url || annotation.url;
-        if (!url) continue;
-        unique.set(url, {
-          title: annotation.url_citation?.title || annotation.title || url,
-          url,
-        });
-      }
-    }
-  }
-
-  return [...unique.values()].slice(0, 12);
-}
-
-function responseUsedBrowser(data: GroqResponsesData | null) {
-  return (data?.output || []).some((item) =>
-    /browser|search/i.test(`${item.type || ""}:${item.name || ""}`),
-  );
-}
-
-function toChatShape(data: GroqResponsesData | null): BrainResponseData | null {
-  if (!data) return null;
-  const content = responseText(data);
-  return {
-    model: data.model,
-    choices: content
-      ? [
-          {
-            message: {
-              content,
-              executed_tools: responseUsedBrowser(data)
-                ? [{ type: "browser_search", name: "responses_api" }]
-                : [],
-            },
-          },
-        ]
-      : [],
-    error: data.error
-      ? {
-          message: data.error.message,
-          type: data.error.type,
-          code: data.error.code,
-        }
-      : undefined,
-  };
-}
-
-async function groqRequest(args: {
-  apiKey: string;
-  model: string;
-  systemContent: string;
-  history: BrainMessage[];
-  maxCompletion: number;
-  reasoning?: "low" | "medium";
-  compoundTools?: string[];
-}) {
-  const body: Record<string, unknown> = {
-    model: args.model,
-    messages: [{ role: "system", content: args.systemContent }, ...args.history],
-    max_completion_tokens: args.maxCompletion,
-    stream: false,
-  };
-
-  if (args.reasoning && !args.model.startsWith("groq/compound")) {
-    body.reasoning_effort = args.reasoning;
-  }
-
-  if (args.compoundTools?.length) {
-    body.compound_custom = {
-      tools: { enabled_tools: args.compoundTools },
-    };
-  }
-
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${args.apiKey}`,
-      "Content-Type": "application/json",
-      ...(args.model.startsWith("groq/compound")
-        ? { "Groq-Model-Version": "latest" }
-        : {}),
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = (await response.json().catch(() => null)) as BrainResponseData | null;
-  return { response, data };
-}
-
-async function groqResponsesWeb(args: {
-  apiKey: string;
-  query: string;
-  systemContent: string;
-}) {
-  const response = await fetch("https://api.groq.com/openai/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${args.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "openai/gpt-oss-20b",
-      instructions: `${args.systemContent.slice(0, 3_000)}\n\nWEB MODE: обязательно используй browser_search. Дай актуальный ответ и укажи реальные источники.`,
-      input: args.query.slice(0, 2_500),
-      tool_choice: "required",
-      tools: [{ type: "browser_search" }],
-      reasoning: { effort: "low" },
-      max_output_tokens: 900,
-    }),
-  });
-
-  const raw = (await response.json().catch(() => null)) as GroqResponsesData | null;
-  return {
-    response,
-    data: toChatShape(raw),
-    raw,
-    sources: responseSources(raw),
-    usedBrowser: response.ok && responseUsedBrowser(raw),
-  };
-}
-
-async function preferredTextRequest(args: {
-  apiKey: string;
-  fallbackModel: string;
-  systemContent: string;
-  history: BrainMessage[];
-  maxCompletion: number;
-  reasoning?: "low" | "medium";
-  selfHostedOnline: boolean;
-}) {
-  if (args.selfHostedOnline) {
-    const local = await selfHostedChat({
-      messages: [
-        { role: "system", content: args.systemContent },
-        ...args.history,
-      ],
-      maxTokens: args.maxCompletion,
-    });
-
-    if (local?.response.ok && local.data?.choices?.[0]?.message?.content) {
-      const data: BrainResponseData = {
-        model: local.model,
-        choices: local.data.choices,
-        error: local.data.error,
-      };
-      return {
-        response: local.response,
-        data,
-        provider: "self-hosted" as const,
-        model: local.model,
-      };
-    }
-  }
-
-  const groq = await groqRequest({
-    apiKey: args.apiKey,
-    model: args.fallbackModel,
-    systemContent: args.systemContent,
-    history: args.history,
-    maxCompletion: args.maxCompletion,
-    reasoning: args.reasoning,
-  });
-
-  return {
-    ...groq,
-    provider: "groq" as const,
-    model: groq.data?.model || args.fallbackModel,
-  };
-}
-
-export async function runBrain(args: {
+type RunArgs = {
   apiKey: string;
   defaultModel: string;
   systemContent: string;
   history: BrainMessage[];
   query: string;
   repositoryRead: boolean;
-}): Promise<BrainRun> {
-  const mode = selectBrainMode(args.query, args.repositoryRead);
-  const selfHostedState = await selfHostedHealth().catch(() => ({
-    configured: false,
-    online: false,
-    model: null as string | null,
-  }));
-  const selfHostedOnline = selfHostedState.online === true;
+};
 
-  if (mode === "research") {
-    // Only a genuinely online GPU may enter the self-hosted research branch.
-    if (selfHostedOnline) {
-      try {
-        const searched = await searchWebDirect(args.query, 5);
-        const directSources = searched.sources.map(({ title, url }) => ({ title, url }));
-        const local = await selfHostedChat({
-          messages: [
-            {
-              role: "system",
-              content: `${args.systemContent.slice(0, 3_500)}\n\nSERVER WEB SEARCH RESULTS\n${searched.context.slice(0, 6_000)}\n\nОтветь только по этим реальным результатам и перечисли источники.`,
-            },
-            { role: "user", content: args.query.slice(0, 2_500) },
-          ],
-          maxTokens: 900,
-        });
+type SandboxPlan = {
+  language: SandboxLanguage;
+  code: string;
+  purpose: string;
+};
 
-        if (local?.response.ok && local.data?.choices?.[0]?.message?.content) {
-          return {
-            response: local.response,
-            data: {
-              model: local.model,
-              choices: local.data.choices,
-              error: local.data.error,
-            },
-            provider: "self-hosted",
-            model: local.model,
-            mode,
-            toolsUsed: ["direct_web_search:server"],
-            sources: directSources,
-            webToolForced: true,
-          };
-        }
-      } catch (error) {
-        console.error("Khasroy self-hosted research failed", error);
-      }
-    }
+const TEXT_ONLY_QUERY =
+  "Сформируй итоговый ответ только по переданному контексту. Не запускай веб-поиск и код.";
 
-    const web = await groqResponsesWeb({
-      apiKey: args.apiKey,
-      query: args.query,
-      systemContent: args.systemContent,
-    });
+function observedProvider(response: Response, fallback: string): BrainProvider {
+  const marked = response.headers.get("x-khasroy-ai-provider");
+  if (marked === "gateway") return "gateway";
+  if (marked === "groq-fallback") return "groq-fallback";
+  if (fallback === "self-hosted") return "self-hosted";
+  return "groq";
+}
 
-    if (web.response.ok && web.data?.choices?.[0]?.message?.content) {
-      return {
-        response: web.response,
-        data: web.data,
-        provider: "groq",
-        model: web.raw?.model || "openai/gpt-oss-20b",
-        mode,
-        toolsUsed: ["browser_search:responses_api"],
-        sources: web.sources,
-        webToolForced: true,
-      };
-    }
+function normalizeLegacy(
+  run: Awaited<ReturnType<typeof runLegacyBrain>>,
+  mode = run.mode,
+): BrainRun {
+  return {
+    ...run,
+    provider: observedProvider(run.response, run.provider),
+    mode,
+  };
+}
 
-    let compound = await groqRequest({
-      apiKey: args.apiKey,
-      model: "groq/compound-mini",
-      systemContent: `${args.systemContent.slice(0, 4_000)}\n\nWEB RESEARCH MODE: используй web_search и отвечай по найденным источникам.`,
-      history: [{ role: "user", content: args.query.slice(0, 2_500) }],
-      maxCompletion: 900,
-      compoundTools: extractUrls(args.query).length ? ["visit_website"] : ["web_search"],
-    });
-
-    if (compound.response.ok && compound.data?.choices?.[0]?.message?.content) {
-      return {
-        response: compound.response,
-        data: compound.data,
-        provider: "groq",
-        model: compound.data.model || "groq/compound-mini",
-        mode,
-        toolsUsed: normalizeTools(compound.data),
-        sources: extractSources(compound.data),
-        webToolForced: true,
-      };
-    }
-
-    try {
-      const searched = await searchWebDirect(args.query, 5);
-      const directSources = searched.sources.map(({ title, url }) => ({ title, url }));
-      const direct = await preferredTextRequest({
-        apiKey: args.apiKey,
-        fallbackModel: args.defaultModel,
-        systemContent: `${args.systemContent.slice(0, 2_500)}\n\nSERVER WEB SEARCH RESULTS\n${searched.context.slice(0, 4_500)}\n\nОтветь только по этим реальным результатам и перечисли источники.`,
-        history: [{ role: "user", content: args.query.slice(0, 2_000) }],
-        maxCompletion: 700,
-        reasoning: "low",
-        selfHostedOnline,
-      });
-
-      if (direct.response.ok && direct.data?.choices?.[0]?.message?.content) {
-        return {
-          response: direct.response,
-          data: direct.data,
-          provider: direct.provider,
-          model: direct.model,
-          mode,
-          toolsUsed: ["direct_web_search:server"],
-          sources: directSources,
-          webToolForced: true,
-        };
-      }
-
-      compound = direct;
-    } catch (error) {
-      console.error("Khasroy direct web fallback failed", error);
-    }
-
-    return {
-      response: compound.response,
-      data: compound.data,
-      provider: "groq",
-      model: compound.data?.model || "groq/compound-mini",
-      mode,
-      toolsUsed: [],
-      sources: [],
-      webToolForced: false,
-    };
-  }
-
-  if (mode === "chat" || mode === "repository") {
-    const systemContent = mode === "repository"
-      ? args.systemContent.slice(0, 18_000)
-      : args.systemContent;
-    const history = mode === "repository" ? args.history.slice(-6) : args.history.slice(-16);
-    const result = await preferredTextRequest({
-      apiKey: args.apiKey,
-      fallbackModel: args.defaultModel,
-      systemContent,
-      history,
-      maxCompletion: mode === "repository" ? 1200 : 2200,
-      reasoning: mode === "repository" ? "low" : "medium",
-      selfHostedOnline,
-    });
-
-    return {
-      response: result.response,
-      data: result.data,
-      provider: result.provider,
-      model: result.model,
-      mode,
-      toolsUsed: [],
-      sources: [],
-      webToolForced: false,
-    };
-  }
-
-  // Sandbox/agentic temporarily use Groq's managed code interpreter.
-  const model = mode === "sandbox" ? "groq/compound-mini" : "groq/compound";
-  const tools = mode === "sandbox"
-    ? ["code_interpreter"]
-    : ["web_search", "visit_website", "code_interpreter"];
-  const systemContent = `${args.systemContent.slice(0, 7_000)}\n\n${
-    mode === "sandbox"
-      ? "SANDBOX MODE: используй безопасный облачный code interpreter. Не утверждай, что код выполнен, если инструмент не запускался."
-      : "AGENTIC MODE: используй веб-поиск и code interpreter только когда они нужны. Чётко отличай найденные факты от вычисленных результатов."
-  }`;
-
-  const result = await groqRequest({
+async function textOnly(args: RunArgs, options: {
+  systemContent: string;
+  history: BrainMessage[];
+  maxHistory?: number;
+}) {
+  const run = await runLegacyBrain({
     apiKey: args.apiKey,
-    model,
-    systemContent,
-    history: args.history.slice(-6),
-    maxCompletion: mode === "sandbox" ? 1200 : 1400,
-    compoundTools: tools,
+    defaultModel: args.defaultModel,
+    systemContent: options.systemContent,
+    history: options.history.slice(-(options.maxHistory || 8)),
+    query: TEXT_ONLY_QUERY,
+    repositoryRead: false,
+  });
+  return normalizeLegacy(run, "chat");
+}
+
+function directSources(
+  sources: Array<{ title: string; url: string; snippet: string }>,
+) {
+  return sources.map(({ title, url }) => ({ title, url }));
+}
+
+function parseJsonObject(value: string) {
+  const cleaned = value
+    .trim()
+    .replace(/^```(?:json)?\s*/iu, "")
+    .replace(/\s*```$/u, "");
+  try {
+    return JSON.parse(cleaned) as Record<string, unknown>;
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}/u);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function normalizeLanguage(value: unknown): SandboxLanguage | null {
+  if (typeof value !== "string") return null;
+  const language = value.toLowerCase().trim();
+  if (["python", "py", "python3"].includes(language)) return "python";
+  if (["javascript", "js", "node", "nodejs"].includes(language)) {
+    return "javascript";
+  }
+  return null;
+}
+
+function fencedPlan(query: string): SandboxPlan | null {
+  const match = query.match(
+    /```(python|py|python3|javascript|js|node|nodejs)\s*\n([\s\S]*?)```/iu,
+  );
+  if (!match) return null;
+  const language = normalizeLanguage(match[1]);
+  const code = match[2]?.trim() || "";
+  if (!language || !code || code.length > 12_000) return null;
+  return {
+    language,
+    code,
+    purpose: "Выполнить код, явно переданный владельцем.",
+  };
+}
+
+async function buildSandboxPlan(
+  args: RunArgs,
+  verifiedContext = "",
+): Promise<SandboxPlan | null> {
+  const explicit = fencedPlan(args.query);
+  if (explicit) return explicit;
+
+  const planner = await textOnly(args, {
+    systemContent: `Ты — планировщик безопасного выполнения кода Хасроя.
+Верни ТОЛЬКО валидный JSON без markdown:
+{"language":"python|javascript","code":"...","purpose":"..."}.
+Правила:
+- выбери Python 3.13 или Node.js 24;
+- только стандартная библиотека / встроенные модули;
+- программа должна печатать полезный итог в stdout;
+- сеть запрещена, не пытайся обращаться к интернету;
+- не читай секреты, env и системные файлы;
+- не запускай дочерние shell-команды;
+- код должен быть коротким и решать именно задачу владельца;
+- если передан VERIFIED SEARCH CONTEXT, используй его как данные и не выдумывай другие факты.`,
+    history: [
+      {
+        role: "user",
+        content: `${args.query.slice(0, 3_000)}${
+          verifiedContext
+            ? `\n\nVERIFIED SEARCH CONTEXT\n${verifiedContext.slice(0, 7_000)}`
+            : ""
+        }`,
+      },
+    ],
+  });
+
+  if (!planner.response.ok) return null;
+  const content = planner.data?.choices?.[0]?.message?.content || "";
+  const parsed = parseJsonObject(content);
+  if (!parsed) return null;
+
+  const language = normalizeLanguage(parsed.language);
+  const code = typeof parsed.code === "string" ? parsed.code.trim() : "";
+  const purpose =
+    typeof parsed.purpose === "string"
+      ? parsed.purpose.trim().slice(0, 240)
+      : "Выполнить вычисление в изолированной песочнице.";
+
+  if (!language || !code || code.length > 12_000) return null;
+  return { language, code, purpose };
+}
+
+function sandboxEvidence(plan: SandboxPlan, execution: SandboxExecution) {
+  return [
+    "VERIFIED VERCEL SANDBOX EXECUTION",
+    `environment=Vercel Sandbox Firecracker`,
+    `runtime=${execution.runtime}`,
+    `network=deny-all`,
+    `language=${execution.language}`,
+    `exitCode=${execution.exitCode}`,
+    `durationMs=${execution.durationMs}`,
+    `purpose=${plan.purpose}`,
+    "STDOUT:",
+    execution.stdout || "(empty)",
+    "STDERR:",
+    execution.stderr || "(empty)",
+  ].join("\n");
+}
+
+function syntheticSandboxRun(
+  mode: BrainMode,
+  execution: SandboxExecution,
+  sources: Array<{ title: string; url: string }> = [],
+): BrainRun {
+  const content = execution.ok
+    ? `Код реально выполнен в изолированной Vercel Sandbox (${execution.runtime}).\n\n${
+        execution.stdout || "Команда завершилась без вывода."
+      }`
+    : `Код реально запускался в изолированной Vercel Sandbox, но завершился с exit code ${execution.exitCode}.\n\n${
+        execution.stderr || execution.stdout || "Вывод отсутствует."
+      }`;
+
+  const data: BrainResponseData = {
+    model: `vercel-sandbox/${execution.runtime}`,
+    choices: [{ message: { content } }],
+  };
+  const response = new Response(JSON.stringify(data), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "x-khasroy-ai-provider": "vercel-sandbox",
+    },
   });
 
   return {
-    response: result.response,
-    data: result.data,
-    provider: "groq",
-    model: result.data?.model || model,
+    response,
+    data,
+    provider: "vercel-sandbox",
+    model: data.model || "vercel-sandbox",
     mode,
-    toolsUsed: normalizeTools(result.data),
-    sources: extractSources(result.data),
-    webToolForced: false,
+    toolsUsed: [`code_interpreter:vercel_sandbox`, `runtime:${execution.runtime}`],
+    sources,
+    webToolForced: sources.length > 0,
   };
+}
+
+async function answerAfterExecution(
+  args: RunArgs,
+  mode: "sandbox" | "agentic",
+  plan: SandboxPlan,
+  execution: SandboxExecution,
+  searchContext = "",
+  sources: Array<{ title: string; url: string }> = [],
+): Promise<BrainRun> {
+  const evidence = sandboxEvidence(plan, execution);
+  const final = await textOnly(args, {
+    systemContent: `${args.systemContent.slice(0, 8_000)}
+
+${searchContext ? `VERIFIED SERVER SEARCH RESULTS\n${searchContext.slice(0, 7_000)}\n\n` : ""}${evidence}
+
+Сформируй итоговый ответ владельцу.
+Строго отличай реальные результаты выполнения от предположений.
+Не утверждай, что запускал что-либо кроме указанного VERIFIED VERCEL SANDBOX EXECUTION.
+Если exitCode не 0 — честно объясни ошибку.
+${sources.length ? "Используй только переданные реальные источники для веб-фактов." : ""}`,
+    history: args.history.slice(-6),
+    maxHistory: 6,
+  });
+
+  if (!final.response.ok || !final.data?.choices?.[0]?.message?.content) {
+    return syntheticSandboxRun(mode, execution, sources);
+  }
+
+  return {
+    response: final.response,
+    data: final.data,
+    provider: final.provider,
+    model: final.model,
+    mode,
+    toolsUsed: [
+      ...(sources.length ? ["direct_web_search:server"] : []),
+      "code_interpreter:vercel_sandbox",
+      `runtime:${execution.runtime}`,
+    ],
+    sources,
+    webToolForced: sources.length > 0,
+  };
+}
+
+async function runIndependentResearch(args: RunArgs): Promise<BrainRun | null> {
+  try {
+    const searched = await searchWebDirect(args.query, 6);
+    const sources = directSources(searched.sources);
+    const final = await textOnly(args, {
+      systemContent: `${args.systemContent.slice(0, 8_000)}
+
+VERIFIED SERVER WEB SEARCH RESULTS
+${searched.context.slice(0, 8_000)}
+
+Ответь на запрос владельца только по этим реальным результатам для актуальных веб-фактов.
+Не утверждай, что посещал страницы, если у тебя есть только результаты поиска.
+Перечисли источники.`,
+      history: args.history.slice(-8),
+    });
+
+    if (!final.response.ok || !final.data?.choices?.[0]?.message?.content) {
+      return null;
+    }
+
+    return {
+      response: final.response,
+      data: final.data,
+      provider: final.provider,
+      model: final.model,
+      mode: "research",
+      toolsUsed: ["direct_web_search:server"],
+      sources,
+      webToolForced: true,
+    };
+  } catch (error) {
+    console.error("Khasroy independent research failed", error);
+    return null;
+  }
+}
+
+async function runIndependentSandbox(
+  args: RunArgs,
+): Promise<BrainRun | null> {
+  try {
+    const plan = await buildSandboxPlan(args);
+    if (!plan) return null;
+    const execution = await runCodeSandbox(plan);
+    return await answerAfterExecution(args, "sandbox", plan, execution);
+  } catch (error) {
+    console.error("Khasroy Vercel Sandbox execution failed", error);
+    return null;
+  }
+}
+
+async function runIndependentAgentic(
+  args: RunArgs,
+): Promise<BrainRun | null> {
+  try {
+    const searched = await searchWebDirect(args.query, 6);
+    const sources = directSources(searched.sources);
+    const plan = await buildSandboxPlan(args, searched.context);
+    if (!plan) return null;
+    const execution = await runCodeSandbox(plan);
+    return await answerAfterExecution(
+      args,
+      "agentic",
+      plan,
+      execution,
+      searched.context,
+      sources,
+    );
+  } catch (error) {
+    console.error("Khasroy independent agentic pipeline failed", error);
+    return null;
+  }
+}
+
+export async function runBrain(args: RunArgs): Promise<BrainRun> {
+  const mode = selectBrainMode(args.query, args.repositoryRead);
+
+  if (mode === "research") {
+    const independent = await runIndependentResearch(args);
+    if (independent) return independent;
+  }
+
+  if (mode === "sandbox") {
+    const independent = await runIndependentSandbox(args);
+    if (independent) return independent;
+  }
+
+  if (mode === "agentic") {
+    const independent = await runIndependentAgentic(args);
+    if (independent) return independent;
+  }
+
+  return normalizeLegacy(await runLegacyBrain(args));
 }
 
 export function usedWebTool(run: BrainRun) {
   return (
     run.webToolForced ||
     run.sources.length > 0 ||
-    run.toolsUsed.some((tool) => /search|visit|browser/.test(tool))
+    run.toolsUsed.some((tool) => /search|visit|browser/iu.test(tool))
   );
 }
 
 export function usedCodeInterpreter(run: BrainRun) {
-  return run.toolsUsed.some((tool) => /python|code|interpreter/.test(tool));
+  return run.toolsUsed.some((tool) =>
+    /python|code|interpreter|vercel_sandbox/iu.test(tool),
+  );
 }
