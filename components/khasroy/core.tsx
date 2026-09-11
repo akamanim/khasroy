@@ -50,7 +50,7 @@ export function Core({
   const canvas = useRef<HTMLCanvasElement>(null);
   const current = useRef({ state, evolution });
   const scene = useRef<ReturnType<
-    typeof import("./core-scene").createCoreScene
+    typeof import("./core-scene-v3").createCoreScene
   > | null>(null);
   const [ready, setReady] = useState(false);
 
@@ -73,7 +73,7 @@ export function Core({
 
     async function start() {
       try {
-        const { createCoreScene } = await import("./core-scene");
+        const { createCoreScene } = await import("./core-scene-v3");
         if (cancelled) return;
         scene.current = createCoreScene(element!, () => current.current);
         setReady(true);
@@ -106,12 +106,12 @@ export function Core({
 
   const neonFilter =
     state === "thinking"
-      ? "hue-rotate(168deg) saturate(1.9) brightness(1.2) contrast(1.08) drop-shadow(0 0 16px rgba(45,190,255,.72)) drop-shadow(0 0 34px rgba(47,76,255,.45))"
+      ? "saturate(1.25) brightness(1.16) contrast(1.06) drop-shadow(0 0 18px rgba(45,190,255,.76)) drop-shadow(0 0 38px rgba(71,77,255,.46))"
       : state === "responding"
-        ? "hue-rotate(172deg) saturate(2.05) brightness(1.26) contrast(1.08) drop-shadow(0 0 18px rgba(80,225,255,.82)) drop-shadow(0 0 38px rgba(62,90,255,.52))"
+        ? "saturate(1.3) brightness(1.2) contrast(1.06) drop-shadow(0 0 20px rgba(80,225,255,.84)) drop-shadow(0 0 42px rgba(91,72,255,.52))"
         : state === "listening"
-          ? "hue-rotate(166deg) saturate(1.75) brightness(1.12) contrast(1.06) drop-shadow(0 0 14px rgba(43,192,255,.58))"
-          : "hue-rotate(168deg) saturate(1.65) brightness(1.08) contrast(1.06) drop-shadow(0 0 13px rgba(38,168,255,.5))";
+          ? "saturate(1.18) brightness(1.1) contrast(1.04) drop-shadow(0 0 15px rgba(43,192,255,.62))"
+          : "saturate(1.12) brightness(1.06) contrast(1.04) drop-shadow(0 0 14px rgba(38,168,255,.52))";
 
   return (
     <div
