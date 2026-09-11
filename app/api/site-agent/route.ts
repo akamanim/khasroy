@@ -6,7 +6,7 @@ import {
   formatSiteAgentChatResponse,
   recordVerifiedSiteAgentSkills,
   runFullSiteAgent,
-} from "@/lib/site-agent-v2";
+} from "@/lib/site-agent-v3";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +32,7 @@ function friendlySiteAgentError(error: unknown) {
   if (/screenshot provider/iu.test(raw)) {
     return {
       status: 502,
-      message: `Site Agent остановился на этапе ${stage}: сервис скриншотов ещё не подготовил страницу. Повторите через несколько секунд.`,
+      message: `Site Agent остановился на этапе ${stage}: сервис скриншотов не успел подготовить изображение даже после расширенного ожидания. Незавершённый прогон останется LEARNING.`,
     };
   }
   return {
@@ -77,9 +77,6 @@ export async function POST(request: Request) {
       goal: typeof body.goal === "string" ? body.goal.slice(0, 1200) : query.slice(0, 1200),
     });
 
-    // All six Site Agent skills are promoted together only after a real
-    // screenshot → audit → redesign → screenshot → before/after cycle
-    // demonstrates measurable improvement without visual regressions.
     if (result.repair.success) {
       await recordVerifiedSiteAgentSkills(ownerKey, result);
     }
