@@ -50,7 +50,7 @@ export function Core({
   const canvas = useRef<HTMLCanvasElement>(null);
   const current = useRef({ state, evolution });
   const scene = useRef<ReturnType<
-    typeof import("./core-scene-v4").createCoreScene
+    typeof import("./core-scene-v5").createCoreScene
   > | null>(null);
   const [ready, setReady] = useState(false);
 
@@ -73,7 +73,7 @@ export function Core({
 
     async function start() {
       try {
-        const { createCoreScene } = await import("./core-scene-v4");
+        const { createCoreScene } = await import("./core-scene-v5");
         if (cancelled) return;
         scene.current = createCoreScene(element!, () => current.current);
         setReady(true);
@@ -106,12 +106,12 @@ export function Core({
 
   const neonFilter =
     state === "thinking"
-      ? "brightness(1.10) contrast(1.04) drop-shadow(0 0 14px rgba(60,205,255,.50))"
+      ? "brightness(1.08) contrast(1.03) drop-shadow(0 0 12px rgba(60,205,255,.44))"
       : state === "responding"
-        ? "brightness(1.12) contrast(1.04) drop-shadow(0 0 16px rgba(90,225,255,.55))"
+        ? "brightness(1.10) contrast(1.03) drop-shadow(0 0 14px rgba(90,225,255,.48))"
         : state === "listening"
-          ? "brightness(1.05) drop-shadow(0 0 10px rgba(50,185,255,.38))"
-          : "brightness(1.02) drop-shadow(0 0 9px rgba(40,160,255,.30))";
+          ? "brightness(1.04) drop-shadow(0 0 9px rgba(50,185,255,.32))"
+          : "brightness(1.01) drop-shadow(0 0 8px rgba(40,160,255,.24))";
 
   return (
     <div
@@ -137,24 +137,24 @@ export function Core({
           className="core-fallback"
           viewBox="0 0 400 300"
           aria-hidden="true"
-          style={{ filter: "drop-shadow(0 0 18px rgba(45,195,255,.75))" }}
+          style={{ filter: "drop-shadow(0 0 16px rgba(45,195,255,.68))" }}
         >
           <defs>
             <radialGradient id="field-glow">
               <stop stopColor="#eafcff" />
-              <stop offset=".2" stopColor="#6fe7ff" stopOpacity=".9" />
-              <stop offset=".58" stopColor="#287dff" stopOpacity=".32" />
+              <stop offset=".2" stopColor="#6fe7ff" stopOpacity=".82" />
+              <stop offset=".58" stopColor="#287dff" stopOpacity=".24" />
               <stop offset="1" stopColor="#132bff" stopOpacity="0" />
             </radialGradient>
           </defs>
-          <path d="M88 161C99 93 149 62 217 74c53 9 104 48 96 102-7 46-55 74-113 66-61-8-123-33-112-81Z" fill="url(#field-glow)" opacity=".8" />
-          <g fill="none" stroke="#5fdcff" opacity=".75">
+          <path d="M88 161C99 93 149 62 217 74c53 9 104 48 96 102-7 46-55 74-113 66-61-8-123-33-112-81Z" fill="url(#field-glow)" opacity=".72" />
+          <g fill="none" stroke="#5fdcff" opacity=".64">
             <path d="M102 157 147 116l42 22 31-47 43 39 36 10" />
             <path d="m111 188 53-34 32 39 50-53 45 39" />
             <path d="m137 91 27 63 54 16 22 51" />
           </g>
           <g fill="#dffcff">
-            <circle cx="147" cy="116" r="4"/><circle cx="189" cy="138" r="3"/><circle cx="220" cy="91" r="5"/><circle cx="263" cy="130" r="4"/><circle cx="164" cy="154" r="3"/><circle cx="196" cy="193" r="4"/><circle cx="246" cy="140" r="3"/>
+            <circle cx="147" cy="116" r="3"/><circle cx="189" cy="138" r="2.5"/><circle cx="220" cy="91" r="4"/><circle cx="263" cy="130" r="3"/><circle cx="164" cy="154" r="2.5"/><circle cx="196" cy="193" r="3"/><circle cx="246" cy="140" r="2.5"/>
           </g>
         </svg>
       )}
