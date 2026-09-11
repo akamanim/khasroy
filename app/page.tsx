@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ArrowUp, Plus, Activity, Sparkles, ShieldCheck } from "lucide-react";
 import { Core, type CoreEvolution } from "@/components/khasroy/core";
+import { MarkdownMessage } from "@/components/khasroy/markdown-message";
 import {
   authenticateOwner,
   chat,
@@ -297,12 +298,16 @@ export default function Home() {
               <div className="avatar">
                 {m.role === "assistant" ? <Sparkles size={16} /> : "ВЫ"}
               </div>
-              <div>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div className="message-label">
                   {m.role === "assistant" ? "Хасрой" : "ВЫ"}
                   {m.role === "assistant" && <span>AI RESPONSE</span>}
                 </div>
-                <p>{m.content}</p>
+                {m.role === "assistant" ? (
+                  <MarkdownMessage content={m.content} />
+                ) : (
+                  <p>{m.content}</p>
+                )}
               </div>
             </article>
           ))}
