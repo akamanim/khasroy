@@ -54,6 +54,11 @@ function smooth(current: number, target: number, dt: number, tau: number) {
   return current + (target - current) * (1 - Math.exp(-dt / tau));
 }
 
+function smoothStep(value: number) {
+  const t = clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 export function Core({
   state,
   evolution = BASE_EVOLUTION,
@@ -100,8 +105,9 @@ export function Core({
     });
     resize.observe(element);
 
-    const shellPoints = Array.from({ length: 1650 }, (_, index) => {
-      const y = 1 - (index / 1649) * 2;
+    const shellPointCount = 2350;
+    const shellPoints = Array.from({ length: shellPointCount }, (_, index) => {
+      const y = 1 - (index / (shellPointCount - 1)) * 2;
       const ring = Math.sqrt(Math.max(0, 1 - y * y));
       const phi = index * Math.PI * (3 - Math.sqrt(5));
       return {
@@ -112,33 +118,52 @@ export function Core({
       };
     });
 
-    const filaments = Array.from({ length: 118 }, (_, index) => ({
+    const haloPoints = Array.from({ length: 760 }, (_, index) => ({
+      angle: seeded(index, 41) * Math.PI * 2,
+      radius: 1.04 + seeded(index, 42) * 0.68,
+      squash: 0.62 + seeded(index, 43) * 0.36,
+      speed: (0.16 + seeded(index, 44) * 0.65) * (index % 2 ? -1 : 1),
+      phase: seeded(index, 45) * Math.PI * 2,
+      size: 0.35 + seeded(index, 46) * 1.15,
+      alpha: 0.08 + seeded(index, 47) * 0.34,
+    }));
+
+    const longFilaments = Array.from({ length: 24 }, (_, index) => ({
       rot: seeded(index, 10) * Math.PI * 2,
-      tilt: (seeded(index, 11) - 0.5) * 2.5,
-      rx: 0.18 + seeded(index, 12) * 0.92,
-      ry: 0.04 + seeded(index, 13) * 0.4,
+      tilt: (seeded(index, 11) - 0.5) * 1.9,
+      radius: 0.72 + seeded(index, 12) * 0.63,
+      squash: 0.14 + seeded(index, 13) * 0.28,
       start: seeded(index, 14) * Math.PI * 2,
-      span: 0.12 + seeded(index, 15) * 1.5,
-      speed: (0.25 + seeded(index, 16) * 2.1) * (index % 2 ? -1 : 1),
-      alpha: 0.06 + seeded(index, 17) * 0.2,
-      width: 0.35 + seeded(index, 18) * 0.95,
+      span: 1.35 + seeded(index, 15) * 2.75,
+      speed: (0.24 + seeded(index, 16) * 1.25) * (index % 2 ? -1 : 1),
+      alpha: 0.12 + seeded(index, 17) * 0.24,
+      width: 0.8 + seeded(index, 18) * 0.95,
       wobble: seeded(index, 19) * Math.PI * 2,
     }));
 
-    const ribbons = Array.from({ length: 26 }, (_, index) => ({
-      rot: seeded(index, 31) * Math.PI * 2,
-      radius: 0.26 + seeded(index, 32) * 0.92,
-      squash: 0.09 + seeded(index, 33) * 0.38,
-      span: 0.55 + seeded(index, 34) * 2.15,
-      phase: seeded(index, 35) * Math.PI * 2,
-      speed: (0.35 + seeded(index, 36) * 1.4) * (index % 2 ? -1 : 1),
+    const orbits = Array.from({ length: 8 }, (_, index) => ({
+      radius: 1.08 + index * 0.065 + seeded(index, 51) * 0.07,
+      squash: 0.2 + seeded(index, 52) * 0.32,
+      tilt: -0.78 + seeded(index, 53) * 1.56,
+      phase: seeded(index, 54) * Math.PI * 2,
+      speed: (0.12 + seeded(index, 55) * 0.42) * (index % 2 ? -1 : 1),
+      width: index % 3 === 0 ? 1.8 : 1.05,
+      alpha: 0.12 + seeded(index, 56) * 0.2,
+    }));
+
+    const braids = Array.from({ length: 3 }, (_, index) => ({
+      phase: (index / 3) * Math.PI * 2 + seeded(index, 61) * 0.45,
+      speed: (0.16 + seeded(index, 62) * 0.2) * (index % 2 ? -1 : 1),
+      turns: 1.38 + seeded(index, 63) * 0.42,
+      flatten: 0.42 + seeded(index, 64) * 0.13,
+      reach: 1.18 + seeded(index, 65) * 0.2,
     }));
 
     function drawBackdrop(cx: number, cy: number, radius: number, time: number) {
       const breath = reduced.matches ? 1 : 1 + Math.sin(time * 0.00155) * 0.045;
-      const glowRadius = radius * (1.5 + energy * 0.3) * breath;
+      const glowRadius = radius * (1.72 + energy * 0.34) * breath;
       const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowRadius);
-      glow.addColorStop(0, `rgba(255,214,108,${0.13 + energy * 0.16})`);
+      glow.addColorStop(0, `rgba(255,214,108,${0.14 + energy * 0.17})`);
       glow.addColorStop(0.2, `rgba(255,142,28,${0.1 + energy * 0.11})`);
       glow.addColorStop(0.53, `rgba(170,59,5,${0.045 + energy * 0.055})`);
       glow.addColorStop(1, "rgba(30,8,0,0)");
@@ -150,9 +175,9 @@ export function Core({
       const motion = reduced.matches ? 0 : time * 0.00055;
       return (
         1 +
-        Math.sin(theta * 3 + motion * (0.65 + layer * 0.07) + layer) * 0.12 +
-        Math.sin(theta * 5 - motion * 0.42 + layer * 1.7) * 0.055 +
-        Math.cos(theta * 2 + motion * 0.31) * 0.035
+        Math.sin(theta * 3 + motion * (0.65 + layer * 0.07) + layer) * 0.105 +
+        Math.sin(theta * 5 - motion * 0.42 + layer * 1.7) * 0.045 +
+        Math.cos(theta * 2 + motion * 0.31) * 0.03
       );
     }
 
@@ -160,61 +185,44 @@ export function Core({
       const breath = reduced.matches
         ? 1
         : 1 + Math.sin(time * 0.0022) * 0.06 + Math.sin(time * 0.00073) * 0.035;
-      const nucleus = radius * (0.21 + energy * 0.035) * breath;
+      const nucleus = radius * (0.205 + energy * 0.03) * breath;
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.globalCompositeOperation = "lighter";
 
-      for (let layer = 4; layer >= 0; layer -= 1) {
-        const layerRadius = nucleus * (0.72 + layer * 0.18);
-        const rotation = reverseSpin * (0.42 + layer * 0.09) * (layer % 2 ? -1 : 1);
+      for (let layer = 2; layer >= 0; layer -= 1) {
+        const layerRadius = nucleus * (0.86 + layer * 0.2);
+        const rotation = reverseSpin * (0.34 + layer * 0.08) * (layer % 2 ? -1 : 1);
         ctx.save();
-        ctx.rotate(rotation + layer * 0.4);
+        ctx.rotate(rotation + layer * 0.54);
         ctx.beginPath();
-        for (let i = 0; i <= 96; i += 1) {
-          const theta = (i / 96) * Math.PI * 2;
+        for (let i = 0; i <= 112; i += 1) {
+          const theta = (i / 112) * Math.PI * 2;
           const rr = layerRadius * organicRadius(theta, time, layer);
           const x = Math.cos(theta) * rr;
-          const y = Math.sin(theta) * rr * (0.76 + layer * 0.02);
+          const y = Math.sin(theta) * rr * (0.77 + layer * 0.025);
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
         ctx.closePath();
         ctx.strokeStyle = layer === 0
-          ? `rgba(255,247,195,${0.38 + energy * 0.38})`
-          : `rgba(255,149,31,${0.1 + energy * 0.1 + layer * 0.025})`;
-        ctx.lineWidth = layer === 0 ? 1.25 : 0.65;
+          ? `rgba(255,247,195,${0.46 + energy * 0.35})`
+          : `rgba(255,153,36,${0.16 + energy * 0.13 + layer * 0.035})`;
+        ctx.lineWidth = layer === 0 ? 1.55 : 1.05;
         ctx.stroke();
         ctx.restore();
       }
 
-      const coreGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, nucleus * 2.5);
+      const coreGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, nucleus * 2.65);
       coreGlow.addColorStop(0, `rgba(255,255,221,${0.72 + energy * 0.22})`);
       coreGlow.addColorStop(0.14, `rgba(255,226,126,${0.58 + energy * 0.24})`);
       coreGlow.addColorStop(0.42, `rgba(255,143,24,${0.22 + energy * 0.18})`);
       coreGlow.addColorStop(1, "rgba(255,70,0,0)");
       ctx.fillStyle = coreGlow;
       ctx.beginPath();
-      ctx.arc(0, 0, nucleus * 2.5, 0, Math.PI * 2);
+      ctx.arc(0, 0, nucleus * 2.65, 0, Math.PI * 2);
       ctx.fill();
-
-      for (let index = 0; index < 20; index += 1) {
-        const a = (index / 20) * Math.PI * 2 + spin * 1.8;
-        const inner = nucleus * (0.2 + (index % 3) * 0.1);
-        const outer = nucleus * (0.82 + (index % 5) * 0.11);
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner * 0.78);
-        ctx.quadraticCurveTo(
-          Math.cos(a + 0.35) * outer * 0.58,
-          Math.sin(a - 0.2) * outer * 0.4,
-          Math.cos(a + 0.18) * outer,
-          Math.sin(a + 0.18) * outer * 0.78,
-        );
-        ctx.strokeStyle = `rgba(255,225,137,${0.12 + energy * 0.24})`;
-        ctx.lineWidth = index % 4 === 0 ? 1.2 : 0.55;
-        ctx.stroke();
-      }
 
       ctx.restore();
     }
@@ -241,11 +249,11 @@ export function Core({
         const livingDistortion = reduced.matches
           ? 1
           : 1 +
-            Math.sin(longitude * 3 + time * 0.00072 + point.seed * 3) * 0.095 +
-            Math.cos(latitude * 5 - time * 0.00053 + point.seed * 5) * 0.055 +
-            Math.sin((x1 + y1) * 6 + time * 0.0009) * 0.025 * energy;
+            Math.sin(longitude * 3 + time * 0.00072 + point.seed * 3) * 0.09 +
+            Math.cos(latitude * 5 - time * 0.00053 + point.seed * 5) * 0.05 +
+            Math.sin((x1 + y1) * 6 + time * 0.0009) * 0.022 * energy;
 
-        const sideBias = 1 + 0.055 * Math.sin(longitude + 0.9) - 0.035 * y1;
+        const sideBias = 1 + 0.05 * Math.sin(longitude + 0.9) - 0.03 * y1;
         const rx = livingDistortion * sideBias * breath;
         const perspective = 2.85 / (3.05 - z2 * 0.5);
         const px = cx + x1 * radius * 1.08 * perspective * rx;
@@ -253,42 +261,68 @@ export function Core({
         const depth = (z2 + 1) / 2;
         const flicker = reduced.matches
           ? 1
-          : 0.7 + Math.sin(time * 0.0042 + point.seed * 31) * 0.3;
-        const alpha = clamp((0.055 + depth * 0.32) * flicker * (0.78 + energy * 0.65), 0.025, 0.6);
+          : 0.74 + Math.sin(time * 0.0042 + point.seed * 31) * 0.26;
+        const alpha = clamp((0.05 + depth * 0.34) * flicker * (0.8 + energy * 0.68), 0.025, 0.64);
 
         ctx.fillStyle = depth > 0.68
-          ? `rgba(255,194,91,${alpha})`
+          ? `rgba(255,203,108,${alpha})`
           : `rgba(224,96,12,${alpha})`;
         ctx.beginPath();
-        ctx.arc(px, py, 0.28 + depth * 0.62, 0, Math.PI * 2);
+        ctx.arc(px, py, 0.3 + depth * 0.68, 0, Math.PI * 2);
         ctx.fill();
       }
 
       ctx.restore();
     }
 
-    function drawFilaments(cx: number, cy: number, radius: number, time: number) {
+    function drawHaloParticles(cx: number, cy: number, radius: number, time: number) {
       ctx.save();
       ctx.translate(cx, cy);
       ctx.globalCompositeOperation = "lighter";
 
-      for (const filament of filaments) {
-        const drift = reduced.matches ? 0 : time * 0.00005 * filament.speed * (0.7 + energy * 2.15);
-        const wobble = reduced.matches ? 0 : Math.sin(time * 0.0012 + filament.wobble) * 0.05;
+      for (const point of haloPoints) {
+        const drift = reduced.matches ? 0 : time * 0.000045 * point.speed * (0.7 + energy * 1.25);
+        const a = point.angle + point.phase * 0.1 + drift + spin * 0.09;
+        const pulse = reduced.matches ? 1 : 1 + Math.sin(time * 0.0018 + point.phase) * 0.055;
+        const rr = radius * point.radius * pulse;
+        const x = Math.cos(a) * rr;
+        const y = Math.sin(a) * rr * point.squash;
+        const shimmer = reduced.matches ? 1 : 0.72 + Math.sin(time * 0.003 + point.phase * 4) * 0.28;
+        const alpha = clamp(point.alpha * shimmer * (0.68 + energy * 0.9), 0.035, 0.62);
+
+        ctx.fillStyle = point.radius > 1.42
+          ? `rgba(255,137,30,${alpha})`
+          : `rgba(255,208,119,${alpha})`;
+        ctx.beginPath();
+        ctx.arc(x, y, point.size * (0.86 + energy * 0.26), 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    function drawLongFilaments(cx: number, cy: number, radius: number, time: number) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalCompositeOperation = "lighter";
+
+      for (const filament of longFilaments) {
+        const drift = reduced.matches ? 0 : time * 0.00005 * filament.speed * (0.7 + energy * 1.7);
+        const wobble = reduced.matches ? 0 : Math.sin(time * 0.001 + filament.wobble) * 0.035;
         ctx.save();
-        ctx.rotate(filament.rot + drift + spin * 0.12);
+        ctx.rotate(filament.rot + drift + spin * 0.11);
         ctx.beginPath();
         ctx.ellipse(
           0,
           0,
-          radius * filament.rx * (1 + wobble),
-          radius * filament.ry * (1 - wobble * 0.6),
+          radius * filament.radius * (1 + wobble),
+          radius * filament.radius * filament.squash * (1 - wobble * 0.45),
           filament.tilt + wobble,
           filament.start + drift,
           filament.start + filament.span + drift,
         );
-        ctx.strokeStyle = `rgba(255,139,25,${Math.min(0.5, filament.alpha * (0.75 + energy * 1.5))})`;
-        ctx.lineWidth = filament.width * (0.85 + energy * 0.3);
+        ctx.strokeStyle = `rgba(255,145,32,${Math.min(0.58, filament.alpha * (0.82 + energy * 1.45))})`;
+        ctx.lineWidth = filament.width * (0.95 + energy * 0.24);
         ctx.stroke();
         ctx.restore();
       }
@@ -296,32 +330,76 @@ export function Core({
       ctx.restore();
     }
 
-    function drawRibbons(cx: number, cy: number, radius: number, time: number) {
+    function drawOrbits(cx: number, cy: number, radius: number, time: number, front: boolean) {
       ctx.save();
       ctx.translate(cx, cy);
       ctx.globalCompositeOperation = "lighter";
 
-      for (let index = 0; index < ribbons.length; index += 1) {
-        const ribbon = ribbons[index];
-        const drift = reduced.matches ? 0 : time * 0.000045 * ribbon.speed * (0.8 + energy * 1.8);
+      for (let index = 0; index < orbits.length; index += 1) {
+        if ((index % 2 === 0) !== front) continue;
+        const orbit = orbits[index];
+        const drift = reduced.matches ? 0 : time * 0.00012 * orbit.speed * (0.7 + energy * 1.2);
         ctx.save();
-        ctx.rotate(ribbon.rot + drift + reverseSpin * 0.1);
+        ctx.rotate(orbit.tilt + drift * 0.23 + reverseSpin * 0.08);
         ctx.beginPath();
         ctx.ellipse(
           0,
           0,
-          radius * ribbon.radius,
-          radius * ribbon.radius * ribbon.squash,
-          ribbon.phase * 0.3,
-          ribbon.phase + drift,
-          ribbon.phase + ribbon.span + drift,
+          radius * orbit.radius,
+          radius * orbit.radius * orbit.squash,
+          orbit.phase * 0.16,
+          orbit.phase + drift,
+          orbit.phase + Math.PI * 1.72 + drift,
         );
-        ctx.strokeStyle = index % 4 === 0
-          ? `rgba(255,232,157,${0.13 + energy * 0.35})`
-          : `rgba(255,122,17,${0.09 + energy * 0.22})`;
-        ctx.lineWidth = index % 5 === 0 ? 1.4 : 0.65;
+        ctx.strokeStyle = index % 3 === 0
+          ? `rgba(255,235,169,${orbit.alpha + energy * 0.27})`
+          : `rgba(255,127,22,${orbit.alpha + energy * 0.2})`;
+        ctx.lineWidth = orbit.width * (0.96 + energy * 0.2);
         ctx.stroke();
         ctx.restore();
+      }
+
+      ctx.restore();
+    }
+
+    function drawBraids(cx: number, cy: number, radius: number, time: number) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalCompositeOperation = "lighter";
+
+      for (let bundleIndex = 0; bundleIndex < braids.length; bundleIndex += 1) {
+        const braid = braids[bundleIndex];
+        const rotation = reduced.matches
+          ? braid.phase
+          : braid.phase + time * 0.00017 * braid.speed * (0.75 + energy * 1.8) + spin * 0.18;
+
+        for (let strand = 0; strand < 3; strand += 1) {
+          const strandPhase = (strand / 3) * Math.PI * 2;
+          ctx.beginPath();
+
+          for (let step = 0; step <= 92; step += 1) {
+            const t = step / 92;
+            const eased = smoothStep(t);
+            const angle = rotation + eased * Math.PI * 2 * braid.turns;
+            const rr = radius * (0.17 + eased * braid.reach);
+            const weave = Math.sin(t * Math.PI * 13 + strandPhase + rotation * 2.1)
+              * radius
+              * (0.008 + eased * 0.024);
+            const x = Math.cos(angle) * rr + Math.cos(angle + Math.PI / 2) * weave;
+            const y = Math.sin(angle) * rr * braid.flatten
+              + Math.sin(angle + Math.PI / 2) * weave * 0.7;
+
+            if (step === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+
+          const frontStrand = strand === ((Math.floor(time / 850) + bundleIndex) % 3);
+          ctx.strokeStyle = frontStrand
+            ? `rgba(255,240,179,${0.28 + energy * 0.36})`
+            : `rgba(255,128,25,${0.18 + energy * 0.27})`;
+          ctx.lineWidth = frontStrand ? 1.7 : 1.1;
+          ctx.stroke();
+        }
       }
 
       ctx.restore();
@@ -329,79 +407,82 @@ export function Core({
 
     function drawEvolution(cx: number, cy: number, radius: number, time: number) {
       const e = progress.current;
-      const detailCount = clamp(10 + e.level * 3 + e.skills * 2, 10, 72);
+      const detailCount = clamp(6 + e.level * 2 + e.skills, 6, 24);
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.globalCompositeOperation = "lighter";
 
       for (let index = 0; index < detailCount; index += 1) {
-        const lane = index % 7;
-        const ringRadius = radius * (1.03 + lane * 0.038);
+        const lane = index % 5;
+        const ringRadius = radius * (1.05 + lane * 0.055);
         const direction = index % 2 ? -1 : 1;
-        const drift = reduced.matches ? 0 : time * 0.000035 * direction * (0.7 + energy * 1.8);
+        const drift = reduced.matches ? 0 : time * 0.000035 * direction * (0.7 + energy * 1.5);
         const start = (index / detailCount) * Math.PI * 2 + lane * 0.37 + drift;
-        const span = 0.035 + (index % 6) * 0.032;
+        const span = 0.28 + (index % 5) * 0.11;
         ctx.beginPath();
         ctx.arc(0, 0, ringRadius, start, start + span);
-        ctx.strokeStyle = `rgba(255,133,28,${0.15 + energy * 0.28})`;
-        ctx.lineWidth = index % 7 === 0 ? 1.3 : 0.55;
+        ctx.strokeStyle = `rgba(255,139,34,${0.13 + energy * 0.25})`;
+        ctx.lineWidth = index % 5 === 0 ? 1.55 : 0.95;
         ctx.stroke();
       }
 
       if (e.capabilities.security > 0) {
         ctx.save();
-        ctx.setLineDash([6, 11]);
-        ctx.lineDashOffset = reduced.matches ? 0 : -time * 0.009 * (0.55 + energy);
+        ctx.setLineDash([11, 17]);
+        ctx.lineDashOffset = reduced.matches ? 0 : -time * 0.007 * (0.55 + energy);
         ctx.beginPath();
-        ctx.arc(0, 0, radius * 1.31, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(255,124,25,${0.12 + energy * 0.2})`;
-        ctx.lineWidth = 0.8;
+        ctx.arc(0, 0, radius * 1.38, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,137,31,${0.13 + energy * 0.2})`;
+        ctx.lineWidth = 1.1;
         ctx.stroke();
         ctx.restore();
       }
 
-      const codeNodes = clamp(e.capabilities.code * 8, 0, 40);
+      const codeNodes = clamp(e.capabilities.code * 7, 0, 35);
       for (let index = 0; index < codeNodes; index += 1) {
         const a = (index / Math.max(1, codeNodes)) * Math.PI * 2 + reverseSpin * 0.22;
-        const rr = radius * (0.83 + (index % 4) * 0.075);
+        const rr = radius * (0.86 + (index % 4) * 0.085);
         const x = Math.cos(a) * rr;
-        const y = Math.sin(a) * rr * 0.68;
-        ctx.strokeStyle = `rgba(255,189,82,${0.16 + energy * 0.28})`;
+        const y = Math.sin(a) * rr * 0.69;
+        ctx.strokeStyle = `rgba(255,196,91,${0.17 + energy * 0.27})`;
+        ctx.lineWidth = 1;
         ctx.strokeRect(x - 2, y - 2, 4, 4);
       }
 
       if (e.capabilities.memory > 0) {
         ctx.beginPath();
-        ctx.ellipse(0, 0, radius * 0.47, radius * 0.31, -0.35 + spin * 0.08, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(255,211,119,${0.12 + energy * 0.24})`;
-        ctx.lineWidth = 1.1;
+        ctx.ellipse(0, 0, radius * 0.49, radius * 0.3, -0.35 + spin * 0.08, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,218,132,${0.13 + energy * 0.24})`;
+        ctx.lineWidth = 1.25;
         ctx.stroke();
       }
 
       if (e.capabilities.internet > 0) {
         for (let index = 0; index < 3; index += 1) {
-          const a = -0.55 + index * 1.7 + spin * 0.08;
+          const a = -0.75 + index * 2.1 + spin * 0.08;
           ctx.beginPath();
-          ctx.moveTo(Math.cos(a) * radius * 0.8, Math.sin(a) * radius * 0.8);
-          ctx.lineTo(Math.cos(a) * radius * 1.48, Math.sin(a) * radius * 1.48);
-          ctx.strokeStyle = `rgba(255,163,55,${0.08 + energy * 0.2})`;
+          ctx.arc(0, 0, radius * (1.46 + index * 0.055), a, a + 0.62);
+          ctx.strokeStyle = `rgba(255,169,64,${0.11 + energy * 0.2})`;
+          ctx.lineWidth = 1.2;
           ctx.stroke();
         }
       }
 
       if (e.capabilities.vision > 0 || e.capabilities.images > 0) {
         ctx.beginPath();
-        ctx.ellipse(0, 0, radius * 0.28, radius * 0.12, spin * 0.18, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(255,239,183,${0.2 + energy * 0.28})`;
+        ctx.ellipse(0, 0, radius * 0.3, radius * 0.13, spin * 0.18, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,242,194,${0.22 + energy * 0.28})`;
+        ctx.lineWidth = 1.25;
         ctx.stroke();
       }
 
       if (e.capabilities.voice > 0) {
         for (let index = 0; index < 3; index += 1) {
           ctx.beginPath();
-          ctx.arc(0, 0, radius * (1.37 + index * 0.065), -0.42, 0.42);
-          ctx.strokeStyle = `rgba(255,145,36,${0.15 - index * 0.03 + energy * 0.08})`;
+          ctx.arc(0, 0, radius * (1.52 + index * 0.075), -0.48, 0.48);
+          ctx.strokeStyle = `rgba(255,151,42,${0.16 - index * 0.03 + energy * 0.08})`;
+          ctx.lineWidth = 1.1;
           ctx.stroke();
         }
       }
@@ -410,10 +491,10 @@ export function Core({
         const satellites = clamp(e.capabilities.agents * 3, 0, 12);
         for (let index = 0; index < satellites; index += 1) {
           const a = (index / satellites) * Math.PI * 2 + spin * 0.4;
-          const rr = radius * 1.18;
-          ctx.fillStyle = `rgba(255,226,142,${0.4 + energy * 0.35})`;
+          const rr = radius * 1.23;
+          ctx.fillStyle = `rgba(255,229,151,${0.42 + energy * 0.34})`;
           ctx.beginPath();
-          ctx.arc(Math.cos(a) * rr, Math.sin(a) * rr, 1.7, 0, Math.PI * 2);
+          ctx.arc(Math.cos(a) * rr, Math.sin(a) * rr, 1.8, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -446,13 +527,16 @@ export function Core({
       ctx.clearRect(0, 0, width, height);
       const cx = width / 2;
       const cy = height / 2;
-      const radius = Math.min(width, height) * (0.295 + energy * 0.006);
+      const radius = Math.min(width, height) * (0.292 + energy * 0.006);
 
       drawBackdrop(cx, cy, radius, time);
+      drawHaloParticles(cx, cy, radius, time);
+      drawOrbits(cx, cy, radius, time, false);
       drawShell(cx, cy, radius, time);
-      drawFilaments(cx, cy, radius, time);
-      drawRibbons(cx, cy, radius, time);
+      drawLongFilaments(cx, cy, radius, time);
+      drawBraids(cx, cy, radius, time);
       drawNucleus(cx, cy, radius, time);
+      drawOrbits(cx, cy, radius, time, true);
       drawEvolution(cx, cy, radius, time);
 
       frame = requestAnimationFrame(draw);
