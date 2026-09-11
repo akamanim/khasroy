@@ -94,7 +94,7 @@ main {
   top: 0;
 }
 .core-canvas { width: 100%; height: 100%; transition: filter .5s; }
-.khasroy-core { position: relative; width: 100%; height: calc(100% - 64px); }
+.khasroy-core { position: relative; width: 100%; height: 100%; }
 .core-canvas { display: block; }
 .core-fallback { position: absolute; inset: 0; width: 100%; height: 100%; }
 .core-coordinate { position: absolute; top: 49%; font: 10px/1.8 monospace; letter-spacing: 1px; color: #557585; }

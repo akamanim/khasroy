@@ -261,17 +261,6 @@ export default function Home() {
           </span>
         </div>
 
-        <div className="core-caption">
-          <span className="eyebrow">
-            {responding ? "ОТВЕТ ГОТОВ" : busy
-              ? "АНАЛИЗИРУЮ ЗАПРОС"
-              : focused
-                ? "СЛУШАЮ ВЛАДЕЛЬЦА"
-                : "НА СВЯЗИ. VERIFIED CORE ACTIVE."}
-          </span>
-          <h1>Мысль. Код. Развитие.</h1>
-          <p>Ядро строится из реально подтверждённых навыков.</p>
-        </div>
         <div className="stage-index">{levelLabel} / CORE EVOLUTION</div>
       </section>
 
