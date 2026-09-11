@@ -103,13 +103,21 @@ function numberFromMetadata(value: unknown) {
 
 function compactSources(sources: SearchSource[]) {
   return sources
-    .slice(0, 7)
+    .slice(0, 4)
     .map(
       (source, index) =>
-        `[${index + 1}] ${source.title}\n${source.url}\n${source.snippet}`,
+        `[${index + 1}] ${source.title}\n${source.url}\n${source.snippet.slice(0, 700)}`,
     )
     .join("\n\n")
-    .slice(0, 6_000);
+    .slice(0, 4_000);
+}
+
+function sourceIndex(sources: SearchSource[]) {
+  return sources
+    .slice(0, 5)
+    .map((source, index) => `[${index + 1}] ${source.title} — ${source.url}`)
+    .join("\n")
+    .slice(0, 2_000);
 }
 
 async function groqChat(args: {
@@ -164,8 +172,6 @@ async function groqWebResearch(args: {
     headers: {
       Authorization: `Bearer ${args.apiKey}`,
       "Content-Type": "application/json",
-      // The 2025-07-23 Compound version uses Basic Search: smaller context,
-      // lower latency and less risk of a 413 on autonomous training cycles.
       "Groq-Model-Version": "2025-07-23",
     },
     body: JSON.stringify({
@@ -212,6 +218,45 @@ async function groqWebResearch(args: {
     sources: [...unique.values()].slice(0, 10),
     toolCalls: message?.executed_tools?.length || 0,
   };
+}
+
+async function verifyResearch(args: {
+  apiKey: string;
+  lessonName: string;
+  lessonObjective: string;
+  research: string;
+  sources: SearchSource[];
+}) {
+  const system =
+    "Ты строгий Verifier Khasroy Vision School. Между тегами <RESEARCH> всегда находится проверяемый учебный вывод; если он непустой, запрещено отвечать, что вывод не предоставлен. Сверяй его с <SOURCES>. Теория не доказывает практический навык. Верни только JSON: {\"passed\":true|false,\"reason\":\"кратко\",\"usefulPrinciples\":[\"...\"]}. passed=true только если вывод связан с целью урока, осторожен, не выдумывает практические результаты и поддерживается источниками.";
+
+  const first = await groqChat({
+    apiKey: args.apiKey,
+    system,
+    user: `Урок: ${args.lessonName}\nЦель: ${args.lessonObjective}\n<RESEARCH>\n${args.research.slice(0, 3_500)}\n</RESEARCH>\n<SOURCES>\n${compactSources(args.sources)}\n</SOURCES>`,
+    maxTokens: 360,
+    jsonMode: true,
+  });
+
+  let verdict = extractJson(first.content);
+  let reason = typeof verdict?.reason === "string" ? verdict.reason.trim() : "";
+  const falseMissingInput = /не\s+(?:предоставлен|представлен)|нет\s+(?:вывода|исследования|текста)/iu.test(reason);
+
+  if (first.ok && verdict?.passed !== true && falseMissingInput && args.research.trim().length > 200) {
+    const retry = await groqChat({
+      apiKey: args.apiKey,
+      system:
+        "Ты второй независимый Verifier. Текст RESEARCH точно присутствует ниже. Оцени его содержательно по списку реальных источников. Не требуй полного текста веб-страниц: проверяй осторожность и соответствие найденным данным. Верни только JSON {\"passed\":true|false,\"reason\":\"кратко\"}.",
+      user: `Урок: ${args.lessonName}\nRESEARCH:\n${args.research.slice(0, 2_600)}\n\nSOURCE INDEX:\n${sourceIndex(args.sources)}`,
+      maxTokens: 260,
+      jsonMode: true,
+    });
+    verdict = extractJson(retry.content);
+    reason = typeof verdict?.reason === "string" ? verdict.reason.trim() : "";
+    return { response: retry, verdict, reason, retried: true };
+  }
+
+  return { response: first, verdict, reason, retried: false };
 }
 
 export async function GET(request: Request) {
@@ -278,15 +323,14 @@ export async function GET(request: Request) {
       );
     }
 
-    const evidence = compactSources(research.sources);
-    const verification = await groqChat({
+    const checked = await verifyResearch({
       apiKey: groqKey,
-      system:
-        "Ты строгий Verifier Khasroy Vision School. Проверяй вывод только по переданным реальным web_search results. Теоретическое исследование не доказывает практический навык генерации изображения. Верни только JSON: {\"passed\":true|false,\"reason\":\"кратко\",\"usefulPrinciples\":[\"...\"]}. passed=true только если вывод связан с целью урока, осторожен, не выдумывает результаты тестов и опирается на источники.",
-      user: `Урок: ${lesson.name}\nЦель: ${lesson.objective}\n\nИсследование:\n${research.content.slice(0, 5_000)}\n\nWEB SEARCH RESULTS:\n${evidence}`,
-      maxTokens: 320,
-      jsonMode: true,
+      lessonName: lesson.name,
+      lessonObjective: lesson.objective,
+      research: research.content,
+      sources: research.sources,
     });
+    const verification = checked.response;
 
     if (verification.status === 429) {
       await finishAutonomyRun(ownerKey, {
@@ -302,11 +346,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ ok: true, school: "rate_limited", retryLater: true });
     }
 
-    const verdict = extractJson(verification.content);
-    const passed = verification.ok && verdict?.passed === true;
-    const reason = typeof verdict?.reason === "string"
-      ? verdict.reason.trim().slice(0, 900)
-      : "verifier did not provide a reason";
+    const passed = verification.ok && checked.verdict?.passed === true;
+    const reason = checked.reason.slice(0, 900) || "verifier did not provide a reason";
 
     if (!passed) {
       await finishAutonomyRun(ownerKey, {
@@ -322,6 +363,7 @@ export async function GET(request: Request) {
           searchQuery,
           sources: research.sources,
           verifier: reason,
+          verifierRetried: checked.retried,
         },
         error: "Vision School theory verification failed",
       });
@@ -382,6 +424,7 @@ export async function GET(request: Request) {
         searchQuery,
         sources: research.sources,
         verifier: reason,
+        verifierRetried: checked.retried,
         practicalVerificationRequired: true,
         storedKnowledgeKey: `vision_${lesson.slug}_${fingerprint}`,
       },
@@ -396,6 +439,7 @@ export async function GET(request: Request) {
       practicalStatus: "NOT_VERIFIED",
       sources: research.sources.length,
       verifier: reason,
+      verifierRetried: checked.retried,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown Vision School error";
