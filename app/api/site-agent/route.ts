@@ -9,11 +9,24 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Every request now performs only one short Site Agent stage.
+// Every request performs one bounded stage. Upstream calls have their own deadlines
+// well below this Vercel ceiling, so the route can always return retryable JSON.
 export const maxDuration = 60;
 
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Site Agent failed.";
+
+  if (/(timeout|TimeoutError|AbortError|aborted|memory save|memory load|preview save|verify skill)/iu.test(message)) {
+    return NextResponse.json(
+      {
+        error: "Текущий этап не дождался внешнего сервиса вовремя. Прогресс сохранён, Хасрой повторит только этот этап.",
+        retryable: true,
+        retryAfterMs: 2500,
+      },
+      { status: 503 },
+    );
+  }
+
   if (/(429|rate limit|tokens per minute|otpm|quota|request too large)/iu.test(message)) {
     return NextResponse.json(
       {
@@ -24,6 +37,7 @@ function errorResponse(error: unknown) {
       { status: 429 },
     );
   }
+
   if (/(screenshot provider|preview HTTP)/iu.test(message)) {
     return NextResponse.json(
       {
@@ -34,6 +48,7 @@ function errorResponse(error: unknown) {
       { status: 503 },
     );
   }
+
   if (/invalid compact JSON/iu.test(message)) {
     return NextResponse.json(
       {
@@ -44,6 +59,7 @@ function errorResponse(error: unknown) {
       { status: 502 },
     );
   }
+
   const status = /(URL|адрес|локальн|приватн|jobId|не найден)/iu.test(message) ? 400 : 502;
   return NextResponse.json({ error: message, retryable: false }, { status });
 }
