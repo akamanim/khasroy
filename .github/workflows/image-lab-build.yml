@@ -1,0 +1,34 @@
+name: Image Lab Build Verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+      - "lib/server-image-lab.ts"
+      - "app/api/image-lab/**"
+      - "app/api/vision-school/practical/**"
+      - "app/api/status/**"
+      - ".github/workflows/image-lab-build.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: image-lab-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Next production build
+        run: npm run build
