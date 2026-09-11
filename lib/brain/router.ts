@@ -15,9 +15,9 @@ import {
 export { selectBrainMode };
 export type { BrainMessage, BrainMode, BrainResponseData };
 
-export type BrainProvider =
-  | "self-hosted"
-  | "groq"
+export type BrainProvider = "self-hosted" | "groq";
+export type BrainProviderDetail =
+  | BrainProvider
   | "groq-fallback"
   | "gateway"
   | "vercel-sandbox";
@@ -26,6 +26,7 @@ export type BrainRun = {
   response: Response;
   data: BrainResponseData | null;
   provider: BrainProvider;
+  providerDetail: BrainProviderDetail;
   model: string;
   mode: BrainMode;
   toolsUsed: string[];
@@ -51,7 +52,7 @@ type SandboxPlan = {
 const TEXT_ONLY_QUERY =
   "Сформируй итоговый ответ только по переданному контексту. Не запускай веб-поиск и код.";
 
-function observedProvider(response: Response, fallback: string): BrainProvider {
+function observedProvider(response: Response, fallback: string): BrainProviderDetail {
   const marked = response.headers.get("x-khasroy-ai-provider");
   if (marked === "gateway") return "gateway";
   if (marked === "groq-fallback") return "groq-fallback";
@@ -65,7 +66,8 @@ function normalizeLegacy(
 ): BrainRun {
   return {
     ...run,
-    provider: observedProvider(run.response, run.provider),
+    provider: run.provider,
+    providerDetail: observedProvider(run.response, run.provider),
     mode,
   };
 }
@@ -228,7 +230,8 @@ function syntheticSandboxRun(
   return {
     response,
     data,
-    provider: "vercel-sandbox",
+    provider: "groq",
+    providerDetail: "vercel-sandbox",
     model: data.model || "vercel-sandbox",
     mode,
     toolsUsed: [`code_interpreter:vercel_sandbox`, `runtime:${execution.runtime}`],
@@ -268,6 +271,7 @@ ${sources.length ? "Используй только переданные реа�
     response: final.response,
     data: final.data,
     provider: final.provider,
+    providerDetail: final.providerDetail,
     model: final.model,
     mode,
     toolsUsed: [
@@ -304,6 +308,7 @@ ${searched.context.slice(0, 8_000)}
       response: final.response,
       data: final.data,
       provider: final.provider,
+      providerDetail: final.providerDetail,
       model: final.model,
       mode: "research",
       toolsUsed: ["direct_web_search:server"],

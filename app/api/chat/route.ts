@@ -236,6 +236,7 @@ export async function POST(request: Request) {
 
   const webVerified = usedWebTool(brain);
   const sandboxVerified = usedCodeInterpreter(brain);
+  const providerLabel = brain.providerDetail || brain.provider;
 
   const memoryWrites: Promise<unknown>[] = [
     appendMessage(ownerKey, "user", latestUser.content),
@@ -247,7 +248,7 @@ export async function POST(request: Request) {
       status: "verified",
       level: 1,
       testsPassed: 1,
-      metadata: { provider: brain.provider, model: brain.model },
+      metadata: { provider: providerLabel, model: brain.model },
     }),
     upsertSkill(ownerKey, {
       slug: "owner_access_control",
@@ -288,7 +289,7 @@ export async function POST(request: Request) {
         level: 1,
         testsPassed: 1,
         metadata: {
-          provider: brain.provider,
+          provider: providerLabel,
           model: brain.model,
           sources: brain.sources,
         },
@@ -306,7 +307,7 @@ export async function POST(request: Request) {
         level: 1,
         testsPassed: 1,
         metadata: {
-          provider: brain.provider,
+          provider: providerLabel,
           model: brain.model,
           environment: brain.toolsUsed.some((tool) => /vercel_sandbox/iu.test(tool))
             ? "vercel_sandbox_firecracker"
@@ -360,7 +361,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     content,
-    provider: brain.provider,
+    provider: providerLabel,
     model: brain.model,
     brainMode: brain.mode,
     memory: memoryRead && memoryWrite ? "active" : "error",
