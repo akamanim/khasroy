@@ -2,53 +2,57 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import {
+  createSiteAgentJob,
   extractSiteUrl,
-  formatSiteAgentChatResponse,
-  recordVerifiedSiteAgentSkills,
-  runFullSiteAgent,
-} from "@/lib/site-agent-v3";
+  stepSiteAgentJob,
+} from "@/lib/site-agent-job";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Screenshot providers can queue a freshly-created preview and the full flow also
-// performs three bounded vision calls. 60s was too short and Vercel could terminate
-// the function before our stage-aware JSON error handler had a chance to respond.
-export const maxDuration = 180;
+// Every request now performs only one short Site Agent stage.
+export const maxDuration = 60;
 
-function friendlySiteAgentError(error: unknown) {
-  const raw = error instanceof Error ? error.message : "Site Agent failed.";
-  const stage = raw.match(/^\[([A-Z_]+)\]/u)?.[1] || "UNKNOWN";
-
-  if (/(429|rate limit|tokens per minute|otpm|quota|request too large)/iu.test(raw)) {
-    return {
-      status: 429,
-      message: `Site Agent остановился на этапе ${stage}: vision-модель временно упёрлась в лимит Groq. Подождите около минуты и повторите. Незавершённый прогон не станет VERIFIED.`,
-    };
+function errorResponse(error: unknown) {
+  const message = error instanceof Error ? error.message : "Site Agent failed.";
+  if (/(429|rate limit|tokens per minute|otpm|quota|request too large)/iu.test(message)) {
+    return NextResponse.json(
+      {
+        error: "Vision-модель временно упёрлась в лимит Groq. Этот этап сохранён и будет повторён.",
+        retryable: true,
+        retryAfterMs: 65000,
+      },
+      { status: 429 },
+    );
   }
-  if (/invalid compact JSON|invalid JSON/iu.test(raw)) {
-    return {
-      status: 502,
-      message: `Site Agent остановился на этапе ${stage}: vision-модель оборвала компактный JSON. Повторите аудит; незавершённый прогон не станет VERIFIED.`,
-    };
+  if (/(screenshot provider|preview HTTP)/iu.test(message)) {
+    return NextResponse.json(
+      {
+        error: "Внешний сервис скриншотов временно не готов. Прогресс сохранён.",
+        retryable: true,
+        retryAfterMs: 3000,
+      },
+      { status: 503 },
+    );
   }
-  if (/(URL|адрес|http|локальн|приватн)/iu.test(raw)) return { status: 400, message: raw };
-  if (/screenshot provider/iu.test(raw)) {
-    return {
-      status: 502,
-      message: `Site Agent остановился на этапе ${stage}: сервис скриншотов не успел подготовить изображение даже после расширенного ожидания. Незавершённый прогон останется LEARNING.`,
-    };
+  if (/invalid compact JSON/iu.test(message)) {
+    return NextResponse.json(
+      {
+        error: "Vision-модель вернула незавершённый JSON. Этап можно повторить без потери прогресса.",
+        retryable: true,
+        retryAfterMs: 1500,
+      },
+      { status: 502 },
+    );
   }
-  return {
-    status: 502,
-    message: `Site Agent остановился на этапе ${stage}. Незавершённые навыки останутся LEARNING; повторите запрос.`,
-  };
+  const status = /(URL|адрес|локальн|приватн|jobId|не найден)/iu.test(message) ? 400 : 502;
+  return NextResponse.json({ error: message, retryable: false }, { status });
 }
 
 export async function POST(request: Request) {
   const ownerKey = process.env.KHASROY_OWNER_KEY;
   const apiKey = process.env.GROQ_API_KEY;
   if (!ownerKey || !apiKey) {
-    return NextResponse.json({ error: "site_agent_not_configured" }, { status: 503 });
+    return NextResponse.json({ error: "Site Agent ещё не настроен на сервере." }, { status: 503 });
   }
 
   const cookieStore = await cookies();
@@ -57,42 +61,44 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Требуется доступ владельца." }, { status: 401 });
   }
 
-  let body: { url?: unknown; query?: unknown; goal?: unknown };
+  let body: {
+    action?: unknown;
+    jobId?: unknown;
+    url?: unknown;
+    query?: unknown;
+    goal?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
   }
 
-  const explicitUrl = typeof body.url === "string" ? body.url.trim() : "";
-  const query = typeof body.query === "string" ? body.query.trim().slice(0, 4000) : "";
-  const resolvedUrl = explicitUrl || (query ? extractSiteUrl(query) : null);
-  if (!resolvedUrl) {
-    return NextResponse.json({ error: "Передайте URL сайта для аудита." }, { status: 400 });
-  }
-
   try {
-    const result = await runFullSiteAgent({
+    if (body.action === "step") {
+      if (typeof body.jobId !== "string" || !body.jobId.trim()) {
+        return NextResponse.json({ error: "Не передан jobId Site Agent." }, { status: 400 });
+      }
+      const result = await stepSiteAgentJob({ ownerKey, apiKey, jobId: body.jobId.trim() });
+      return NextResponse.json({ ok: true, ...result });
+    }
+
+    const explicitUrl = typeof body.url === "string" ? body.url.trim() : "";
+    const query = typeof body.query === "string" ? body.query.trim().slice(0, 4000) : "";
+    const resolvedUrl = explicitUrl || (query ? extractSiteUrl(query) : null);
+    if (!resolvedUrl) {
+      return NextResponse.json({ error: "Передайте URL сайта для аудита." }, { status: 400 });
+    }
+
+    const job = await createSiteAgentJob({
       ownerKey,
-      apiKey,
       origin: new URL(request.url).origin,
       targetUrl: resolvedUrl,
       goal: typeof body.goal === "string" ? body.goal.slice(0, 1200) : query.slice(0, 1200),
     });
-
-    if (result.repair.success) {
-      await recordVerifiedSiteAgentSkills(ownerKey, result);
-    }
-
-    return NextResponse.json({
-      ok: true,
-      verified: result.repair.success,
-      content: formatSiteAgentChatResponse(result),
-      result,
-    });
+    return NextResponse.json({ ok: true, ...job });
   } catch (error) {
-    console.error("Khasroy Site Agent failed", error);
-    const friendly = friendlySiteAgentError(error);
-    return NextResponse.json({ error: friendly.message }, { status: friendly.status });
+    console.error("Khasroy resumable Site Agent failed", error);
+    return errorResponse(error);
   }
 }
