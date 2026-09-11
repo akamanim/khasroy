@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-const EXPECTED = "f75d069aa09908b3d00e2db8c99e591cdd44e0f8008f95e03e81a3dac1ac12d4";
+const EXPECTED = "68a684ac1baf9489e2a62ae60ae57436466e58dc09c2ebe3e48c28d4cd96baac";
 
 function digest(value: string) {
   return createHash("sha256").update(value).digest("hex");
