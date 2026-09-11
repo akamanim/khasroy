@@ -5,7 +5,9 @@ on:
     branches: [main]
     paths:
       - "package.json"
+      - "lib/chat.ts"
       - "lib/server-image-lab.ts"
+      - "components/khasroy/markdown-message.tsx"
       - "app/api/image-lab/**"
       - "app/api/vision-school/practical/**"
       - "app/api/status/**"
