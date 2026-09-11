@@ -50,7 +50,7 @@ export function Core({
   const canvas = useRef<HTMLCanvasElement>(null);
   const current = useRef({ state, evolution });
   const scene = useRef<ReturnType<
-    typeof import("./core-scene-v3").createCoreScene
+    typeof import("./core-scene-v4").createCoreScene
   > | null>(null);
   const [ready, setReady] = useState(false);
 
@@ -73,7 +73,7 @@ export function Core({
 
     async function start() {
       try {
-        const { createCoreScene } = await import("./core-scene-v3");
+        const { createCoreScene } = await import("./core-scene-v4");
         if (cancelled) return;
         scene.current = createCoreScene(element!, () => current.current);
         setReady(true);
@@ -106,18 +106,18 @@ export function Core({
 
   const neonFilter =
     state === "thinking"
-      ? "saturate(1.25) brightness(1.16) contrast(1.06) drop-shadow(0 0 18px rgba(45,190,255,.76)) drop-shadow(0 0 38px rgba(71,77,255,.46))"
+      ? "brightness(1.10) contrast(1.04) drop-shadow(0 0 14px rgba(60,205,255,.50))"
       : state === "responding"
-        ? "saturate(1.3) brightness(1.2) contrast(1.06) drop-shadow(0 0 20px rgba(80,225,255,.84)) drop-shadow(0 0 42px rgba(91,72,255,.52))"
+        ? "brightness(1.12) contrast(1.04) drop-shadow(0 0 16px rgba(90,225,255,.55))"
         : state === "listening"
-          ? "saturate(1.18) brightness(1.1) contrast(1.04) drop-shadow(0 0 15px rgba(43,192,255,.62))"
-          : "saturate(1.12) brightness(1.06) contrast(1.04) drop-shadow(0 0 14px rgba(38,168,255,.52))";
+          ? "brightness(1.05) drop-shadow(0 0 10px rgba(50,185,255,.38))"
+          : "brightness(1.02) drop-shadow(0 0 9px rgba(40,160,255,.30))";
 
   return (
     <div
       className={`khasroy-core ${state}`}
       role="img"
-      aria-label={`3D-ядро Хасроя, уровень ${evolution.level}: ${label}`}
+      aria-label={`3D-проекция сознания Хасроя, уровень ${evolution.level}: ${label}`}
       data-core-state={state}
       data-renderer={ready ? "webgl" : "fallback"}
     >
@@ -140,25 +140,21 @@ export function Core({
           style={{ filter: "drop-shadow(0 0 18px rgba(45,195,255,.75))" }}
         >
           <defs>
-            <radialGradient id="core-glow">
+            <radialGradient id="field-glow">
               <stop stopColor="#eafcff" />
-              <stop offset=".18" stopColor="#6fe7ff" stopOpacity=".9" />
-              <stop offset=".46" stopColor="#287dff" stopOpacity=".5" />
+              <stop offset=".2" stopColor="#6fe7ff" stopOpacity=".9" />
+              <stop offset=".58" stopColor="#287dff" stopOpacity=".32" />
               <stop offset="1" stopColor="#132bff" stopOpacity="0" />
             </radialGradient>
           </defs>
-          <circle cx="200" cy="150" r="100" fill="url(#core-glow)" />
-          <g fill="none" stroke="#5fdcff">
-            <ellipse cx="200" cy="150" rx="95" ry="65" />
-            <ellipse
-              cx="200"
-              cy="150"
-              rx="48"
-              ry="98"
-              transform="rotate(40 200 150)"
-            />
-            <circle cx="200" cy="150" r="105" strokeDasharray="2 9" />
-            <path d="m185 127 30 46m0-46-30 46" stroke="#a9f4ff" strokeWidth="2" />
+          <path d="M88 161C99 93 149 62 217 74c53 9 104 48 96 102-7 46-55 74-113 66-61-8-123-33-112-81Z" fill="url(#field-glow)" opacity=".8" />
+          <g fill="none" stroke="#5fdcff" opacity=".75">
+            <path d="M102 157 147 116l42 22 31-47 43 39 36 10" />
+            <path d="m111 188 53-34 32 39 50-53 45 39" />
+            <path d="m137 91 27 63 54 16 22 51" />
+          </g>
+          <g fill="#dffcff">
+            <circle cx="147" cy="116" r="4"/><circle cx="189" cy="138" r="3"/><circle cx="220" cy="91" r="5"/><circle cx="263" cy="130" r="4"/><circle cx="164" cy="154" r="3"/><circle cx="196" cy="193" r="4"/><circle cx="246" cy="140" r="3"/>
           </g>
         </svg>
       )}
