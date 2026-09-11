@@ -8,6 +8,7 @@ import {
   authenticateOwner,
   chat,
   KhasroyAuthError,
+  type ChatProgress,
   type Message,
 } from "@/lib/chat";
 
@@ -75,6 +76,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [responding, setResponding] = useState(false);
+  const [progressLog, setProgressLog] = useState<ChatProgress[]>([]);
   const responseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (responseTimer.current) clearTimeout(responseTimer.current); }, []);
   const [error, setError] = useState("");
@@ -115,29 +117,55 @@ export default function Home() {
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [messages, busy]);
+  }, [messages, busy, progressLog]);
 
   useEffect(() => {
     void refreshStatus();
   }, []);
 
   async function finishChat(next: Message[]) {
-    const content = await chat(next);
-    setMessages([
-      ...next,
-      { id: crypto.randomUUID(), role: "assistant", content },
-    ]);
-    setResponding(true);
-    if (responseTimer.current) clearTimeout(responseTimer.current);
-    responseTimer.current = setTimeout(() => setResponding(false), 3600);
-    void refreshStatus();
+    const assistantId = crypto.randomUUID();
+    setProgressLog([]);
+    setMessages([...next, { id: assistantId, role: "assistant", content: "" }]);
+
+    try {
+      const content = await chat(next, {
+        onProgress(progress) {
+          setProgressLog((previous) => {
+            if (previous[previous.length - 1]?.message === progress.message) return previous;
+            return [...previous.slice(-7), progress];
+          });
+        },
+        onChunk(_delta, full) {
+          setMessages((previous) =>
+            previous.map((message) =>
+              message.id === assistantId ? { ...message, content: full } : message,
+            ),
+          );
+        },
+      });
+
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.id === assistantId ? { ...message, content } : message,
+        ),
+      );
+      setResponding(true);
+      if (responseTimer.current) clearTimeout(responseTimer.current);
+      responseTimer.current = setTimeout(() => setResponding(false), 3600);
+      void refreshStatus();
+    } catch (err) {
+      setMessages(next);
+      setProgressLog([]);
+      throw err;
+    }
   }
 
   async function send(value = input) {
     if (!value.trim() || busy) return;
 
     const next: Message[] = [
-      ...messages,
+      ...messages.filter((message) => message.content.trim()),
       { id: crypto.randomUUID(), role: "user", content: value.trim() },
     ];
 
@@ -145,6 +173,7 @@ export default function Home() {
     setInput("");
     setBusy(true);
     setResponding(false);
+    setProgressLog([]);
     if (responseTimer.current) clearTimeout(responseTimer.current);
     setError("");
 
@@ -165,6 +194,7 @@ export default function Home() {
       );
     } finally {
       setBusy(false);
+      setProgressLog([]);
       field.current?.focus();
     }
   }
@@ -201,6 +231,7 @@ export default function Home() {
           );
         } finally {
           setBusy(false);
+          setProgressLog([]);
         }
       }
     } catch {
@@ -209,6 +240,8 @@ export default function Home() {
       setAuthBusy(false);
     }
   }
+
+  const latestProgress = progressLog[progressLog.length - 1];
 
   return (
     <main>
@@ -276,6 +309,7 @@ export default function Home() {
             onClick={() => {
               setMessages([welcome]);
               setResponding(false);
+              setProgressLog([]);
               if (responseTimer.current) clearTimeout(responseTimer.current);
               setInput("");
               setError("");
@@ -292,7 +326,7 @@ export default function Home() {
           aria-live="polite"
           aria-label="История сообщений"
         >
-          {messages.map((m) => (
+          {messages.filter((m) => m.role === "user" || m.content).map((m) => (
             <article className={`message ${m.role}`} key={m.id}>
               <div className="avatar">
                 {m.role === "assistant" ? <Sparkles size={16} /> : "ВЫ"}
@@ -310,9 +344,33 @@ export default function Home() {
               </div>
             </article>
           ))}
+
           {busy && (
-            <div className="typing" role="status">
-              <i /><i /><i /><span>Хасрой думает</span>
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                margin: "4px 0 14px 43px",
+                border: "1px solid #213744",
+                borderRadius: 12,
+                background: "#0c171f",
+                padding: "11px 13px",
+                color: "#9eb8c5",
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 9, color: "#c5e8f2" }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#82d9d0", boxShadow: "0 0 10px #82d9d077", flex: "none" }} />
+                <strong style={{ fontWeight: 600 }}>{latestProgress?.message || "Хасрой начинает задачу…"}</strong>
+              </div>
+              {progressLog.length > 1 && (
+                <div style={{ marginTop: 8, paddingLeft: 15, borderLeft: "1px solid #24404d", color: "#718d9a" }}>
+                  {progressLog.slice(-5, -1).reverse().map((item, index) => (
+                    <div key={`${item.stage || "step"}-${index}`} style={{ margin: "3px 0" }}>✓ {item.message}</div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           <div ref={bottom} />
@@ -367,7 +425,7 @@ export default function Home() {
         </form>
 
         <div className="chat-footer">
-          <span>LIVE AI · DYNAMIC VERIFIED CORE · AUTONOMY HEARTBEAT · Доступ владельца</span>
+          <span>LIVE AI · ACTION TRACE · DYNAMIC VERIFIED CORE · Доступ владельца</span>
           <span>Enter — отправить ↵</span>
         </div>
       </section>
