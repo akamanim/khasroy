@@ -13,6 +13,10 @@ type ChatApiResponse = {
   progress?: string;
   retryAfterMs?: number;
   retryable?: boolean;
+  image?: string;
+  model?: string;
+  lab?: string;
+  mode?: string;
 };
 
 export type ChatProgress = {
@@ -46,6 +50,17 @@ function looksLikeSiteAgentRequest(text: string) {
   const hasUrl = /https?:\/\/[^\s]+/iu.test(text) || /\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s]*)?/iu.test(text);
   const hasIntent = /(аудит|проанализ|проверь|улучш|передел|редизайн|сделай.*лучше|оцени|audit|redesign|improve|review)/iu.test(text);
   return hasUrl && hasIntent;
+}
+
+export function looksLikeImageGenerationRequest(text: string) {
+  const value = text.trim();
+  if (!value) return false;
+
+  const explicitGenerator = /\b(сгенерируй|генерируй|нарисуй|отрендери|визуализируй|generate|render|draw|visualize)\b/iu.test(value);
+  const imageNoun = /(фото|фотограф|картин|изображен|иллюстрац|портрет|аватар|постер|обложк|логотип|рендер|image|photo|picture|portrait|poster|cover|logo)/iu.test(value);
+  const createIntent = /(создай|сделай|сгенерируй|нарисуй|отрендери|покажи.*как.*выгляд|create|make|generate|draw|render)/iu.test(value);
+
+  return explicitGenerator || (imageNoun && createIntent);
 }
 
 function wait(ms: number) {
@@ -122,6 +137,47 @@ async function revealContent(content: string, callbacks?: ChatCallbacks) {
 function emitProgress(callbacks: ChatCallbacks | undefined, data: ChatApiResponse, fallback?: string) {
   const message = typeof data.progress === "string" && data.progress.trim() ? data.progress.trim() : fallback;
   if (message) callbacks?.onProgress?.({ stage: data.stage, message });
+}
+
+async function runImageGeneration(query: string, callbacks?: ChatCallbacks): Promise<string> {
+  callbacks?.onProgress?.({
+    stage: "IMAGE",
+    message: "Подключаю Image Lab и создаю изображение прямо в чате…",
+  });
+
+  const response = await fetchWithTimeout(
+    "/api/image-lab",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ prompt: query, fast: true }),
+    },
+    70_000,
+  );
+
+  if (response.status === 401) throw new KhasroyAuthError();
+  const payload = await readApiResponse(response);
+  if (!response.ok) {
+    throw new Error(payload.data.error || "Image Lab временно не смог создать изображение.");
+  }
+
+  const image = typeof payload.data.image === "string" ? payload.data.image.trim() : "";
+  if (!image || !/^data:image\/(?:png|jpeg|jpg|webp);base64,/iu.test(image)) {
+    throw new Error("Image Lab завершил генерацию без изображения.");
+  }
+
+  const model = typeof payload.data.model === "string" && payload.data.model.trim()
+    ? payload.data.model.trim()
+    : "Image Lab";
+  const content = `Готово. Сгенерировал изображение по твоему запросу.\n\n![Сгенерированное изображение](${image})\n\n*Модель: ${model}*`;
+
+  callbacks?.onProgress?.({
+    stage: "IMAGE_DONE",
+    message: "Изображение готово. Показываю его прямо в диалоге…",
+  });
+  callbacks?.onChunk?.(content, content);
+  return content;
 }
 
 async function runSiteAgent(query: string, callbacks?: ChatCallbacks): Promise<string> {
@@ -212,6 +268,10 @@ async function runSiteAgent(query: string, callbacks?: ChatCallbacks): Promise<s
 
 export async function chat(messages: Message[], callbacks?: ChatCallbacks): Promise<string> {
   const latestUser = [...messages].reverse().find((message) => message.role === "user");
+  if (latestUser && looksLikeImageGenerationRequest(latestUser.content)) {
+    return runImageGeneration(latestUser.content, callbacks);
+  }
+
   const siteAgent = latestUser ? looksLikeSiteAgentRequest(latestUser.content) : false;
   if (siteAgent && latestUser) return runSiteAgent(latestUser.content, callbacks);
 
