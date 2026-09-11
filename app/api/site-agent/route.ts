@@ -1,7 +1,12 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
-import { recordVerifiedSiteAgentSkills, runFullSiteAgent } from "@/lib/site-agent";
+import {
+  extractSiteUrl,
+  formatSiteAgentChatResponse,
+  recordVerifiedSiteAgentSkills,
+  runFullSiteAgent,
+} from "@/lib/site-agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,15 +25,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Требуется доступ владельца." }, { status: 401 });
   }
 
-  let body: { url?: unknown; goal?: unknown };
+  let body: { url?: unknown; query?: unknown; goal?: unknown };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
   }
 
-  if (typeof body.url !== "string" || !body.url.trim()) {
-    return NextResponse.json({ error: "Передайте URL сайта." }, { status: 400 });
+  const explicitUrl = typeof body.url === "string" ? body.url.trim() : "";
+  const query = typeof body.query === "string" ? body.query.trim().slice(0, 4000) : "";
+  const resolvedUrl = explicitUrl || (query ? extractSiteUrl(query) : null);
+  if (!resolvedUrl) {
+    return NextResponse.json({ error: "Передайте URL сайта для аудита." }, { status: 400 });
   }
 
   try {
@@ -36,11 +44,15 @@ export async function POST(request: Request) {
       ownerKey,
       apiKey,
       origin: new URL(request.url).origin,
-      targetUrl: body.url,
-      goal: typeof body.goal === "string" ? body.goal.slice(0, 1200) : "",
+      targetUrl: resolvedUrl,
+      goal: typeof body.goal === "string" ? body.goal.slice(0, 1200) : query.slice(0, 1200),
     });
     await recordVerifiedSiteAgentSkills(ownerKey, result);
-    return NextResponse.json({ ok: true, result });
+    return NextResponse.json({
+      ok: true,
+      content: formatSiteAgentChatResponse(result),
+      result,
+    });
   } catch (error) {
     console.error("Khasroy Site Agent failed", error);
     const message = error instanceof Error ? error.message : "Site Agent failed.";
