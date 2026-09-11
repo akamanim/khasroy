@@ -1,3 +1,5 @@
+import { getVercelOidcToken } from "@vercel/oidc";
+
 type FailoverState = {
   installed: boolean;
   originalFetch: typeof fetch;
@@ -28,8 +30,15 @@ function globalState() {
   return state;
 }
 
-function gatewayCredential() {
-  return process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || "";
+async function gatewayCredential() {
+  const staticKey = process.env.AI_GATEWAY_API_KEY?.trim();
+  if (staticKey) return staticKey;
+  try {
+    return (await getVercelOidcToken()) || "";
+  } catch (error) {
+    console.error("Khasroy AI Gateway OIDC token unavailable", error);
+    return "";
+  }
 }
 
 function modelsFromEnv(name: string, fallback: string[]) {
@@ -137,8 +146,8 @@ async function callGateway(
   input: RequestInfo | URL,
   init: RequestInit | undefined,
   body: JsonBody,
+  credential: string,
 ) {
-  const credential = gatewayCredential();
   if (!credential) return null;
 
   const headers = new Headers(init?.headers);
@@ -170,11 +179,36 @@ export function providerFailoverInfo() {
   const state = globalState();
   return {
     installed: state.installed,
-    gatewayConfigured: Boolean(gatewayCredential()),
+    gatewayStaticKeyConfigured: Boolean(process.env.AI_GATEWAY_API_KEY?.trim()),
+    oidcRuntimeEnabled: Boolean(process.env.VERCEL),
     groqCoolingDown: state.groqCooldownUntil > Date.now(),
     fallbackTextModels: fallbackModels({}),
     fallbackVisionModels: fallbackModels({ messages: [{ content: [{ type: "image_url" }] }] }),
   };
+}
+
+export async function testGatewayConnection() {
+  const state = globalState();
+  const credential = await gatewayCredential();
+  if (!credential) return { ok: false, configured: false, status: 0, model: null as string | null };
+  try {
+    const response = await state.originalFetch(`${GATEWAY_ORIGIN}/v1/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify({
+        model: "google/gemini-3.6-flash",
+        models: ["openai/gpt-5.6-sol"],
+        messages: [{ role: "user", content: "Reply with exactly OK" }],
+        max_completion_tokens: 8,
+        temperature: 0,
+      }),
+    });
+    const data = await response.json().catch(() => null) as { model?: string } | null;
+    return { ok: response.ok, configured: true, status: response.status, model: data?.model || null };
+  } catch {
+    return { ok: false, configured: true, status: 0, model: null as string | null };
+  }
 }
 
 export function installProviderFailover() {
@@ -185,11 +219,12 @@ export function installProviderFailover() {
     if (!isGroqAiRequest(input)) return state.originalFetch(input, init);
 
     const body = parseBody(init);
-    const gatewayReady = Boolean(body && gatewayCredential());
+    const credential = body ? await gatewayCredential() : "";
+    const gatewayReady = Boolean(body && credential);
 
     if (gatewayReady && state.groqCooldownUntil > Date.now()) {
       try {
-        const gateway = await callGateway(state, input, init, body!);
+        const gateway = await callGateway(state, input, init, body!, credential);
         if (gateway) return gateway;
       } catch (error) {
         console.error("Khasroy AI Gateway cooldown route failed", error);
@@ -214,7 +249,7 @@ export function installProviderFailover() {
 
     if (gatewayReady) {
       try {
-        const gateway = await callGateway(state, input, init, body!);
+        const gateway = await callGateway(state, input, init, body!, credential);
         if (gateway) return gateway;
       } catch (error) {
         console.error("Khasroy AI Gateway failover request failed", error);
