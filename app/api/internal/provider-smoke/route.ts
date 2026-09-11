@@ -21,8 +21,16 @@ export async function GET(request: Request) {
   const token = new URL(request.url).searchParams.get("token") || "";
   if (!safeToken(token)) return NextResponse.json({ error: "not found" }, { status: 404 });
 
+  const providers = {
+    gateway: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
+    openai: Boolean(process.env.OPENAI_API_KEY),
+    gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY),
+    anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+    openrouter: Boolean(process.env.OPENROUTER_API_KEY),
+    together: Boolean(process.env.TOGETHER_API_KEY),
+  };
   const credential = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || "";
-  if (!credential) return NextResponse.json({ ok: false, configured: false }, { status: 503 });
+  if (!credential) return NextResponse.json({ ok: false, configured: false, providers }, { status: 503 });
 
   const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
     method: "POST",
@@ -40,6 +48,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ok: response.ok,
     configured: true,
+    providers,
     status: response.status,
     model: data?.model || null,
     error: response.ok ? null : data?.error?.message?.slice(0, 160) || "gateway error",
