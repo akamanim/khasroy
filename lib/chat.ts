@@ -26,14 +26,24 @@ export async function authenticateOwner(key: string): Promise<boolean> {
   return response.ok;
 }
 
+function looksLikeSiteAgentRequest(text: string) {
+  const hasUrl = /https?:\/\/[^\s]+/iu.test(text) || /\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s]*)?/iu.test(text);
+  const hasIntent = /(аудит|проанализ|проверь|улучш|передел|редизайн|сделай.*лучше|оцени|audit|redesign|improve|review)/iu.test(text);
+  return hasUrl && hasIntent;
+}
+
 export async function chat(messages: Message[]): Promise<string> {
-  const response = await fetch("/api/chat", {
+  const latestUser = [...messages].reverse().find((message) => message.role === "user");
+  const siteAgent = latestUser ? looksLikeSiteAgentRequest(latestUser.content) : false;
+  const response = await fetch(siteAgent ? "/api/site-agent" : "/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({
-      messages: messages.map(({ role, content }) => ({ role, content })),
-    }),
+    body: JSON.stringify(
+      siteAgent
+        ? { query: latestUser?.content || "", goal: latestUser?.content || "" }
+        : { messages: messages.map(({ role, content }) => ({ role, content })) },
+    ),
   });
 
   if (response.status === 401) throw new KhasroyAuthError();
@@ -52,7 +62,9 @@ export async function chat(messages: Message[]): Promise<string> {
     throw new Error(
       typeof data.error === "string"
         ? data.error
-        : "Не удалось получить ответ от Хасроя.",
+        : siteAgent
+          ? "Site Agent не смог завершить аудит. Попробуйте ещё раз чуть позже."
+          : "Не удалось получить ответ от Хасроя.",
     );
   }
 
