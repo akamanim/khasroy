@@ -37,6 +37,7 @@ export async function GET() {
     const designAgent = has("site_design_agent");
     const repairLoop = has("site_repair_loop");
     const commercialAudit = has("commercial_site_audit");
+    const imageLab = has("image_generation_lab");
     const siteAgentReady = screenshotVision && visualComparison && visualScoring && designAgent && repairLoop && commercialAudit;
 
     const selfHostedState = brain.online
@@ -71,7 +72,7 @@ export async function GET() {
           (designAgent ? 1 : 0) +
           (repairLoop ? 1 : 0) +
           (commercialAudit ? 1 : 0),
-        images: 0,
+        images: imageLab ? 1 : 0,
       },
       modules: {
         memory: has("long_term_memory") ? "VERIFIED" : "LOCKED",
@@ -81,6 +82,7 @@ export async function GET() {
         critic: critic ? "VERIFIED" : "LOCKED",
         vision: screenshotVision ? "VERIFIED" : "WAITING",
         siteAgent: siteAgentReady ? "VERIFIED" : "WAITING",
+        imageLab: imageLab ? "VERIFIED" : "WAITING",
         selfHosted: selfHostedState,
         autonomy: autonomyState,
       },
