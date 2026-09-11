@@ -42,6 +42,16 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(ms, 70000))));
 }
 
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function readApiResponse(response: Response): Promise<{ raw: string; data: ChatApiResponse }> {
   const raw = await response.text().catch(() => "");
   if (!raw) return { raw: "", data: {} };
@@ -55,19 +65,27 @@ async function readApiResponse(response: Response): Promise<{ raw: string; data:
 
 function fallbackHttpError(status: number, raw: string, siteAgent: boolean) {
   if (siteAgent && (status === 504 || /FUNCTION_INVOCATION_TIMEOUT|timed?\s*out|timeout/iu.test(raw))) {
-    return "Один короткий этап Site Agent превысил серверное время. Прогресс предыдущих этапов сохранён.";
+    return "Один этап Site Agent временно не ответил. Job сохранён и может продолжиться с того же этапа.";
   }
   if (siteAgent && status >= 500) return `Site Agent получил серверную ошибку HTTP ${status}.`;
   return siteAgent ? "Site Agent не смог продолжить аудит." : "Не удалось получить ответ от Хасроя.";
 }
 
+function shouldRetryTransport(status: number, raw: string) {
+  return status === 408 || status === 502 || status === 503 || status === 504 || /FUNCTION_INVOCATION_TIMEOUT|timed?\s*out|timeout/iu.test(raw);
+}
+
 async function runSiteAgent(query: string): Promise<string> {
-  const started = await fetch("/api/site-agent", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ action: "start", query, goal: query }),
-  });
+  const started = await fetchWithTimeout(
+    "/api/site-agent",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ action: "start", query, goal: query }),
+    },
+    30_000,
+  );
   if (started.status === 401) throw new KhasroyAuthError();
   const startPayload = await readApiResponse(started);
   if (!started.ok) {
@@ -78,29 +96,49 @@ async function runSiteAgent(query: string): Promise<string> {
   if (!jobId) throw new Error("Site Agent не получил jobId.");
 
   let retryAfterMs = startPayload.data.retryAfterMs || 100;
-  const deadline = Date.now() + 10 * 60 * 1000;
+  const deadline = Date.now() + 12 * 60 * 1000;
   let attempts = 0;
+  let consecutiveTransportFailures = 0;
 
-  while (Date.now() < deadline && attempts < 180) {
+  while (Date.now() < deadline && attempts < 240) {
     attempts += 1;
     if (retryAfterMs > 0) await wait(retryAfterMs);
 
-    const response = await fetch("/api/site-agent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ action: "step", jobId }),
-    });
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        "/api/site-agent",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ action: "step", jobId }),
+        },
+        45_000,
+      );
+    } catch (error) {
+      if (error instanceof KhasroyAuthError) throw error;
+      consecutiveTransportFailures += 1;
+      if (consecutiveTransportFailures > 12) {
+        throw new Error("Site Agent слишком много раз подряд потерял связь с сервером. Job сохранён; повторный запуск можно продолжить позже.");
+      }
+      retryAfterMs = Math.min(2500 + consecutiveTransportFailures * 1000, 15_000);
+      continue;
+    }
+
     if (response.status === 401) throw new KhasroyAuthError();
     const payload = await readApiResponse(response);
 
     if (!response.ok) {
-      if (payload.data.retryable) {
-        retryAfterMs = payload.data.retryAfterMs || 2500;
+      if (payload.data.retryable || shouldRetryTransport(response.status, payload.raw)) {
+        consecutiveTransportFailures += 1;
+        retryAfterMs = payload.data.retryAfterMs || Math.min(2500 + consecutiveTransportFailures * 1000, 15_000);
         continue;
       }
       throw new Error(payload.data.error || fallbackHttpError(response.status, payload.raw, true));
     }
+
+    consecutiveTransportFailures = 0;
 
     if (payload.data.done) {
       if (typeof payload.data.content !== "string" || !payload.data.content.trim()) {
@@ -112,7 +150,7 @@ async function runSiteAgent(query: string): Promise<string> {
     retryAfterMs = payload.data.retryAfterMs || 150;
   }
 
-  throw new Error("Site Agent не успел завершить job за 10 минут. Прогресс сохранён на сервере.");
+  throw new Error("Site Agent не успел завершить job за 12 минут. Прогресс сохранён на сервере.");
 }
 
 export async function chat(messages: Message[]): Promise<string> {
