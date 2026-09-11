@@ -23,9 +23,10 @@ async function runEmergencyImage(prompt: string) {
   }
 
   const bytes = Buffer.from(await upstream.arrayBuffer());
+  const upstreamModel = upstream.headers.get("x-model-used")?.trim() || "auto";
   return {
     image: `data:${mediaType};base64,${bytes.toString("base64")}`,
-    model: "flux-emergency",
+    model: `pollinations-${upstreamModel}`,
     mediaType,
   };
 }
