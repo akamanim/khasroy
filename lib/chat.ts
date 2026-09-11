@@ -15,6 +15,16 @@ type ChatApiResponse = {
   retryable?: boolean;
 };
 
+export type ChatProgress = {
+  stage?: string;
+  message: string;
+};
+
+export type ChatCallbacks = {
+  onProgress?: (progress: ChatProgress) => void;
+  onChunk?: (delta: string, full: string) => void;
+};
+
 export class KhasroyAuthError extends Error {
   constructor() {
     super("Требуется доступ владельца.");
@@ -75,7 +85,47 @@ function shouldRetryTransport(status: number, raw: string) {
   return status === 408 || status === 502 || status === 503 || status === 504 || /FUNCTION_INVOCATION_TIMEOUT|timed?\s*out|timeout/iu.test(raw);
 }
 
-async function runSiteAgent(query: string): Promise<string> {
+function splitReadableChunks(content: string) {
+  const paragraphs = content.split(/(\n\n+)/u).filter(Boolean);
+  const chunks: string[] = [];
+  for (const paragraph of paragraphs) {
+    if (/^\n+$/u.test(paragraph) || paragraph.length <= 420) {
+      chunks.push(paragraph);
+      continue;
+    }
+    const words = paragraph.split(/(\s+)/u);
+    let current = "";
+    for (const word of words) {
+      if (current.length + word.length > 300 && current.trim()) {
+        chunks.push(current);
+        current = word;
+      } else {
+        current += word;
+      }
+    }
+    if (current) chunks.push(current);
+  }
+  return chunks;
+}
+
+async function revealContent(content: string, callbacks?: ChatCallbacks) {
+  if (!callbacks?.onChunk) return;
+  let full = "";
+  const chunks = splitReadableChunks(content);
+  for (const chunk of chunks) {
+    full += chunk;
+    callbacks.onChunk(chunk, full);
+    await wait(chunk.trim() ? 45 : 18);
+  }
+}
+
+function emitProgress(callbacks: ChatCallbacks | undefined, data: ChatApiResponse, fallback?: string) {
+  const message = typeof data.progress === "string" && data.progress.trim() ? data.progress.trim() : fallback;
+  if (message) callbacks?.onProgress?.({ stage: data.stage, message });
+}
+
+async function runSiteAgent(query: string, callbacks?: ChatCallbacks): Promise<string> {
+  callbacks?.onProgress?.({ stage: "START", message: "Подготавливаю Site Agent и создаю resumable job…" });
   const started = await fetchWithTimeout(
     "/api/site-agent",
     {
@@ -94,13 +144,14 @@ async function runSiteAgent(query: string): Promise<string> {
 
   const jobId = startPayload.data.jobId;
   if (!jobId) throw new Error("Site Agent не получил jobId.");
+  emitProgress(callbacks, startPayload.data, "Job создан. Начинаю исследование сайта.");
 
   let retryAfterMs = startPayload.data.retryAfterMs || 100;
-  const deadline = Date.now() + 12 * 60 * 1000;
+  const deadline = Date.now() + 20 * 60 * 1000;
   let attempts = 0;
   let consecutiveTransportFailures = 0;
 
-  while (Date.now() < deadline && attempts < 240) {
+  while (Date.now() < deadline && attempts < 320) {
     attempts += 1;
     if (retryAfterMs > 0) await wait(retryAfterMs);
 
@@ -119,6 +170,7 @@ async function runSiteAgent(query: string): Promise<string> {
     } catch (error) {
       if (error instanceof KhasroyAuthError) throw error;
       consecutiveTransportFailures += 1;
+      callbacks?.onProgress?.({ stage: "RETRY", message: `Связь с этапом прервалась. Повторяю только текущий шаг (${consecutiveTransportFailures}/12)…` });
       if (consecutiveTransportFailures > 12) {
         throw new Error("Site Agent слишком много раз подряд потерял связь с сервером. Job сохранён; повторный запуск можно продолжить позже.");
       }
@@ -132,6 +184,7 @@ async function runSiteAgent(query: string): Promise<string> {
     if (!response.ok) {
       if (payload.data.retryable || shouldRetryTransport(response.status, payload.raw)) {
         consecutiveTransportFailures += 1;
+        callbacks?.onProgress?.({ stage: payload.data.stage || "RETRY", message: payload.data.error || "Внешний сервис не ответил вовремя. Повторяю текущий этап без потери прогресса…" });
         retryAfterMs = payload.data.retryAfterMs || Math.min(2500 + consecutiveTransportFailures * 1000, 15_000);
         continue;
       }
@@ -139,25 +192,30 @@ async function runSiteAgent(query: string): Promise<string> {
     }
 
     consecutiveTransportFailures = 0;
+    emitProgress(callbacks, payload.data);
 
     if (payload.data.done) {
       if (typeof payload.data.content !== "string" || !payload.data.content.trim()) {
         throw new Error("Site Agent завершил job без итогового отчёта.");
       }
-      return payload.data.content.trim();
+      const content = payload.data.content.trim();
+      callbacks?.onProgress?.({ stage: "DONE", message: "Анализ завершён. Формирую итоговый отчёт по частям…" });
+      await revealContent(content, callbacks);
+      return content;
     }
 
     retryAfterMs = payload.data.retryAfterMs || 150;
   }
 
-  throw new Error("Site Agent не успел завершить job за 12 минут. Прогресс сохранён на сервере.");
+  throw new Error("Site Agent не успел завершить job за 20 минут. Прогресс сохранён на сервере.");
 }
 
-export async function chat(messages: Message[]): Promise<string> {
+export async function chat(messages: Message[], callbacks?: ChatCallbacks): Promise<string> {
   const latestUser = [...messages].reverse().find((message) => message.role === "user");
   const siteAgent = latestUser ? looksLikeSiteAgentRequest(latestUser.content) : false;
-  if (siteAgent && latestUser) return runSiteAgent(latestUser.content);
+  if (siteAgent && latestUser) return runSiteAgent(latestUser.content, callbacks);
 
+  callbacks?.onProgress?.({ stage: "BRAIN", message: "Маршрутизирую запрос и подключаю нужный модуль мозга…" });
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -173,5 +231,8 @@ export async function chat(messages: Message[]): Promise<string> {
   if (typeof payload.data.content !== "string" || !payload.data.content.trim()) {
     throw new Error("Хасрой вернул пустой ответ.");
   }
-  return payload.data.content.trim();
+  const content = payload.data.content.trim();
+  callbacks?.onProgress?.({ stage: "RESPONSE", message: "Ответ готов. Показываю его постепенно…" });
+  await revealContent(content, callbacks);
+  return content;
 }
