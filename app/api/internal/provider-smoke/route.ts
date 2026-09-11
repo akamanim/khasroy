@@ -19,6 +19,11 @@ function safeToken(value: string) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+type GatewayPayload = {
+  model?: string;
+  error?: { message?: string; code?: string };
+};
+
 export async function GET(request: Request) {
   const token = new URL(request.url).searchParams.get("token") || "";
   if (!safeToken(token)) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -39,21 +44,16 @@ export async function GET(request: Request) {
       temperature: 0,
     }),
   });
-  const text = await response.text().catch(() => "");
-  let parsed: { model?: string; error?: { message?: string; code?: string } | string } | null = null;
-  try { parsed = JSON.parse(text) as typeof parsed; } catch { /* text fallback */ }
-  const error = parsed?.error;
-  const errorMessage = typeof error === "string" ? error : error?.message;
-  const errorCode = typeof error === "object" && error ? error.code : undefined;
+  const data = (await response.json().catch(() => null)) as GatewayPayload | null;
 
   return NextResponse.json({
     ok: response.ok,
     oidc: true,
     gateway: {
       status: response.status,
-      model: parsed?.model || null,
-      errorCode: errorCode || null,
-      error: response.ok ? null : (errorMessage || text).slice(0, 300),
+      model: data?.model || null,
+      errorCode: data?.error?.code || null,
+      error: response.ok ? null : data?.error?.message?.slice(0, 300) || "gateway error",
     },
     selfHosted: {
       configured: selfHosted.configured,
