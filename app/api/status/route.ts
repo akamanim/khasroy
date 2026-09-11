@@ -31,6 +31,14 @@ export async function GET() {
     const sandbox = has("cloud_code_sandbox");
     const critic = has("independent_response_critic");
     const autonomy = has("autonomous_learning_loop");
+    const screenshotVision = has("screenshot_vision");
+    const visualComparison = has("visual_before_after_comparison");
+    const visualScoring = has("visual_site_scoring");
+    const designAgent = has("site_design_agent");
+    const repairLoop = has("site_repair_loop");
+    const commercialAudit = has("commercial_site_audit");
+    const siteAgentReady = screenshotVision && visualComparison && visualScoring && designAgent && repairLoop && commercialAudit;
+
     const selfHostedState = brain.online
       ? "ONLINE"
       : brain.configured
@@ -55,9 +63,14 @@ export async function GET() {
         code: (repository ? 1 : 0) + (sandbox ? 1 : 0),
         memory: has("long_term_memory") ? 1 : 0,
         internet: has("internet_research") ? 1 : 0,
-        vision: 0,
+        vision: (screenshotVision ? 1 : 0) + (visualComparison ? 1 : 0) + (visualScoring ? 1 : 0),
         voice: 0,
-        agents: (critic ? 1 : 0) + (autonomy ? 1 : 0),
+        agents:
+          (critic ? 1 : 0) +
+          (autonomy ? 1 : 0) +
+          (designAgent ? 1 : 0) +
+          (repairLoop ? 1 : 0) +
+          (commercialAudit ? 1 : 0),
         images: 0,
       },
       modules: {
@@ -66,6 +79,8 @@ export async function GET() {
         internet: has("internet_research") ? "VERIFIED" : "LOCKED",
         sandbox: sandbox ? "VERIFIED" : "LOCKED",
         critic: critic ? "VERIFIED" : "LOCKED",
+        vision: screenshotVision ? "VERIFIED" : "WAITING",
+        siteAgent: siteAgentReady ? "VERIFIED" : "WAITING",
         selfHosted: selfHostedState,
         autonomy: autonomyState,
       },
