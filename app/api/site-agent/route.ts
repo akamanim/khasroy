@@ -5,7 +5,7 @@ import {
   createSiteAgentJob,
   extractSiteUrl,
   stepSiteAgentJob,
-} from "@/lib/site-agent-job";
+} from "@/lib/site-agent-job-v2";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, ...job });
   } catch (error) {
-    console.error("Khasroy resumable Site Agent failed", error);
+    console.error("Khasroy business-aware Site Agent failed", error);
     return errorResponse(error);
   }
 }
