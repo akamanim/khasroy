@@ -74,6 +74,9 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([welcome]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [responding, setResponding] = useState(false);
+  const responseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (responseTimer.current) clearTimeout(responseTimer.current); }, []);
   const [error, setError] = useState("");
   const [focused, setFocused] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
@@ -124,7 +127,10 @@ export default function Home() {
       ...next,
       { id: crypto.randomUUID(), role: "assistant", content },
     ]);
-    await refreshStatus();
+    setResponding(true);
+    if (responseTimer.current) clearTimeout(responseTimer.current);
+    responseTimer.current = setTimeout(() => setResponding(false), 3600);
+    void refreshStatus();
   }
 
   async function send(value = input) {
@@ -138,6 +144,8 @@ export default function Home() {
     setMessages(next);
     setInput("");
     setBusy(true);
+    setResponding(false);
+    if (responseTimer.current) clearTimeout(responseTimer.current);
     setError("");
 
     try {
@@ -242,20 +250,20 @@ export default function Home() {
 
         <div className="core-wrap">
           <Core
-            state={busy ? "thinking" : focused ? "listening" : "idle"}
+            state={responding ? "responding" : busy ? "thinking" : focused ? "listening" : "idle"}
             evolution={evolution}
           />
           <span className="core-coordinate coord-left">
             CORE EVOLUTION<br />LEVEL {levelLabel}
           </span>
           <span className="core-coordinate coord-right">
-            {busy ? "PROCESSING" : "STANDBY"}<br />● ACTIVE
+            {responding ? "RESPONDING" : busy ? "PROCESSING" : "STANDBY"}<br />● ACTIVE
           </span>
         </div>
 
         <div className="core-caption">
           <span className="eyebrow">
-            {busy
+            {responding ? "ОТВЕТ ГОТОВ" : busy
               ? "АНАЛИЗИРУЮ ЗАПРОС"
               : focused
                 ? "СЛУШАЮ ВЛАДЕЛЬЦА"
@@ -278,6 +286,8 @@ export default function Home() {
             disabled={busy}
             onClick={() => {
               setMessages([welcome]);
+              setResponding(false);
+              if (responseTimer.current) clearTimeout(responseTimer.current);
               setInput("");
               setError("");
               field.current?.focus();
