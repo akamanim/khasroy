@@ -17,7 +17,6 @@ export function createCoreScene(
   const camera = new T.PerspectiveCamera(38, 1, 0.1, 50);
   camera.position.z = 7.8;
   const root = new T.Group();
-  root.position.y = 0.35;
   scene.add(root);
   const materials: T.Material[] = [];
   const geometries: T.BufferGeometry[] = [];
