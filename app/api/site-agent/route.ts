@@ -10,7 +10,10 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Screenshot providers can queue a freshly-created preview and the full flow also
+// performs three bounded vision calls. 60s was too short and Vercel could terminate
+// the function before our stage-aware JSON error handler had a chance to respond.
+export const maxDuration = 180;
 
 function friendlySiteAgentError(error: unknown) {
   const raw = error instanceof Error ? error.message : "Site Agent failed.";
