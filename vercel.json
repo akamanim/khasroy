@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/vision-school/cron",
+      "schedule": "17 22 * * *"
+    }
+  ]
+}
