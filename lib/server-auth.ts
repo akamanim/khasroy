@@ -1,4 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { installProviderFailover } from "@/lib/ai/provider-failover";
+
+installProviderFailover();
 
 export const OWNER_COOKIE = "khasroy_owner";
 
