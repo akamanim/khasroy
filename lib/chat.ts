@@ -32,6 +32,18 @@ function looksLikeSiteAgentRequest(text: string) {
   return hasUrl && hasIntent;
 }
 
+function fallbackHttpError(status: number, raw: string, siteAgent: boolean) {
+  if (siteAgent && (status === 504 || /FUNCTION_INVOCATION_TIMEOUT|timed?\s*out|timeout/iu.test(raw))) {
+    return "Site Agent превысил серверное время выполнения. Это системный таймаут Vercel, а не ошибка аудита.";
+  }
+  if (siteAgent && status >= 500) {
+    return `Site Agent завершился серверной ошибкой HTTP ${status}. Конкретный stage-error не дошёл до браузера.`;
+  }
+  return siteAgent
+    ? "Site Agent не смог завершить аудит. Попробуйте ещё раз чуть позже."
+    : "Не удалось получить ответ от Хасроя.";
+}
+
 export async function chat(messages: Message[]): Promise<string> {
   const latestUser = [...messages].reverse().find((message) => message.role === "user");
   const siteAgent = latestUser ? looksLikeSiteAgentRequest(latestUser.content) : false;
@@ -48,23 +60,22 @@ export async function chat(messages: Message[]): Promise<string> {
 
   if (response.status === 401) throw new KhasroyAuthError();
 
+  const raw = await response.text().catch(() => "");
   let data: ChatApiResponse = {};
-  try {
-    const parsed: unknown = await response.json();
-    if (parsed && typeof parsed === "object") {
-      data = parsed as ChatApiResponse;
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") data = parsed as ChatApiResponse;
+    } catch {
+      data = {};
     }
-  } catch {
-    data = {};
   }
 
   if (!response.ok) {
     throw new Error(
-      typeof data.error === "string"
+      typeof data.error === "string" && data.error.trim()
         ? data.error
-        : siteAgent
-          ? "Site Agent не смог завершить аудит. Попробуйте ещё раз чуть позже."
-          : "Не удалось получить ответ от Хасроя.",
+        : fallbackHttpError(response.status, raw, siteAgent),
     );
   }
 
