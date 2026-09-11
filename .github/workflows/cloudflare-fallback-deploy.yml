@@ -1,0 +1,55 @@
+name: Cloudflare Fallback Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cloudflare-fallback-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check Cloudflare credentials
+        id: credentials
+        shell: bash
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare CI credentials are available."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare CI credentials are not configured in GitHub Actions secrets."
+          fi
+
+      - name: Install dependencies
+        if: steps.credentials.outputs.ready == 'true'
+        run: npm ci
+
+      - name: Check vinext compatibility
+        if: steps.credentials.outputs.ready == 'true'
+        run: npx vinext check || true
+
+      - name: Deploy current main to Cloudflare Workers
+        if: steps.credentials.outputs.ready == 'true'
+        run: npx @vinext/cloudflare deploy
+
+      - name: Explain fallback state
+        if: steps.credentials.outputs.ready != 'true'
+        run: |
+          echo "CLOUDFLARE_CREDENTIALS_MISSING"
+          echo "Connect Cloudflare CI credentials or use the connected Cloudflare MCP to deploy without Vercel."
