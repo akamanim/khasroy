@@ -12,6 +12,30 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+function friendlySiteAgentError(error: unknown) {
+  const raw = error instanceof Error ? error.message : "Site Agent failed.";
+  if (/(429|rate limit|tokens per minute|otpm|quota|request too large)/iu.test(raw)) {
+    return {
+      status: 429,
+      message: "Vision-модель временно упёрлась в бесплатный лимит Groq. Token budget уже снижен; если лимит занят предыдущим запросом, подождите около минуты и повторите.",
+    };
+  }
+  if (/invalid compact JSON|invalid JSON/iu.test(raw)) {
+    return {
+      status: 502,
+      message: "Vision-модель оборвала компактный JSON. Повторите аудит — незавершённый прогон не будет записан как VERIFIED.",
+    };
+  }
+  if (/(URL|адрес|http|локальн|приватн)/iu.test(raw)) return { status: 400, message: raw };
+  if (/screenshot provider/iu.test(raw)) {
+    return { status: 502, message: "Сервис скриншотов временно не подготовил страницу. Повторите запрос через несколько секунд." };
+  }
+  return {
+    status: 502,
+    message: "Site Agent не смог завершить полный цикл. Незавершённые навыки останутся LEARNING; попробуйте ещё раз.",
+  };
+}
+
 export async function POST(request: Request) {
   const ownerKey = process.env.KHASROY_OWNER_KEY;
   const apiKey = process.env.GROQ_API_KEY;
@@ -47,21 +71,16 @@ export async function POST(request: Request) {
       targetUrl: resolvedUrl,
       goal: typeof body.goal === "string" ? body.goal.slice(0, 1200) : query.slice(0, 1200),
     });
-    const comparison = result.repair.comparison;
-    const verified = comparison.improved && comparison.overallDelta > 0;
-    if (verified) {
-      await recordVerifiedSiteAgentSkills(ownerKey, result);
-    }
+    await recordVerifiedSiteAgentSkills(ownerKey, result);
     return NextResponse.json({
       ok: true,
-      verified,
+      verified: result.repair.success,
       content: formatSiteAgentChatResponse(result),
       result,
     });
   } catch (error) {
     console.error("Khasroy Site Agent failed", error);
-    const message = error instanceof Error ? error.message : "Site Agent failed.";
-    const status = /rate|429|quota/i.test(message) ? 429 : /URL|адрес|http/i.test(message) ? 400 : 502;
-    return NextResponse.json({ error: message }, { status });
+    const friendly = friendlySiteAgentError(error);
+    return NextResponse.json({ error: friendly.message }, { status: friendly.status });
   }
 }
