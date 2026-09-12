@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "package.json"
+      - "scripts/ensure-local-owner-key.mjs"
+      - "tests/local-owner-key.mjs"
       - "lib/chat.ts"
       - "lib/server-image-lab.ts"
       - "components/khasroy/markdown-message.tsx"
@@ -30,6 +32,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm install --ignore-scripts
+      - name: Local owner bootstrap test
+        run: npm run test:local-owner-key
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Next production build

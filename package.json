@@ -6,11 +6,12 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/ensure-local-owner-key.mjs && next dev",
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "start": "next start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test:local-owner-key": "node tests/local-owner-key.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
