@@ -1,8 +1,6 @@
 name: Vercel Prebuilt Production Deploy
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -60,12 +58,8 @@ jobs:
             console.error('Vercel project response is missing id/accountId');
             process.exit(1);
           }
-
           let analyticsId;
-          if (project.analytics?.id && (!project.analytics.disabledAt || (project.analytics.enabledAt && project.analytics.enabledAt > project.analytics.disabledAt))) {
-            analyticsId = project.analytics.id;
-          }
-
+          if (project.analytics?.id && (!project.analytics.disabledAt || (project.analytics.enabledAt && project.analytics.enabledAt > project.analytics.disabledAt))) analyticsId = project.analytics.id;
           const projectJson = {
             projectId: project.id,
             orgId: project.accountId,
@@ -83,12 +77,10 @@ jobs:
               ...(analyticsId ? { analyticsId } : {})
             }
           };
-
           fs.mkdirSync('.vercel', { recursive: true });
           fs.writeFileSync('.vercel/project.json', JSON.stringify(projectJson, null, 2));
           fs.appendFileSync(process.env.GITHUB_ENV, `VERCEL_PROJECT_ID=${project.id}\nVERCEL_ORG_ID=${project.accountId}\n`);
           console.log(`Resolved project: ${projectJson.projectName}`);
-          console.log(`Framework: ${projectJson.settings.framework || 'auto'}`);
           NODE
 
       - name: Pull production env through REST API
@@ -100,13 +92,10 @@ jobs:
             "https://api.vercel.com/v10/projects/$VERCEL_PROJECT_ID/env?decrypt=true&source=vercel-cli%3Apull" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H "Content-Type: application/json")
-
           if [ "$HTTP_CODE" != "200" ]; then
             echo "VERCEL_ENV_LOOKUP_FAILED_HTTP_$HTTP_CODE"
-            node -e 'const fs=require("fs"); const p="/tmp/vercel-env.json"; if(fs.existsSync(p)){try{const x=JSON.parse(fs.readFileSync(p,"utf8")); console.log(x.error?.message || x.message || "Unknown Vercel API error");}catch{console.log("Non-JSON Vercel API response");}}'
             exit 1
           fi
-
           node <<'NODE'
           const fs = require('fs');
           const payload = JSON.parse(fs.readFileSync('/tmp/vercel-env.json', 'utf8'));
@@ -115,7 +104,6 @@ jobs:
             const target = Array.isArray(env.target) ? env.target : [env.target];
             return target.includes('production') && typeof env.key === 'string' && typeof env.value !== 'undefined';
           });
-
           const deduped = new Map();
           for (const env of production) deduped.set(env.key, String(env.value ?? ''));
           const lines = [...deduped.entries()].map(([key, value]) => `${key}=${JSON.stringify(value)}`);
