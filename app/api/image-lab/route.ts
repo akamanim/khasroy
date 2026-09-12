@@ -15,11 +15,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-async function runEmergencyImage(prompt: string, timeoutMs = 17_000) {
+async function runEmergencyImage(prompt: string, timeoutMs = 18_000) {
   const seed = Date.now() % 2147483647;
   const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?model=flux&width=1024&height=1024&nologo=true&seed=${seed}`;
   const upstream = await fetch(imageUrl, {
-    headers: { "user-agent": "Khasroy-Image-Lab/2.0" },
+    headers: { "user-agent": "Khasroy-Image-Lab/2.1" },
     signal: AbortSignal.timeout(timeoutMs),
     cache: "no-store",
   });
@@ -80,28 +80,47 @@ async function runVerifiedEmergencyImage(args: {
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     attempts = attempt;
-    const compiledPrompt = compileImagePrompt(args.prompt, {
-      lessons,
-      repairPrompt: repairPrompt || undefined,
-    });
-    const image = await runEmergencyImage(compiledPrompt, attempt === 1 ? 17_000 : 16_000);
-    const audit = await verifyGeneratedImage({
-      apiKey: args.apiKey,
-      prompt: args.prompt,
-      imageDataUrl: image.image,
-    });
+    try {
+      const compiledPrompt = compileImagePrompt(args.prompt, {
+        lessons,
+        repairPrompt: repairPrompt || undefined,
+      });
+      const image = await runEmergencyImage(compiledPrompt, 18_000);
+      const audit = await verifyGeneratedImage({
+        apiKey: args.apiKey,
+        prompt: args.prompt,
+        imageDataUrl: image.image,
+      });
 
-    finalImage = image;
-    finalAudit = audit;
+      finalImage = image;
+      finalAudit = audit;
 
-    if (audit.passed) break;
+      if (audit.passed) break;
 
-    await rememberImageGenerationFailure(args.ownerKey, {
-      prompt: args.prompt,
-      audit,
-    }).catch((error) => console.error("Khasroy image failure lesson save failed", error));
+      await rememberImageGenerationFailure(args.ownerKey, {
+        prompt: args.prompt,
+        audit,
+      }).catch((error) => console.error("Khasroy image failure lesson save failed", error));
 
-    repairPrompt = audit.repairPrompt;
+      repairPrompt = audit.repairPrompt;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown_retry_failure";
+      console.error(`Khasroy image attempt ${attempt} failed`, error);
+
+      // If an earlier image was already semantically judged, keep that evidence.
+      // A transport failure on the retry must not erase the learning result.
+      if (finalImage && finalAudit) {
+        finalAudit = {
+          ...finalAudit,
+          mismatches: [
+            ...finalAudit.mismatches,
+            `Retry technical failure: ${message.slice(0, 180)}`,
+          ].slice(0, 6),
+        };
+        break;
+      }
+      throw error;
+    }
   }
 
   if (!finalImage || !finalAudit) throw new Error("image_learning_loop_empty_result");
@@ -175,7 +194,7 @@ export async function POST(request: Request) {
           {
             ok: false,
             error:
-              "Я сгенерировал два варианта, но сам забраковал их: изображение не соответствует запросу. Провал записан как урок, плохую картинку не показываю.",
+              "Финальный результат не прошёл мой визуальный экзамен. Провал и причина сохранены как урок; неподходящую картинку я не показываю.",
             code: "image_semantic_verification_failed",
             audit: outcome.audit,
             attempts: outcome.attempts,
@@ -203,7 +222,11 @@ export async function POST(request: Request) {
       const message = error instanceof Error ? error.message : "unknown image learning error";
       console.error("Khasroy semantic image generation failed", error);
       return NextResponse.json(
-        { ok: false, error: "image_generation_failed", detail: message.slice(0, 400) },
+        {
+          ok: false,
+          error: "image_generation_failed",
+          detail: message.slice(0, 400),
+        },
         { status: 502 },
       );
     }
