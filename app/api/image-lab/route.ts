@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import { runImageLab } from "@/lib/server-image-lab";
+import { recordChatImageGenerationTrial } from "@/lib/server-learning";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ async function runEmergencyImage(prompt: string) {
   return {
     image: `data:${mediaType};base64,${bytes.toString("base64")}`,
     model: `pollinations-${upstreamModel}`,
-    mediaType,
+    mediaType: mediaType.split(";")[0].trim(),
   };
 }
 
@@ -54,9 +55,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "prompt_required" }, { status: 400 });
   }
 
+  const startedAt = Date.now();
+
   if (fast) {
     try {
       const emergency = await runEmergencyImage(prompt);
+      const learning = await recordChatImageGenerationTrial(ownerKey, {
+        prompt,
+        model: emergency.model,
+        mediaType: emergency.mediaType,
+        mode: "fast_emergency",
+        runtimeMs: Date.now() - startedAt,
+      }).catch((error) => {
+        console.error("Khasroy image learning trial failed", error);
+        return null;
+      });
+
       return NextResponse.json({
         ok: true,
         lab: "Khasroy Image Generation Lab",
@@ -67,6 +81,7 @@ export async function POST(request: Request) {
         repaired: null,
         delta: 0,
         improved: false,
+        learning,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown emergency image error";
@@ -80,7 +95,17 @@ export async function POST(request: Request) {
 
   try {
     const result = await runImageLab(prompt);
-    const finalImage = result.repaired || result.baseline;
+    const finalImage = result.improved && result.repaired ? result.repaired : result.baseline;
+    const learning = await recordChatImageGenerationTrial(ownerKey, {
+      prompt,
+      model: finalImage.model,
+      mediaType: finalImage.mediaType,
+      mode: "audited",
+      runtimeMs: Date.now() - startedAt,
+    }).catch((error) => {
+      console.error("Khasroy audited image learning trial failed", error);
+      return null;
+    });
 
     return NextResponse.json({
       ok: true,
@@ -102,12 +127,24 @@ export async function POST(request: Request) {
         : null,
       delta: result.delta,
       improved: result.improved,
+      learning,
     });
   } catch (error) {
     console.error("Khasroy audited Image Lab failed, trying emergency fallback", error);
 
     try {
       const emergency = await runEmergencyImage(prompt);
+      const learning = await recordChatImageGenerationTrial(ownerKey, {
+        prompt,
+        model: emergency.model,
+        mediaType: emergency.mediaType,
+        mode: "emergency_fallback",
+        runtimeMs: Date.now() - startedAt,
+      }).catch((learningError) => {
+        console.error("Khasroy fallback image learning trial failed", learningError);
+        return null;
+      });
+
       return NextResponse.json({
         ok: true,
         lab: "Khasroy Image Generation Lab",
@@ -118,6 +155,7 @@ export async function POST(request: Request) {
         repaired: null,
         delta: 0,
         improved: false,
+        learning,
       });
     } catch (fallbackError) {
       const primary = error instanceof Error ? error.message : "unknown image lab error";
