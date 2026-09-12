@@ -61,31 +61,32 @@ export async function loadImageGenerationLessons(ownerKey: string, limit = 3) {
     .filter(Boolean);
 }
 
+function compactLesson(value: string) {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  const repair = normalized.match(/Repair guidance:\s*(.+)$/iu)?.[1]?.trim();
+  const mismatch = normalized.match(/Mismatch:\s*(.+?)(?:\s*\|\s*Repair guidance:|$)/iu)?.[1]?.trim();
+  return (repair || mismatch || normalized).slice(0, 220);
+}
+
 export function compileImagePrompt(
   userPrompt: string,
   options: { lessons?: string[]; repairPrompt?: string } = {},
 ) {
-  const clean = userPrompt.trim().slice(0, 1800);
-  const lessons = (options.lessons || []).slice(0, 3);
-  const repair = options.repairPrompt?.trim().slice(0, 1200) || "";
+  const clean = userPrompt.replace(/\s+/gu, " ").trim().slice(0, 320);
+  const repair = options.repairPrompt?.replace(/\s+/gu, " ").trim().slice(0, 220) || "";
+  const lesson = compactLesson(options.lessons?.[0] || "");
 
-  return [
-    "CREATE THE IMAGE REQUESTED BY THE USER EXACTLY. DO NOT SUBSTITUTE AN UNRELATED SUBJECT OR SCENE.",
-    `USER REQUEST: ${clean}`,
-    "HARD REQUIREMENTS:",
-    "- The requested main subject must be clearly visible and dominant in the frame.",
-    "- The requested environment/background must also be clearly visible.",
-    "- Preserve named object type, make/model, person, product, location and action when the user specifies them.",
-    "- Do not replace the requested scene with an indoor room, furniture, random landscape, unrelated person or unrelated object.",
-    "- Do not add text, logos or watermarks unless the user explicitly requests them.",
-    "- If the user asks for realism or a photograph, use believable photographic lighting, materials, perspective and proportions.",
-    lessons.length
-      ? `LESSONS FROM PREVIOUS FAILED GENERATIONS (advisory only):\n${lessons.map((item, index) => `${index + 1}. ${item}`).join("\n")}`
-      : "",
-    repair ? `VISUAL VERIFIER REPAIR INSTRUCTION:\n${repair}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const parts = [
+    `Create exactly this image: ${clean}`,
+    "Main requested subject and requested background must both be clearly visible. Preserve any named make/model, object type, location and action.",
+    "Do not substitute unrelated rooms, furniture, people, objects or scenery. No text or watermark unless requested.",
+    repair ? `Retry correction: ${repair}` : "",
+    !repair && lesson ? `Avoid this previous failure: ${lesson}` : "",
+  ].filter(Boolean);
+
+  // Pollinations uses the prompt inside the URL path. Keep the compiled prompt compact
+  // so a repair pass cannot cross practical URL/path limits.
+  return parts.join(" ").slice(0, 620);
 }
 
 export async function rememberImageGenerationFailure(
@@ -190,8 +191,8 @@ export async function verifyGeneratedImage(args: {
     overall >= 70;
   const repairPrompt =
     typeof parsed.repairPrompt === "string" && parsed.repairPrompt.trim()
-      ? parsed.repairPrompt.trim().slice(0, 1200)
-      : `Regenerate the requested subject and scene exactly. Fix: ${mismatches.join("; ") || "prompt mismatch"}.`;
+      ? parsed.repairPrompt.trim().replace(/\s+/gu, " ").slice(0, 220)
+      : `Regenerate exact subject and scene. Fix: ${mismatches.join("; ") || "prompt mismatch"}.`.slice(0, 220);
 
   return {
     passed,
