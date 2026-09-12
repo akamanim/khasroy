@@ -39,7 +39,7 @@ jobs:
         run: npm install --ignore-scripts
 
       - name: Link Vercel project
-        run: npx --yes vercel@latest link --yes --project khasroy --scope akamanim --token="$VERCEL_TOKEN"
+        run: npx --yes vercel@latest link --yes --project khasroy --token="$VERCEL_TOKEN"
 
       - name: Pull production environment
         run: npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
