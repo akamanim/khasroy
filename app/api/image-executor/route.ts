@@ -19,6 +19,7 @@ const MAX_ATTEMPTS = 2;
 const COMPUTE_BUDGET_MS = 42_000;
 const MIN_RETRY_BUDGET_MS = 18_000;
 const GENERATION_TIMEOUT_MS = 12_000;
+const FALLBACK_GENERATION_TIMEOUT_MS = 9_000;
 
 const ACCEPTANCE_THRESHOLDS = Object.freeze({
   subjectMatch: 72,
@@ -93,19 +94,27 @@ function technicalFailure(stage: TechnicalFailure["stage"], error: unknown): Tec
   return { code, stage, detail: message.slice(0, 320), retryable };
 }
 
-async function generatePollinations(prompt: string, timeoutMs: number): Promise<GeneratedImage> {
-  const compact = prompt.replace(/\s+/gu, " ").trim().slice(0, 620);
+function compactProviderPrompt(prompt: string, maxChars = 620) {
+  return prompt.replace(/\s+/gu, " ").trim().slice(0, maxChars);
+}
+
+async function fetchPollinationsImage(args: {
+  prompt: string;
+  timeoutMs: number;
+  seedOffset?: number;
+}): Promise<GeneratedImage> {
+  const compact = compactProviderPrompt(args.prompt);
   const encoded = encodeURIComponent(compact);
   if (!compact || encoded.length > 1800) {
     throw new Error("provider_prompt_path_too_long");
   }
 
-  const seed = Date.now() % 2147483647;
+  const seed = (Date.now() + (args.seedOffset || 0)) % 2147483647;
   const requestedModel = "flux";
   const url = `https://image.pollinations.ai/prompt/${encoded}?model=${requestedModel}&width=1024&height=1024&nologo=true&seed=${seed}`;
   const response = await fetch(url, {
-    headers: { "user-agent": "Khasroy-Image-Executor/3.0" },
-    signal: AbortSignal.timeout(timeoutMs),
+    headers: { "user-agent": "Khasroy-Image-Executor/3.1" },
+    signal: AbortSignal.timeout(args.timeoutMs),
     cache: "no-store",
   });
   const mediaType = (response.headers.get("content-type") || "").split(";")[0].trim();
@@ -123,6 +132,33 @@ async function generatePollinations(prompt: string, timeoutMs: number): Promise<
     requestedModel,
     actualModel,
   };
+}
+
+async function generatePollinations(
+  prompt: string,
+  timeoutMs: number,
+  fallbackPrompt: string,
+): Promise<GeneratedImage> {
+  try {
+    return await fetchPollinationsImage({ prompt, timeoutMs });
+  } catch (primaryError) {
+    const fallback = compactProviderPrompt(fallbackPrompt, 420);
+    if (!fallback) throw primaryError;
+
+    try {
+      return await fetchPollinationsImage({
+        prompt: fallback,
+        timeoutMs: Math.max(4_000, Math.min(FALLBACK_GENERATION_TIMEOUT_MS, timeoutMs)),
+        seedOffset: 997,
+      });
+    } catch (fallbackError) {
+      const first = primaryError instanceof Error ? primaryError.message : String(primaryError);
+      const second = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      throw new Error(
+        `primary_generation_failed=${first.slice(0, 145)}; fallback_generation_failed=${second.slice(0, 145)}`,
+      );
+    }
+  }
 }
 
 async function loadConfirmedLessons(ownerKey: string) {
@@ -203,6 +239,38 @@ async function saveLessonBounded(
   ]).catch(() => null);
 }
 
+async function rememberTechnicalInterruption(
+  ownerKey: string,
+  contract: AcceptanceContract,
+  failure: TechnicalFailure,
+  attempt: number,
+  audit: ImageSemanticAudit | null,
+) {
+  return rememberKnowledge(
+    ownerKey,
+    `image_executor_technical_${Date.now()}`,
+    "image_generation_technical",
+    JSON.stringify({
+      requestHash: contract.requestHash,
+      code: failure.code,
+      stage: failure.stage,
+      detail: failure.detail,
+      attempt,
+      lastAudit: audit
+        ? {
+            subjectMatch: audit.subjectMatch,
+            sceneMatch: audit.sceneMatch,
+            requestMatch: audit.requestMatch,
+            overall: audit.overall,
+            criticalMismatch: audit.criticalMismatch,
+          }
+        : null,
+      observedAt: new Date().toISOString(),
+    }),
+    0.85,
+  ).catch(() => undefined);
+}
+
 export async function POST(request: Request) {
   const ownerKey = process.env.KHASROY_OWNER_KEY?.trim();
   if (!ownerKey) return NextResponse.json({ error: "owner_not_configured" }, { status: 503 });
@@ -258,11 +326,18 @@ export async function POST(request: Request) {
       lessons,
       repairPrompt: repairPrompt || undefined,
     });
+    const fallbackPrompt = repairPrompt
+      ? `${contract.prompt}. Mandatory correction: ${repairPrompt}`
+      : contract.prompt;
 
     let image: GeneratedImage;
     try {
       const available = Math.max(4_000, deadline - Date.now() - 9_000);
-      image = await generatePollinations(compiledPrompt, Math.min(GENERATION_TIMEOUT_MS, available));
+      image = await generatePollinations(
+        compiledPrompt,
+        Math.min(GENERATION_TIMEOUT_MS, available),
+        fallbackPrompt,
+      );
     } catch (error) {
       techFailure = technicalFailure("generation", error);
       break;
@@ -295,6 +370,7 @@ export async function POST(request: Request) {
   }
 
   if (techFailure) {
+    await rememberTechnicalInterruption(ownerKey, contract, techFailure, attempts, lastAudit);
     return NextResponse.json(
       {
         ok: false,
