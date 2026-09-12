@@ -1,7 +1,9 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { installSurvivalFetchGuard } from "@/lib/survival/fetch-guard";
 import { installProviderFailover } from "@/lib/ai/provider-failover";
 import { installGroqContentGuard } from "@/lib/ai/groq-content-guard";
 
+installSurvivalFetchGuard();
 installProviderFailover();
 installGroqContentGuard();
 
