@@ -5,7 +5,7 @@ import {
   type BrainMode,
   type BrainResponseData,
 } from "@/lib/brain/router-legacy";
-import { searchWebDirect } from "@/lib/server-web";
+import { searchWebDirect, type WebSearchResult } from "@/lib/server-web";
 import {
   runCodeSandbox,
   type SandboxExecution,
@@ -20,6 +20,7 @@ export type BrainProviderDetail =
   | BrainProvider
   | "groq-fallback"
   | "gateway"
+  | "server-search"
   | "vercel-sandbox";
 
 export type BrainRun = {
@@ -92,6 +93,43 @@ function directSources(
   sources: Array<{ title: string; url: string; snippet: string }>,
 ) {
   return sources.map(({ title, url }) => ({ title, url }));
+}
+
+function researchRunFromGrounded(
+  searched: WebSearchResult,
+  content: string,
+): BrainRun {
+  const data: BrainResponseData = {
+    model: searched.provider,
+    choices: [{ message: { content } }],
+  };
+  const gatewayBacked = searched.provider.startsWith("vercel-ai-gateway");
+  const response = new Response(JSON.stringify(data), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "x-khasroy-ai-provider": gatewayBacked ? "gateway" : "server-search",
+    },
+  });
+  return {
+    response,
+    data,
+    provider: "groq",
+    providerDetail: gatewayBacked ? "gateway" : "server-search",
+    model: searched.provider,
+    mode: "research",
+    toolsUsed: [`web_search:${searched.provider}`],
+    sources: directSources(searched.sources),
+    webToolForced: true,
+  };
+}
+
+function groundedFallbackAnswer(query: string, searched: WebSearchResult) {
+  const items = searched.sources.slice(0, 6).map((source, index) => {
+    const snippet = source.snippet ? `\n${source.snippet.slice(0, 360)}` : "";
+    return `${index + 1}. **${source.title}**${snippet}\n${source.url}`;
+  });
+  return `Я выполнил реальный поиск по запросу «${query.slice(0, 180)}». Модуль итогового пересказа сейчас недоступен, поэтому даю подтверждённые результаты напрямую:\n\n${items.join("\n\n")}`;
 }
 
 function parseJsonObject(value: string) {
@@ -288,6 +326,11 @@ async function runIndependentResearch(args: RunArgs): Promise<BrainRun | null> {
   try {
     const searched = await searchWebDirect(args.query, 6);
     const sources = directSources(searched.sources);
+
+    if (searched.answer?.trim()) {
+      return researchRunFromGrounded(searched, searched.answer.trim());
+    }
+
     const final = await textOnly(args, {
       systemContent: `${args.systemContent.slice(0, 8_000)}
 
@@ -301,7 +344,10 @@ ${searched.context.slice(0, 8_000)}
     });
 
     if (!final.response.ok || !final.data?.choices?.[0]?.message?.content) {
-      return null;
+      return researchRunFromGrounded(
+        searched,
+        groundedFallbackAnswer(args.query, searched),
+      );
     }
 
     return {
@@ -311,7 +357,7 @@ ${searched.context.slice(0, 8_000)}
       providerDetail: final.providerDetail,
       model: final.model,
       mode: "research",
-      toolsUsed: ["direct_web_search:server"],
+      toolsUsed: [`web_search:${searched.provider}`],
       sources,
       webToolForced: true,
     };
