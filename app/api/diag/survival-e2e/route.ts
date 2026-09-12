@@ -1,6 +1,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken } from "@/lib/server-auth";
+import { runBrain } from "@/lib/brain/router";
+import {
+  buildMemoryContext,
+  getRecentMessages,
+  recallKnowledge,
+} from "@/lib/server-memory";
 import { providerHealthSnapshot } from "@/lib/survival/provider-health";
 
 export const runtime = "nodejs";
@@ -23,7 +29,7 @@ type ChatPayload = {
   brainMode?: string;
 };
 
-async function runProbe(origin: string, ownerKey: string, message: string) {
+async function runChatProbe(origin: string, ownerKey: string, message: string) {
   const started = Date.now();
   const response = await fetch(`${origin}/api/chat`, {
     method: "POST",
@@ -37,15 +43,47 @@ async function runProbe(origin: string, ownerKey: string, message: string) {
   });
   const data = (await response.json().catch(() => null)) as ChatPayload | null;
   return {
-    input: message,
     status: response.status,
     ok: response.ok && Boolean(data?.content),
     durationMs: Date.now() - started,
-    content: data?.content?.slice(0, 900) || null,
+    content: data?.content?.slice(0, 700) || null,
     error: data?.error?.slice(0, 500) || null,
     provider: data?.provider || null,
     model: data?.model || null,
     brainMode: data?.brainMode || null,
+  };
+}
+
+async function runDirectBrainProbe(ownerKey: string) {
+  const started = Date.now();
+  const [recent, knowledge] = await Promise.all([
+    getRecentMessages(ownerKey, 20),
+    recallKnowledge(ownerKey, "", 12),
+  ]);
+  const memoryContext = buildMemoryContext(recent, knowledge);
+  const systemContent = `Ты — Хасрой, универсальный AI-союзник владельца системы.${memoryContext}`;
+  const brain = await runBrain({
+    apiKey: process.env.GROQ_API_KEY?.trim() || "",
+    defaultModel: process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b",
+    systemContent,
+    history: [{ role: "user", content: "Хасрой" }],
+    query: "Хасрой",
+    repositoryRead: false,
+  });
+
+  return {
+    durationMs: Date.now() - started,
+    status: brain.response.status,
+    ok: brain.response.ok && Boolean(brain.data?.choices?.[0]?.message?.content?.trim()),
+    provider: brain.provider,
+    providerDetail: brain.providerDetail,
+    model: brain.model,
+    mode: brain.mode,
+    content: brain.data?.choices?.[0]?.message?.content?.trim().slice(0, 700) || null,
+    errorType: brain.data?.error?.type || null,
+    errorCode: brain.data?.error?.code || null,
+    errorMessage: brain.data?.error?.message?.slice(0, 500) || null,
+    memoryChars: memoryContext.length,
   };
 }
 
@@ -60,21 +98,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "owner_key_missing" }, { status: 503 });
   }
 
-  const origin = url.origin;
-  const probes = [];
-  probes.push(await runProbe(origin, ownerKey, "Хасрой"));
-  probes.push(
-    await runProbe(
-      origin,
-      ownerKey,
-      "Объясни простыми словами, что такое API, в двух предложениях.",
-    ),
-  );
-  probes.push(await runProbe(origin, ownerKey, "Найди свежие новости об ИИ"));
+  const [directBrain, chat] = await Promise.all([
+    runDirectBrainProbe(ownerKey),
+    runChatProbe(url.origin, ownerKey, "Хасрой"),
+  ]);
 
   return NextResponse.json({
-    ok: probes.every((probe) => probe.ok),
-    probes,
+    ok: directBrain.ok && chat.ok,
+    directBrain,
+    chat,
     survivalHealth: providerHealthSnapshot(),
   });
 }
