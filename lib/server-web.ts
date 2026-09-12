@@ -27,7 +27,11 @@ function decodeHtml(value: string) {
 }
 
 function stripTags(value: string) {
-  return decodeHtml(value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/giu, "$1").replace(/<[^>]+>/g, " "))
+  return decodeHtml(
+    value
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/giu, "$1")
+      .replace(/<[^>]+>/g, " "),
+  )
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -58,6 +62,30 @@ function urlsFromText(text: string) {
   return [...new Set(matches.map((url) => url.replace(/[.,;:!?]+$/u, "")))];
 }
 
+function isRussianQuery(query: string) {
+  return /[а-яё]/iu.test(query);
+}
+
+function wantsFreshNews(query: string) {
+  return /(свеж|новост|сегодня|последн|актуальн|latest|today|news|recent|breaking)/iu.test(
+    query,
+  );
+}
+
+function looksTechnical(query: string) {
+  return /(ии|искусственн.*интеллект|ai\b|openai|anthropic|gemini|grok|llm|код|программ|github|javascript|typescript|python|сервер|database|api|software|tech)/iu.test(
+    query,
+  );
+}
+
+function normalizeTechQuery(query: string) {
+  return query
+    .replace(/\bИИ\b/giu, "AI artificial intelligence")
+    .replace(/искусственн(?:ый|ого|ом|ому)?\s+интеллект(?:а|ом|у)?/giu, "artificial intelligence")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function collectSourcesFromUnknown(
   value: unknown,
   unique: Map<string, WebSearchSource>,
@@ -68,7 +96,11 @@ function collectSourcesFromUnknown(
   if (typeof value === "string") {
     for (const url of urlsFromText(value)) {
       if (!unique.has(url)) {
-        unique.set(url, { title: url, url, snippet: "Referenced by web-search tool." });
+        unique.set(url, {
+          title: url,
+          url,
+          snippet: "Referenced by web-search tool.",
+        });
       }
     }
     return;
@@ -106,17 +138,206 @@ function collectSourcesFromUnknown(
 }
 
 function deterministicAnswer(query: string, sources: WebSearchSource[]) {
+  const russian = isRussianQuery(query);
   const lines = sources.slice(0, 6).map((source, index) => {
-    const detail = source.snippet ? ` — ${source.snippet.slice(0, 260)}` : "";
+    const detail = source.snippet ? ` — ${source.snippet.slice(0, 300)}` : "";
     return `${index + 1}. ${source.title}${detail}\n${source.url}`;
   });
-  return `Я выполнил реальный веб-поиск по запросу «${query.slice(0, 180)}». Модуль итогового пересказа сейчас работает в резервном режиме, поэтому показываю найденные источники напрямую.\n\n${lines.join("\n\n")}`;
+
+  return russian
+    ? `Нашёл актуальные результаты по запросу «${query.slice(0, 180)}». Показываю данные напрямую из веб-источников:\n\n${lines.join("\n\n")}`
+    : `I found current web results for “${query.slice(0, 180)}”. Here are the grounded sources directly:\n\n${lines.join("\n\n")}`;
 }
 
-async function searchWithGateway(query: string, limit: number): Promise<WebSearchResult> {
+function xmlValue(block: string, tag: string) {
+  const match = block.match(
+    new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "iu"),
+  );
+  return match ? stripTags(match[1]) : "";
+}
+
+async function searchWithGoogleNewsRss(
+  query: string,
+  limit: number,
+): Promise<WebSearchResult> {
+  const russian = isRussianQuery(query);
+  const params = new URLSearchParams({
+    q: query,
+    hl: russian ? "ru" : "en-US",
+    gl: russian ? "RU" : "US",
+    ceid: russian ? "RU:ru" : "US:en",
+  });
+  const target = `https://news.google.com/rss/search?${params.toString()}`;
+  const response = await fetch(target, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; KhasroyResearch/0.4)",
+      Accept: "application/rss+xml,application/xml,text/xml,*/*",
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google News RSS failed (${response.status})`);
+  }
+
+  const xml = await response.text();
+  const items = xml.match(/<item\b[\s\S]*?<\/item>/giu) || [];
+  const sources: WebSearchSource[] = [];
+
+  for (const item of items) {
+    if (sources.length >= limit) break;
+    const title = xmlValue(item, "title");
+    const url = xmlValue(item, "link");
+    const description = xmlValue(item, "description");
+    const published = xmlValue(item, "pubDate");
+    const sourceName = xmlValue(item, "source");
+    if (!title || !/^https?:\/\//iu.test(url)) continue;
+    sources.push({
+      title,
+      url,
+      snippet: [published, sourceName, description]
+        .filter(Boolean)
+        .join(" — ")
+        .slice(0, 900),
+    });
+  }
+
+  if (!sources.length) throw new Error("Google News RSS returned no results");
+
+  return {
+    sources,
+    context: sourceContext(sources),
+    answer: deterministicAnswer(query, sources),
+    provider: "google-news-rss",
+  };
+}
+
+async function searchWithHackerNews(
+  query: string,
+  limit: number,
+): Promise<WebSearchResult> {
+  const target = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(
+    normalizeTechQuery(query),
+  )}&tags=story&hitsPerPage=${Math.max(3, Math.min(limit, 10))}`;
+
+  const response = await fetch(target, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!response.ok) throw new Error(`Hacker News search failed (${response.status})`);
+
+  const data = (await response.json().catch(() => null)) as
+    | {
+        hits?: Array<{
+          objectID?: string;
+          title?: string | null;
+          story_title?: string | null;
+          url?: string | null;
+          story_url?: string | null;
+          created_at?: string | null;
+          points?: number | null;
+          author?: string | null;
+        }>;
+      }
+    | null;
+
+  const sources: WebSearchSource[] = [];
+  for (const hit of data?.hits || []) {
+    if (sources.length >= limit) break;
+    const title = (hit.title || hit.story_title || "").trim();
+    if (!title) continue;
+    const url =
+      (hit.url || hit.story_url || "").trim() ||
+      (hit.objectID ? `https://news.ycombinator.com/item?id=${hit.objectID}` : "");
+    if (!/^https?:\/\//iu.test(url)) continue;
+    sources.push({
+      title,
+      url,
+      snippet: [hit.created_at, hit.author, hit.points != null ? `${hit.points} points` : ""]
+        .filter(Boolean)
+        .join(" — "),
+    });
+  }
+
+  if (!sources.length) throw new Error("Hacker News returned no results");
+
+  return {
+    sources,
+    context: sourceContext(sources),
+    answer: deterministicAnswer(query, sources),
+    provider: "hackernews-algolia",
+  };
+}
+
+async function searchWithWikipedia(
+  query: string,
+  limit: number,
+): Promise<WebSearchResult> {
+  const lang = isRussianQuery(query) ? "ru" : "en";
+  const params = new URLSearchParams({
+    action: "query",
+    list: "search",
+    srsearch: query,
+    srlimit: String(Math.max(3, Math.min(limit, 10))),
+    format: "json",
+    origin: "*",
+  });
+  const response = await fetch(
+    `https://${lang}.wikipedia.org/w/api.php?${params.toString()}`,
+    {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8_000),
+    },
+  );
+  if (!response.ok) throw new Error(`Wikipedia search failed (${response.status})`);
+
+  const data = (await response.json().catch(() => null)) as
+    | {
+        query?: {
+          search?: Array<{
+            pageid?: number;
+            title?: string;
+            snippet?: string;
+            timestamp?: string;
+          }>;
+        };
+      }
+    | null;
+
+  const sources: WebSearchSource[] = [];
+  for (const item of data?.query?.search || []) {
+    if (sources.length >= limit) break;
+    if (!item.pageid || !item.title) continue;
+    sources.push({
+      title: item.title,
+      url: `https://${lang}.wikipedia.org/?curid=${item.pageid}`,
+      snippet: [item.timestamp, stripTags(item.snippet || "")]
+        .filter(Boolean)
+        .join(" — ")
+        .slice(0, 900),
+    });
+  }
+
+  if (!sources.length) throw new Error("Wikipedia returned no results");
+
+  return {
+    sources,
+    context: sourceContext(sources),
+    answer: deterministicAnswer(query, sources),
+    provider: `wikipedia-${lang}`,
+  };
+}
+
+async function searchWithGateway(
+  query: string,
+  limit: number,
+): Promise<WebSearchResult> {
   const model =
     process.env.KHASROY_WEB_GATEWAY_MODEL?.trim() || "openai/gpt-5.6-luna";
-  const fresh = /(свеж|новост|сегодня|последн|актуальн|latest|today|news|recent)/iu.test(query);
+  const fresh = wantsFreshNews(query);
 
   const result = await generateText({
     model,
@@ -133,7 +354,7 @@ async function searchWithGateway(query: string, limit: number): Promise<WebSearc
         ...(fresh ? { searchRecencyFilter: "week" as const } : {}),
       }),
     },
-    abortSignal: AbortSignal.timeout(45_000),
+    abortSignal: AbortSignal.timeout(20_000),
   });
 
   const unique = new Map<string, WebSearchSource>();
@@ -151,7 +372,11 @@ async function searchWithGateway(query: string, limit: number): Promise<WebSearc
   }
   for (const url of urlsFromText(result.text)) {
     if (!unique.has(url)) {
-      unique.set(url, { title: url, url, snippet: "Referenced in grounded web-search output." });
+      unique.set(url, {
+        title: url,
+        url,
+        snippet: "Referenced in grounded web-search output.",
+      });
     }
   }
 
@@ -178,7 +403,10 @@ async function searchWithGateway(query: string, limit: number): Promise<WebSearc
   };
 }
 
-async function searchWithDuckDuckGo(query: string, limit: number): Promise<WebSearchResult> {
+async function searchWithDuckDuckGo(
+  query: string,
+  limit: number,
+): Promise<WebSearchResult> {
   const target = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const response = await fetch(target, {
     headers: {
@@ -193,7 +421,9 @@ async function searchWithDuckDuckGo(query: string, limit: number): Promise<WebSe
   if (!response.ok) throw new Error(`DuckDuckGo search failed (${response.status})`);
 
   const html = await response.text();
-  const blocks = html.split(/<div[^>]+class="[^"]*result[^"]*"[^>]*>/i).slice(1);
+  const blocks = html
+    .split(/<div[^>]+class="[^"]*result[^"]*"[^>]*>/i)
+    .slice(1);
   const sources: WebSearchSource[] = [];
 
   for (const block of blocks) {
@@ -220,20 +450,17 @@ async function searchWithDuckDuckGo(query: string, limit: number): Promise<WebSe
   return {
     sources,
     context: sourceContext(sources),
+    answer: deterministicAnswer(query, sources),
     provider: "duckduckgo-html",
   };
 }
 
-function xmlValue(block: string, tag: string) {
-  const match = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "iu"));
-  return match ? stripTags(match[1]) : "";
-}
-
-async function searchWithBingRss(query: string, limit: number): Promise<WebSearchResult> {
-  const wantsNews = /(свеж|новост|сегодня|последн|актуальн|latest|today|news|recent)/iu.test(query);
-  const base = wantsNews
-    ? "https://www.bing.com/news/search"
-    : "https://www.bing.com/search";
+async function searchWithBingRss(
+  query: string,
+  limit: number,
+): Promise<WebSearchResult> {
+  const news = wantsFreshNews(query);
+  const base = news ? "https://www.bing.com/news/search" : "https://www.bing.com/search";
   const target = `${base}?q=${encodeURIComponent(query)}&format=rss`;
   const response = await fetch(target, {
     headers: {
@@ -265,35 +492,64 @@ async function searchWithBingRss(query: string, limit: number): Promise<WebSearc
   return {
     sources,
     context: sourceContext(sources),
-    provider: wantsNews ? "bing-news-rss" : "bing-web-rss",
+    answer: deterministicAnswer(query, sources),
+    provider: news ? "bing-news-rss" : "bing-web-rss",
   };
 }
 
-export async function searchWebDirect(query: string, limit = 6): Promise<WebSearchResult> {
+export async function searchWebDirect(
+  query: string,
+  limit = 6,
+): Promise<WebSearchResult> {
   const cleanQuery = query.trim().slice(0, 3_000);
   if (!cleanQuery) throw new Error("Web search query is empty");
 
   const failures: string[] = [];
-  try {
-    return await searchWithGateway(cleanQuery, limit);
-  } catch (error) {
-    failures.push(`gateway:${error instanceof Error ? error.message : "failed"}`);
-    console.error("Khasroy AI Gateway web search failed", error);
+  const attempt = async (
+    name: string,
+    fn: () => Promise<WebSearchResult>,
+  ): Promise<WebSearchResult | null> => {
+    try {
+      return await fn();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "failed";
+      failures.push(`${name}:${message}`);
+      console.error(`Khasroy ${name} search failed`, error);
+      return null;
+    }
+  };
+
+  if (wantsFreshNews(cleanQuery)) {
+    const googleNews = await attempt("google-news", () =>
+      searchWithGoogleNewsRss(cleanQuery, limit),
+    );
+    if (googleNews) return googleNews;
   }
 
-  try {
-    return await searchWithDuckDuckGo(cleanQuery, limit);
-  } catch (error) {
-    failures.push(`duckduckgo:${error instanceof Error ? error.message : "failed"}`);
-    console.error("Khasroy DuckDuckGo search failed", error);
+  const gatewayResult = await attempt("gateway", () =>
+    searchWithGateway(cleanQuery, limit),
+  );
+  if (gatewayResult) return gatewayResult;
+
+  const duck = await attempt("duckduckgo", () =>
+    searchWithDuckDuckGo(cleanQuery, limit),
+  );
+  if (duck) return duck;
+
+  if (looksTechnical(cleanQuery)) {
+    const hn = await attempt("hackernews", () =>
+      searchWithHackerNews(cleanQuery, limit),
+    );
+    if (hn) return hn;
   }
 
-  try {
-    return await searchWithBingRss(cleanQuery, limit);
-  } catch (error) {
-    failures.push(`bing:${error instanceof Error ? error.message : "failed"}`);
-    console.error("Khasroy Bing RSS search failed", error);
-  }
+  const wiki = await attempt("wikipedia", () =>
+    searchWithWikipedia(cleanQuery, limit),
+  );
+  if (wiki) return wiki;
+
+  const bing = await attempt("bing", () => searchWithBingRss(cleanQuery, limit));
+  if (bing) return bing;
 
   throw new Error(`All web-search providers failed: ${failures.join(" | ")}`);
 }
