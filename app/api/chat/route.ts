@@ -18,6 +18,7 @@ import {
   appendMessage,
   buildMemoryContext,
   getRecentMessages,
+  queueTask,
   recallKnowledge,
   rememberKnowledge,
   upsertSkill,
@@ -150,6 +151,69 @@ async function runEmergencyChat(args: {
   }
 }
 
+async function queueForRecovery(args: {
+  ownerKey: string;
+  query: string;
+  history: ClientMessage[];
+  mode: string;
+  reason: string;
+  status?: number;
+}) {
+  const safeMode = args.mode || "chat";
+  try {
+    const task = await queueTask(args.ownerKey, {
+      kind: safeMode,
+      priority: safeMode === "chat" ? 70 : 60,
+      input: {
+        query: args.query,
+        history: args.history.slice(-12),
+      },
+      checkpoint: {
+        stage: "waiting_for_compute",
+        reason: args.reason.slice(0, 240),
+        upstreamStatus: args.status || null,
+        queuedAt: new Date().toISOString(),
+      },
+    });
+
+    const content = task?.id
+      ? `Я сохранил задачу в устойчивую очередь. Сейчас внешний вычислительный ресурс недоступен, но запрос не потерян. Идентификатор задачи: ${task.id}.`
+      : "Я сохранил задачу в устойчивую очередь. Сейчас внешний вычислительный ресурс недоступен, но запрос не потерян.";
+
+    await Promise.allSettled([
+      appendMessage(args.ownerKey, "user", args.query),
+      appendMessage(args.ownerKey, "assistant", content),
+    ]);
+
+    return NextResponse.json(
+      {
+        content,
+        provider: "survival-core",
+        model: "queued",
+        brainMode: safeMode,
+        memory: "active",
+        queued: true,
+        taskId: task?.id || undefined,
+      },
+      { status: 202 },
+    );
+  } catch (error) {
+    console.error("Khasroy survival queue failed", error);
+    return NextResponse.json(
+      {
+        content:
+          "Внешний AI сейчас недоступен. Я остаюсь активен, но не смог надёжно сохранить эту задачу в очередь, поэтому лучше повторить запрос позже.",
+        provider: "survival-core",
+        model: "degraded",
+        brainMode: safeMode,
+        memory: "error",
+        queued: false,
+      },
+      { status: 200 },
+    );
+  }
+}
+
 export async function POST(request: Request) {
   const ownerKey = process.env.KHASROY_OWNER_KEY;
   if (!ownerKey) {
@@ -248,10 +312,13 @@ export async function POST(request: Request) {
         ? await runEmergencyChat({ ownerKey, query: latestUser.content, history: messages })
         : null;
     if (!emergency) {
-      return NextResponse.json(
-        { error: "Не удалось связаться с AI-сервисом." },
-        { status: 502 },
-      );
+      return queueForRecovery({
+        ownerKey,
+        query: latestUser.content,
+        history: messages,
+        mode: intendedMode,
+        reason: error instanceof Error ? error.message : "brain_router_exception",
+      });
     }
     brain = emergency;
   }
@@ -281,23 +348,26 @@ export async function POST(request: Request) {
       data?.error?.code,
     );
 
-    const status = upstream.status === 429 ? 429 : 502;
-    const error =
-      upstream.status === 429
-        ? brain.mode === "repository"
-          ? "GitHub-код прочитан, но достигнут временный бесплатный лимит AI. Подождите около минуты и повторите запрос."
-          : "Временный бесплатный лимит AI исчерпан. Попробуйте немного позже."
-        : brain.mode === "research" || brain.mode === "agentic"
-          ? "Интернет-модуль временно недоступен. Попробуйте ещё раз чуть позже."
-          : brain.mode === "sandbox"
-            ? "Облачная песочница временно недоступна."
-            : "AI-сервис временно недоступен или неверно настроен.";
-    return NextResponse.json({ error }, { status });
+    return queueForRecovery({
+      ownerKey,
+      query: latestUser.content,
+      history: messages,
+      mode: brain.mode,
+      reason: data?.error?.code || data?.error?.type || "provider_unavailable",
+      status: upstream.status,
+    });
   }
 
   const draftContent = data.choices?.[0]?.message?.content?.trim();
   if (!draftContent) {
-    return NextResponse.json({ error: "Хасрой вернул пустой ответ." }, { status: 502 });
+    return queueForRecovery({
+      ownerKey,
+      query: latestUser.content,
+      history: messages,
+      mode: brain.mode,
+      reason: "empty_ai_response",
+      status: upstream.status,
+    });
   }
 
   const emergencyProvider = brain.providerDetail === "gateway" && /emergency/iu.test(brain.model);
