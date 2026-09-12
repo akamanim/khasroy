@@ -43,10 +43,11 @@ async function runChatProbe(origin: string, ownerKey: string, message: string) {
   });
   const data = (await response.json().catch(() => null)) as ChatPayload | null;
   return {
+    input: message,
     status: response.status,
     ok: response.ok && Boolean(data?.content),
     durationMs: Date.now() - started,
-    content: data?.content?.slice(0, 700) || null,
+    content: data?.content?.slice(0, 900) || null,
     error: data?.error?.slice(0, 500) || null,
     provider: data?.provider || null,
     model: data?.model || null,
@@ -98,15 +99,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "owner_key_missing" }, { status: 503 });
   }
 
-  const [directBrain, chat] = await Promise.all([
+  const [directBrain, hello, normalQuestion, research] = await Promise.all([
     runDirectBrainProbe(ownerKey),
     runChatProbe(url.origin, ownerKey, "Хасрой"),
+    runChatProbe(
+      url.origin,
+      ownerKey,
+      "Объясни простыми словами, что такое API, в двух предложениях.",
+    ),
+    runChatProbe(url.origin, ownerKey, "Найди свежие новости об ИИ"),
   ]);
 
+  const probes = [hello, normalQuestion, research];
   return NextResponse.json({
-    ok: directBrain.ok && chat.ok,
+    ok: directBrain.ok && probes.every((probe) => probe.ok),
     directBrain,
-    chat,
+    probes,
     survivalHealth: providerHealthSnapshot(),
   });
 }
