@@ -65,28 +65,33 @@ function compactLesson(value: string) {
   const normalized = value.replace(/\s+/gu, " ").trim();
   const repair = normalized.match(/Repair guidance:\s*(.+)$/iu)?.[1]?.trim();
   const mismatch = normalized.match(/Mismatch:\s*(.+?)(?:\s*\|\s*Repair guidance:|$)/iu)?.[1]?.trim();
-  return (repair || mismatch || normalized).slice(0, 220);
+  return (repair || mismatch || normalized).slice(0, 180);
 }
 
 export function compileImagePrompt(
   userPrompt: string,
   options: { lessons?: string[]; repairPrompt?: string } = {},
 ) {
-  const clean = userPrompt.replace(/\s+/gu, " ").trim().slice(0, 320);
+  const clean = userPrompt.replace(/\s+/gu, " ").trim().slice(0, 300);
   const repair = options.repairPrompt?.replace(/\s+/gu, " ").trim().slice(0, 220) || "";
   const lesson = compactLesson(options.lessons?.[0] || "");
 
-  const parts = [
-    `Create exactly this image: ${clean}`,
-    "Main requested subject and requested background must both be clearly visible. Preserve any named make/model, object type, location and action.",
-    "Do not substitute unrelated rooms, furniture, people, objects or scenery. No text or watermark unless requested.",
-    repair ? `Retry correction: ${repair}` : "",
-    !repair && lesson ? `Avoid this previous failure: ${lesson}` : "",
-  ].filter(Boolean);
+  // Repair guidance is intentionally placed immediately after the owner request.
+  // Pollinations carries the prompt in a URL path, so late instructions can be truncated.
+  const parts = repair
+    ? [
+        `Create exactly this image: ${clean}`,
+        `MANDATORY RETRY CORRECTION: ${repair}`,
+        "Keep the requested main subject, named make/model, action and background clearly visible. Do not substitute unrelated rooms, people, objects or scenery. No text or watermark unless requested.",
+      ]
+    : [
+        `Create exactly this image: ${clean}`,
+        "Main requested subject and requested background must both be clearly visible. Preserve any named make/model, object type, location and action.",
+        "Do not substitute unrelated rooms, furniture, people, objects or scenery. No text or watermark unless requested.",
+        lesson ? `Avoid this previous failure: ${lesson}` : "",
+      ];
 
-  // Pollinations uses the prompt inside the URL path. Keep the compiled prompt compact
-  // so a repair pass cannot cross practical URL/path limits.
-  return parts.join(" ").slice(0, 620);
+  return parts.filter(Boolean).join(" ").slice(0, 620);
 }
 
 export async function rememberImageGenerationFailure(
