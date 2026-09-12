@@ -29,12 +29,24 @@ function looksTechnical(query: string) {
   );
 }
 
+function isGroundedDirectResearch(answer: string) {
+  return /(?:Показываю данные напрямую из веб-источников|даю подтверждённые результаты напрямую|grounded sources directly)/iu.test(
+    answer,
+  );
+}
+
 export function shouldRunCritic(
   query: string,
   brainMode: string,
   answer: string,
 ) {
   if (answer.length < 80) return false;
+
+  // Deterministic live-search output is already grounded in the sources that
+  // were fetched at request time. A model critic can have an older knowledge
+  // cutoff and must never overwrite fresh 2026 search results with stale facts.
+  if (brainMode === "research" && isGroundedDirectResearch(answer)) return false;
+
   if (["repository", "sandbox", "research", "agentic"].includes(brainMode)) return true;
   return looksTechnical(query);
 }
