@@ -54,4 +54,6 @@ if (match) {
 writeFileSync(ENV_FILE, source, { encoding: "utf8", mode: 0o600 });
 protectFile(ENV_FILE);
 
-console.log("[khasroy] local owner key initialized in .env.local (value hidden).");
+console.log("[khasroy] local owner key initialized in .env.local.");
+console.log(`[khasroy] OWNER KEY (shown once): ${generated}`);
+console.log("[khasroy] Paste this key into the owner-access dialog. It is stored only in your ignored local .env.local file.");
