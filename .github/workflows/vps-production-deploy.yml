@@ -1,0 +1,65 @@
+name: VPS Production Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: khasroy-vps-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+    steps:
+      - name: Check VPS credentials
+        id: credentials
+        shell: bash
+        run: |
+          if [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_SSH_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "VPS credentials are not configured yet; skipping deploy."
+          fi
+
+      - name: Configure SSH
+        if: steps.credentials.outputs.ready == 'true'
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/khasroy_vps
+          chmod 600 ~/.ssh/khasroy_vps
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy Khasroy on VPS
+        if: steps.credentials.outputs.ready == 'true'
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/khasroy_vps -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" <<'REMOTE'
+          set -euo pipefail
+          APP_DIR="$HOME/khasroy"
+          if [ ! -d "$APP_DIR/.git" ]; then
+            git clone https://github.com/akamanim/khasroy.git "$APP_DIR"
+          fi
+          cd "$APP_DIR"
+          git fetch origin main
+          git reset --hard origin/main
+          cd deploy/vps
+          test -f .env || { echo 'Missing deploy/vps/.env on VPS'; exit 1; }
+          docker compose build --pull
+          docker compose up -d --remove-orphans
+          docker image prune -f
+          docker compose ps
+          REMOTE
