@@ -38,8 +38,39 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Link Vercel project
-        run: npx --yes vercel@latest link --yes --project khasroy --token="$VERCEL_TOKEN"
+      - name: Resolve Vercel project directly
+        shell: bash
+        run: |
+          HTTP_CODE=$(curl --silent --show-error \
+            --output /tmp/vercel-project.json \
+            --write-out "%{http_code}" \
+            "https://api.vercel.com/v9/projects/khasroy" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json")
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "VERCEL_PROJECT_LOOKUP_FAILED_HTTP_$HTTP_CODE"
+            node -e 'const fs=require("fs"); const p="/tmp/vercel-project.json"; if(fs.existsSync(p)){try{const x=JSON.parse(fs.readFileSync(p,"utf8")); console.log(x.error?.message || x.message || "Unknown Vercel API error");}catch{console.log("Non-JSON Vercel API response");}}'
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require('fs');
+          const project = JSON.parse(fs.readFileSync('/tmp/vercel-project.json', 'utf8'));
+          if (!project.id || !project.accountId) {
+            console.error('Vercel project response is missing id/accountId');
+            process.exit(1);
+          }
+          fs.mkdirSync('.vercel', { recursive: true });
+          fs.writeFileSync('.vercel/project.json', JSON.stringify({
+            projectId: project.id,
+            orgId: project.accountId
+          }));
+          fs.appendFileSync(process.env.GITHUB_ENV, `VERCEL_PROJECT_ID=${project.id}\nVERCEL_ORG_ID=${project.accountId}\n`);
+          console.log(`Resolved project: ${project.name || 'khasroy'}`);
+          console.log(`Project ID: ${project.id}`);
+          console.log(`Org ID: ${project.accountId}`);
+          NODE
 
       - name: Pull production environment
         run: npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
