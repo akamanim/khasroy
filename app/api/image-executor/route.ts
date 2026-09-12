@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { generateImage } from "ai";
+import { getVercelOidcToken } from "@vercel/oidc";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
@@ -18,21 +18,15 @@ export const maxDuration = 60;
 
 const MAX_ATTEMPTS = 2;
 const COMPUTE_BUDGET_MS = 54_000;
-const MIN_RETRY_BUDGET_MS = 12_000;
-const GATEWAY_GENERATION_TIMEOUT_MS = 26_000;
-const GATEWAY_REPAIR_TIMEOUT_MS = 24_000;
-const POLLINATIONS_GENERATION_TIMEOUT_MS = 18_000;
-const GATEWAY_GENERATION_MODEL =
-  process.env.KHASROY_IMAGE_GENERATION_MODEL || "openai/gpt-image-2.5-flare";
-const GATEWAY_REPAIR_MODEL =
-  process.env.KHASROY_IMAGE_REPAIR_MODEL || "openai/gpt-image-2.5-sunburst";
-const GATEWAY_GENERATION_FALLBACKS = [
-  "openai/gpt-image-1.5",
-  "spacexai/grok-imagine-image-2.0",
-];
-const GATEWAY_REPAIR_FALLBACKS = [
-  "spacexai/grok-imagine-image-2.0",
-  "openai/gpt-image-1.5",
+const MIN_REPAIR_BUDGET_MS = 11_000;
+const GATEWAY_IMAGE_ENDPOINT = "https://ai-gateway.vercel.sh/v1/images/generations";
+const PER_MODEL_TIMEOUT_MS = 13_000;
+
+const DOCUMENTED_IMAGE_MODELS = [
+  "bfl/flux-2-pro",
+  "openai/gpt-image-2",
+  "xai/grok-imagine-image",
+  "google/imagen-4.0-ultra-generate-001",
 ];
 
 const ACCEPTANCE_THRESHOLDS = Object.freeze({
@@ -53,7 +47,7 @@ type AcceptanceContract = {
 type GeneratedImage = {
   image: string;
   mediaType: string;
-  provider: "vercel-ai-gateway" | "pollinations";
+  provider: "vercel-ai-gateway";
   requestedModel: string;
   actualModel: string;
 };
@@ -63,6 +57,12 @@ type TechnicalFailure = {
   stage: "generation" | "verification" | "budget";
   detail: string;
   retryable: boolean;
+};
+
+type GatewayImagePayload = {
+  model?: string;
+  data?: Array<{ b64_json?: string | null; url?: string | null }>;
+  error?: { message?: string; code?: string };
 };
 
 function hash(value: string) {
@@ -99,167 +99,119 @@ function technicalFailure(stage: TechnicalFailure["stage"], error: unknown): Tec
   const lower = message.toLowerCase();
   let code = `${stage}_failed`;
   let retryable = true;
-  if (/429|rate.?limit|quota|cooling.?down/u.test(lower)) code = `${stage}_rate_limited`;
+  if (/429|rate.?limit|quota|cooling.?down|temporar/u.test(lower)) code = `${stage}_rate_limited`;
   else if (/timeout|abort/u.test(lower)) code = `${stage}_timeout`;
   else if (/401|403|unauthor|forbidden/u.test(lower)) {
     code = `${stage}_configuration_error`;
     retryable = false;
   }
-  return { code, stage, detail: message.slice(0, 480), retryable };
+  return { code, stage, detail: message.slice(0, 700), retryable };
 }
 
-function compactProviderPrompt(prompt: string, maxChars = 1500) {
+function compactProviderPrompt(prompt: string, maxChars = 1400) {
   return prompt.replace(/\s+/gu, " ").trim().slice(0, maxChars);
 }
 
-function imageBytes(imageDataUrl: string) {
-  const comma = imageDataUrl.indexOf(",");
-  if (comma < 0) throw new Error("repair_source_invalid_data_url");
-  return new Uint8Array(Buffer.from(imageDataUrl.slice(comma + 1), "base64"));
+async function gatewayToken() {
+  const configured = process.env.AI_GATEWAY_API_KEY?.trim();
+  if (configured) return configured;
+  return getVercelOidcToken({ expirationBufferMs: 2 * 60_000 });
 }
 
-async function generateGatewayImage(prompt: string, timeoutMs: number): Promise<GeneratedImage> {
-  const compact = compactProviderPrompt(prompt, 1500);
-  if (!compact) throw new Error("gateway_prompt_empty");
-
-  const result = await generateImage({
-    model: GATEWAY_GENERATION_MODEL,
-    prompt: compact,
-    aspectRatio: "1:1",
-    n: 1,
-    maxRetries: 0,
-    providerOptions: {
-      gateway: {
-        models: GATEWAY_GENERATION_FALLBACKS,
-        tags: ["feature:image-exam-generation"],
-      },
-    },
-    abortSignal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!result.image?.base64) {
-    throw new Error(`gateway_model_${GATEWAY_GENERATION_MODEL}_returned_no_image`);
-  }
-  const mediaType = result.image.mediaType || "image/png";
-  return {
-    image: `data:${mediaType};base64,${result.image.base64}`,
-    mediaType,
-    provider: "vercel-ai-gateway",
-    requestedModel: GATEWAY_GENERATION_MODEL,
-    actualModel: "gateway-routed-generation",
-  };
+function imageModels() {
+  const configured = process.env.KHASROY_IMAGE_GENERATION_MODEL?.trim();
+  return [...new Set([configured, ...DOCUMENTED_IMAGE_MODELS].filter(Boolean) as string[])];
 }
 
-async function repairGatewayImage(args: {
-  source: GeneratedImage;
-  originalPrompt: string;
-  repairPrompt: string;
-  timeoutMs: number;
-}): Promise<GeneratedImage> {
-  const text = [
-    "EDIT THE PROVIDED IMAGE TO PASS A STRICT VISUAL EXAM.",
-    `Original owner request: ${compactProviderPrompt(args.originalPrompt, 900)}`,
-    `Mandatory audited correction: ${compactProviderPrompt(args.repairPrompt, 500)}`,
-    "Preserve useful matching details from the provided image, but correct wrong subject identity, wrong vehicle make/model, wrong environment, composition and visible geometry when required by the audit.",
-    "Do not add unrelated rooms, people, objects, logos, text or watermarks unless explicitly requested.",
-  ].join("\n");
-
-  const result = await generateImage({
-    model: GATEWAY_REPAIR_MODEL,
-    prompt: { text, images: [imageBytes(args.source.image)] },
-    aspectRatio: "1:1",
-    n: 1,
-    maxRetries: 0,
-    providerOptions: {
-      gateway: {
-        models: GATEWAY_REPAIR_FALLBACKS,
-        tags: ["feature:image-exam-repair"],
-      },
-    },
-    abortSignal: AbortSignal.timeout(args.timeoutMs),
-  });
-
-  if (!result.image?.base64) {
-    throw new Error(`gateway_repair_${GATEWAY_REPAIR_MODEL}_returned_no_image`);
-  }
-  const mediaType = result.image.mediaType || "image/png";
-  return {
-    image: `data:${mediaType};base64,${result.image.base64}`,
-    mediaType,
-    provider: "vercel-ai-gateway",
-    requestedModel: GATEWAY_REPAIR_MODEL,
-    actualModel: "gateway-routed-reference-repair",
-  };
-}
-
-async function fetchPollinationsImage(args: {
-  prompt: string;
-  timeoutMs: number;
-}): Promise<GeneratedImage> {
-  const compact = compactProviderPrompt(args.prompt, 620);
-  const encoded = encodeURIComponent(compact);
-  if (!compact || encoded.length > 1800) {
-    throw new Error("provider_prompt_path_too_long");
-  }
-
-  const seed = Date.now() % 2147483647;
-  const requestedModel = "flux";
-  const url = `https://image.pollinations.ai/prompt/${encoded}?model=${requestedModel}&width=1024&height=1024&nologo=true&seed=${seed}`;
+async function fetchImageUrl(url: string, timeoutMs: number) {
   const response = await fetch(url, {
-    headers: { "user-agent": "Khasroy-Image-Executor/5.0" },
-    signal: AbortSignal.timeout(args.timeoutMs),
     cache: "no-store",
+    signal: AbortSignal.timeout(timeoutMs),
   });
-  const mediaType = (response.headers.get("content-type") || "").split(";")[0].trim();
+  const mediaType = (response.headers.get("content-type") || "image/png").split(";")[0].trim();
   if (!response.ok || !/^image\/(?:png|jpeg|jpg|webp)$/iu.test(mediaType)) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`pollinations_${response.status}: ${text.slice(0, 220)}`);
+    throw new Error(`gateway_image_url_${response.status}`);
   }
-
   const bytes = Buffer.from(await response.arrayBuffer());
-  const actualModel = response.headers.get("x-model-used")?.trim() || "auto";
-  return {
-    image: `data:${mediaType};base64,${bytes.toString("base64")}`,
-    mediaType,
-    provider: "pollinations",
-    requestedModel,
-    actualModel,
-  };
+  return { image: `data:${mediaType};base64,${bytes.toString("base64")}`, mediaType };
 }
 
-async function generateWithProviders(args: {
+async function requestGatewayImage(args: {
+  token: string;
+  model: string;
   prompt: string;
-  pollinationsPrompt: string;
-  availableMs: number;
+  timeoutMs: number;
 }): Promise<GeneratedImage> {
-  const startedAt = Date.now();
-  const gatewayBudget = Math.max(
-    8_000,
-    Math.min(GATEWAY_GENERATION_TIMEOUT_MS, args.availableMs - 12_000),
-  );
-  let gatewayError: unknown = null;
+  const response = await fetch(GATEWAY_IMAGE_ENDPOINT, {
+    method: "POST",
+    cache: "no-store",
+    signal: AbortSignal.timeout(args.timeoutMs),
+    headers: {
+      Authorization: `Bearer ${args.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: args.model,
+      prompt: compactProviderPrompt(args.prompt),
+      n: 1,
+      response_format: "b64_json",
+    }),
+  });
 
-  try {
-    return await generateGatewayImage(args.prompt, gatewayBudget);
-  } catch (error) {
-    gatewayError = error;
-  }
-
-  const remaining = args.availableMs - (Date.now() - startedAt);
-  if (remaining < 6_000) throw gatewayError;
-
-  try {
-    return await fetchPollinationsImage({
-      prompt: args.pollinationsPrompt,
-      timeoutMs: Math.max(6_000, Math.min(POLLINATIONS_GENERATION_TIMEOUT_MS, remaining)),
-    });
-  } catch (pollinationsError) {
-    const first = gatewayError instanceof Error ? gatewayError.message : String(gatewayError);
-    const second =
-      pollinationsError instanceof Error ? pollinationsError.message : String(pollinationsError);
+  const payload = (await response.json().catch(() => null)) as GatewayImagePayload | null;
+  if (!response.ok) {
     throw new Error(
-      `gateway_generation_failed=${first.slice(0, 210)}; pollinations_generation_failed=${second.slice(0, 210)}`,
+      `${args.model}:${response.status}:${payload?.error?.message || payload?.error?.code || "gateway_image_error"}`,
     );
   }
+
+  const item = payload?.data?.[0];
+  if (item?.b64_json) {
+    return {
+      image: `data:image/png;base64,${item.b64_json}`,
+      mediaType: "image/png",
+      provider: "vercel-ai-gateway",
+      requestedModel: args.model,
+      actualModel: payload?.model || args.model,
+    };
+  }
+
+  if (item?.url) {
+    const downloaded = await fetchImageUrl(item.url, Math.min(8_000, args.timeoutMs));
+    return {
+      ...downloaded,
+      provider: "vercel-ai-gateway",
+      requestedModel: args.model,
+      actualModel: payload?.model || args.model,
+    };
+  }
+
+  throw new Error(`${args.model}:gateway_returned_no_image`);
+}
+
+async function generateWithGatewayFailover(args: {
+  prompt: string;
+  deadline: number;
+  reserveMs: number;
+  avoidModel?: string;
+}): Promise<GeneratedImage> {
+  const token = await gatewayToken();
+  const models = imageModels().filter((model) => model !== args.avoidModel);
+  const errors: string[] = [];
+
+  for (const model of models) {
+    const remaining = args.deadline - Date.now() - args.reserveMs;
+    if (remaining < 5_000) break;
+    const timeoutMs = Math.max(5_000, Math.min(PER_MODEL_TIMEOUT_MS, remaining));
+    try {
+      return await requestGatewayImage({ token, model, prompt: args.prompt, timeoutMs });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "unknown");
+      errors.push(message.slice(0, 220));
+    }
+  }
+
+  throw new Error(`all_gateway_image_models_failed=${errors.join(" | ").slice(0, 680) || "no_model_budget"}`);
 }
 
 async function loadConfirmedLessons(ownerKey: string) {
@@ -413,7 +365,7 @@ export async function POST(request: Request) {
 
   for (let attempt = 1; attempt <= contract.maxAttempts; attempt += 1) {
     const remaining = deadline - Date.now();
-    if (attempt > 1 && remaining < MIN_RETRY_BUDGET_MS) {
+    if (attempt > 1 && remaining < MIN_REPAIR_BUDGET_MS) {
       repairInterrupted = {
         code: "retry_skipped_time_budget",
         stage: "budget",
@@ -424,40 +376,28 @@ export async function POST(request: Request) {
     }
 
     attempts = attempt;
-    let image: GeneratedImage;
+    const compiledPrompt = compileImagePrompt(contract.prompt, {
+      lessons,
+      repairPrompt: attempt > 1 ? repairPrompt : undefined,
+    });
 
-    if (attempt > 1 && finalImage && repairPrompt) {
-      try {
-        image = await repairGatewayImage({
-          source: finalImage,
-          originalPrompt: contract.prompt,
-          repairPrompt,
-          timeoutMs: Math.max(8_000, Math.min(GATEWAY_REPAIR_TIMEOUT_MS, remaining - 7_000)),
-        });
-      } catch (error) {
-        repairInterrupted = technicalFailure("generation", error);
-        await rememberTechnicalInterruption(
-          ownerKey,
-          contract,
-          repairInterrupted,
-          attempt,
-          audits[audits.length - 1] || null,
-        );
+    let image: GeneratedImage;
+    try {
+      image = await generateWithGatewayFailover({
+        prompt: compiledPrompt,
+        deadline,
+        reserveMs: 10_000,
+        avoidModel: attempt > 1 ? finalImage?.actualModel : undefined,
+      });
+    } catch (error) {
+      const failure = technicalFailure("generation", error);
+      if (attempt > 1 && finalImage && audits.length) {
+        repairInterrupted = failure;
+        await rememberTechnicalInterruption(ownerKey, contract, failure, attempt, audits[audits.length - 1]);
         break;
       }
-    } else {
-      const compiledPrompt = compileImagePrompt(contract.prompt, { lessons });
-      try {
-        const available = Math.max(8_000, deadline - Date.now() - 9_000);
-        image = await generateWithProviders({
-          prompt: compiledPrompt,
-          pollinationsPrompt: contract.prompt,
-          availableMs: available,
-        });
-      } catch (error) {
-        techFailure = technicalFailure("generation", error);
-        break;
-      }
+      techFailure = failure;
+      break;
     }
 
     let audit: ImageSemanticAudit;
@@ -493,10 +433,7 @@ export async function POST(request: Request) {
         ok: false,
         failureClass: "technical",
         code: techFailure.code,
-        error:
-          techFailure.stage === "budget"
-            ? "Я остановил внутренний retry, чтобы не упереться в лимит выполнения. Уже найденная ошибка сохранена как учебный материал, но экзамен не засчитан ни в плюс, ни в минус."
-            : "Технический ресурс прервал генерацию или проверку. Это не считается провалом навыка; экзамен остаётся незавершённым.",
+        error: "Технический ресурс прервал генерацию или проверку. Это не считается провалом навыка; экзамен остаётся незавершённым.",
         detail: techFailure.detail,
         retryable: techFailure.retryable,
         attempts,
@@ -528,7 +465,7 @@ export async function POST(request: Request) {
     prompt: contract.prompt,
     model: `${finalImage.provider}-${finalImage.actualModel}`,
     mediaType: finalImage.mediaType,
-    mode: "executor_v5_reference_repair",
+    mode: "executor_v6_rest_failover",
     runtimeMs: Date.now() - startedAt,
     attempts,
     audit: lastAudit,
@@ -544,8 +481,8 @@ export async function POST(request: Request) {
         failureClass: "semantic",
         code: "image_semantic_verification_failed",
         error: repairInterrupted
-          ? "Первая картинка была реально создана и проверена, но не прошла визуальный экзамен. Автоматический repair-проход был временно недоступен; провал уже записан в обучение, а не потерян как незавершённый экзамен."
-          : "Я закончил разрешённые попытки, но финальная картинка не прошла заранее заданный визуальный экзамен. Плохой результат скрыт, провал записан в обучение.",
+          ? "Первая картинка была реально создана и проверена, но не прошла визуальный экзамен. Повторная генерация по замечаниям временно недоступна; провал записан в обучение."
+          : "Я закончил разрешённые попытки, но финальная картинка не прошла визуальный экзамен. Провал записан в обучение.",
         retryable: Boolean(repairInterrupted?.retryable),
         attempts,
         audit: lastAudit,
@@ -565,7 +502,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    mode: "executor_v5_reference_repair",
+    mode: "executor_v6_rest_failover",
     image: finalImage.image,
     model: `${finalImage.provider}-${finalImage.actualModel}`,
     provider: finalImage.provider,
