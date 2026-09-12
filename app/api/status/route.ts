@@ -7,6 +7,7 @@ import {
   preferredResource,
   resourceRegistry,
   resourcePlan,
+  type ResourceRuntimeOverrides,
 } from "@/lib/brain/resource-router";
 
 export const runtime = "nodejs";
@@ -63,8 +64,19 @@ export async function GET() {
         ? "READY"
         : "WAITING";
 
-    const resources = resourceRegistry();
-    const preferredText = preferredResource("text");
+    const overrides: ResourceRuntimeOverrides = {
+      "self-hosted": {
+        configured: brain.configured,
+        available: brain.online,
+        reason: brain.online
+          ? undefined
+          : brain.configured
+            ? "offline"
+            : "not_configured",
+      },
+    };
+    const resources = resourceRegistry(overrides);
+    const preferredText = preferredResource("text", { overrides });
 
     return NextResponse.json({
       level: Math.max(1, verified.length),
@@ -115,7 +127,9 @@ export async function GET() {
       survival: {
         pendingTasks: pendingTasks.length,
         resources,
-        plan: resourcePlan(["text", "research", "code", "memory"]),
+        plan: resourcePlan(["text", "research", "code", "memory"], {
+          overrides,
+        }),
       },
       verifiedSkills: verified.map((skill) => ({
         slug: skill.slug,
