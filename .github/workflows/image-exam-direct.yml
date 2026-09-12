@@ -1,0 +1,65 @@
+name: Direct Image Exam
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/image-exam-direct.yml"
+      - "scripts/image-exam-direct.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN || secrets.VERSEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+
+      - name: Mint project OIDC token
+        shell: bash
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "VERCEL_TOKEN_MISSING"
+            exit 1
+          fi
+
+          HTTP_CODE=$(curl --silent --show-error \
+            --output /tmp/oidc.json \
+            --write-out "%{http_code}" \
+            -X POST \
+            "https://api.vercel.com/v1/projects/prj_Qb6Lb38IlFOuq5KzD8saumjVRieh/token?teamId=team_nnmxfFd9O8wE7QEnsBRJ7QQ5" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"source":"github-actions:image-exam-direct"}')
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "OIDC_TOKEN_FAILED_HTTP_$HTTP_CODE"
+            node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("/tmp/oidc.json","utf8")); console.log(x.error?.message || x.message || "Unknown Vercel API error")'
+            exit 1
+          fi
+
+          OIDC_TOKEN=$(node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("/tmp/oidc.json","utf8")); if(!x.token) process.exit(1); process.stdout.write(x.token)')
+          echo "::add-mask::$OIDC_TOKEN"
+          echo "VERCEL_OIDC_TOKEN=$OIDC_TOKEN" >> "$GITHUB_ENV"
+          echo "PROJECT_OIDC_READY"
+
+      - name: Run Khasroy direct image exam
+        run: node scripts/image-exam-direct.mjs
+
+      - name: Upload exam evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-image-exam
+          path: exam-output
+          if-no-files-found: warn
+          retention-days: 7
