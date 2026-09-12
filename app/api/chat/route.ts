@@ -8,8 +8,10 @@ import {
 } from "@/lib/server-github";
 import {
   runBrain,
+  selectBrainMode,
   usedCodeInterpreter,
   usedWebTool,
+  type BrainRun,
 } from "@/lib/brain/router";
 import { runCritic, shouldRunCritic, type CriticMode } from "@/lib/brain/critic";
 import {
@@ -23,6 +25,9 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+const EMERGENCY_CHAT_GATEWAY =
+  "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-chat-live";
 
 const SYSTEM_PROMPT = `Ты — Хасрой, универсальный AI-союзник владельца системы.
 Твоя главная специализация — программирование, архитектура ПО, анализ кода, исследование технологий и решение сложных технических задач.
@@ -38,6 +43,12 @@ const SYSTEM_PROMPT = `Ты — Хасрой, универсальный AI-со
 type ClientMessage = {
   role: "user" | "assistant";
   content: string;
+};
+
+type EmergencyChatResponse = {
+  content?: string;
+  model?: string;
+  error?: string;
 };
 
 function parseMessage(value: unknown): ClientMessage | null {
@@ -70,6 +81,75 @@ function criticEvidence(args: {
   return `${sourceText}${toolText}`.trim();
 }
 
+async function runEmergencyChat(args: {
+  ownerKey: string;
+  query: string;
+  history: ClientMessage[];
+}): Promise<BrainRun | null> {
+  const endpoint =
+    process.env.KHASROY_EMERGENCY_CHAT_GATEWAY?.trim() || EMERGENCY_CHAT_GATEWAY;
+  const ownerHash = createHash("sha256").update(args.ownerKey).digest("hex");
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `khasroy_live_owner=${encodeURIComponent(ownerHash)}`,
+      },
+      body: JSON.stringify({
+        action: "chat",
+        message: args.query,
+        history: args.history.slice(-8),
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(50_000),
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | EmergencyChatResponse
+      | null;
+    const content = payload?.content?.trim() || "";
+
+    if (!response.ok || !content) {
+      console.error(
+        "Khasroy emergency brain failed",
+        response.status,
+        payload?.error || "empty_response",
+      );
+      return null;
+    }
+
+    const model = payload?.model?.trim() || "openai-emergency";
+    const data: NonNullable<BrainRun["data"]> = {
+      model,
+      choices: [{ message: { content } }],
+    };
+    const normalized = new Response(JSON.stringify(data), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "x-khasroy-ai-provider": "gateway",
+      },
+    });
+
+    return {
+      response: normalized,
+      data,
+      provider: "groq",
+      providerDetail: "gateway",
+      model,
+      mode: "chat",
+      toolsUsed: [],
+      sources: [],
+      webToolForced: false,
+    };
+  } catch (error) {
+    console.error("Khasroy emergency brain request failed", error);
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   const ownerKey = process.env.KHASROY_OWNER_KEY;
   if (!ownerKey) {
@@ -86,13 +166,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Требуется доступ владельца." }, { status: 401 });
   }
 
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "Мозг Хасроя ещё не подключён к серверу." },
-      { status: 503 },
-    );
-  }
+  const apiKey = process.env.GROQ_API_KEY?.trim() || "";
 
   let body: { messages?: unknown };
   try {
@@ -155,6 +229,7 @@ export async function POST(request: Request) {
   const defaultModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
   const memoryForBrain = repositoryRead ? memoryContext.slice(0, 5_000) : memoryContext;
   const systemContent = `${SYSTEM_PROMPT}${memoryForBrain}${repositoryContext}`;
+  const intendedMode = selectBrainMode(latestUser.content, repositoryRead);
 
   let brain: Awaited<ReturnType<typeof runBrain>>;
   try {
@@ -168,13 +243,34 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Khasroy Brain Router failed", error);
-    return NextResponse.json(
-      { error: "Не удалось связаться с AI-сервисом." },
-      { status: 502 },
-    );
+    const emergency =
+      intendedMode === "chat"
+        ? await runEmergencyChat({ ownerKey, query: latestUser.content, history: messages })
+        : null;
+    if (!emergency) {
+      return NextResponse.json(
+        { error: "Не удалось связаться с AI-сервисом." },
+        { status: 502 },
+      );
+    }
+    brain = emergency;
   }
 
-  const { response: upstream, data } = brain;
+  let upstream = brain.response;
+  let data = brain.data;
+
+  if ((!upstream.ok || !data) && brain.mode === "chat") {
+    const emergency = await runEmergencyChat({
+      ownerKey,
+      query: latestUser.content,
+      history: messages,
+    });
+    if (emergency) {
+      brain = emergency;
+      upstream = emergency.response;
+      data = emergency.data;
+    }
+  }
 
   if (!upstream.ok || !data) {
     console.error(
@@ -204,13 +300,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Хасрой вернул пустой ответ." }, { status: 502 });
   }
 
+  const emergencyProvider = brain.providerDetail === "gateway" && /emergency/iu.test(brain.model);
   let content = draftContent;
   let criticRan = false;
   let criticRevised = false;
   let criticNotes: string[] = [];
   let criticModel: string | undefined;
 
-  if (shouldRunCritic(latestUser.content, brain.mode, draftContent)) {
+  if (apiKey && !emergencyProvider && shouldRunCritic(latestUser.content, brain.mode, draftContent)) {
     try {
       const critic = await runCritic({
         apiKey,
@@ -236,7 +333,9 @@ export async function POST(request: Request) {
 
   const webVerified = usedWebTool(brain);
   const sandboxVerified = usedCodeInterpreter(brain);
-  const providerLabel = brain.providerDetail || brain.provider;
+  const providerLabel = emergencyProvider
+    ? "supabase-pollinations"
+    : brain.providerDetail || brain.provider;
 
   const memoryWrites: Promise<unknown>[] = [
     appendMessage(ownerKey, "user", latestUser.content),
