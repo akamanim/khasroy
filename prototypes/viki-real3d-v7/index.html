@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Khasroy VIKI v7</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#02050a}body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(900px 760px at 50% 46%,rgba(34,118,205,.22),transparent 62%),radial-gradient(520px 520px at 50% 44%,rgba(76,223,255,.07),transparent 70%),linear-gradient(180deg,#07111f 0%,#02050a 74%);color:#dffaff}#app{position:fixed;inset:0}canvas{display:block;width:100%;height:100%}.top{position:fixed;left:50%;top:max(16px,env(safe-area-inset-top));transform:translateX(-50%);z-index:10;font-size:10px;letter-spacing:.25em;text-transform:uppercase;color:rgba(220,248,255,.46);white-space:nowrap}.panel{position:fixed;left:16px;bottom:max(16px,env(safe-area-inset-bottom));z-index:10;max-width:min(430px,calc(100vw - 32px));padding:10px 12px;border-radius:14px;background:rgba(3,8,16,.36);border:1px solid rgba(145,231,255,.11);backdrop-filter:blur(12px);color:rgba(215,241,250,.67);font-size:11px;line-height:1.45}.status{display:flex;align-items:center;gap:7px;color:rgba(235,252,255,.9)}.dot{width:7px;height:7px;border-radius:50%;background:#a8f6ff;box-shadow:0 0 15px rgba(95,225,255,.9)}.error{display:none;margin-top:7px;color:#ffc9c9;white-space:pre-wrap}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}</script>
+</head>
+<body>
+<div id="app"></div><div class="top">KHASROY // VIKI REAL 3D // V7</div><div class="panel"><div class="status"><span class="dot"></span><span id="status">Инициализация V7…</span></div><div>Female avatar → cinematic hologram → face embedded in sphere.</div><div class="error" id="error"></div></div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+const statusEl=document.getElementById('status'),errorEl=document.getElementById('error');
+const fail=m=>{statusEl.textContent='ERROR';errorEl.style.display='block';errorEl.textContent=String(m)};
+addEventListener('error',e=>fail(e.message||e.error||'Browser error'));addEventListener('unhandledrejection',e=>fail(e.reason?.message||e.reason||'Promise error'));
+
+try{
+const scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0x02050a,.052);
+const camera=new THREE.PerspectiveCamera(30,innerWidth/innerHeight,.01,100);camera.position.set(0,.03,5.55);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.setClearColor(0x02050a,0);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.18;renderer.localClippingEnabled=true;document.getElementById('app').appendChild(renderer.domElement);
+const composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.9,.7,.14));
+
+const root=new THREE.Group();scene.add(root);
+scene.add(new THREE.HemisphereLight(0xbef7ff,0x06101f,.52));
+const key=new THREE.PointLight(0xcffbff,12,12,2);key.position.set(-2.0,1.65,3.4);scene.add(key);
+const fill=new THREE.PointLight(0x4f8cff,8,10,2);fill.position.set(2.0,.4,1.0);scene.add(fill);
+const rim=new THREE.PointLight(0x6deeff,9,11,2);rim.position.set(0,1.0,-2.2);scene.add(rim);
+
+const sphereMat=new THREE.MeshPhysicalMaterial({color:0x18395f,emissive:0x0d3153,emissiveIntensity:.42,transparent:true,opacity:.055,roughness:.22,metalness:.01,transmission:.5,thickness:.6,side:THREE.DoubleSide,depthWrite:false});
+const sphere=new THREE.Mesh(new THREE.SphereGeometry(1.72,96,96),sphereMat);sphere.scale.set(1.01,1.08,.92);root.add(sphere);
+const shell=new THREE.Mesh(new THREE.SphereGeometry(1.79,64,64),new THREE.MeshBasicMaterial({color:0x9cefff,wireframe:true,transparent:true,opacity:.012,blending:THREE.AdditiveBlending,depthWrite:false}));shell.scale.copy(sphere.scale);root.add(shell);
+
+function braid(r,rx,rz,c,o,phase){const pts=[];for(let i=0;i<260;i++){const a=i/260*Math.PI*2;const w=.032*Math.sin(a*3+phase)+.014*Math.sin(a*7-phase);pts.push(new THREE.Vector3(Math.cos(a)*(r+w),Math.sin(a)*(r*.39),.14*Math.sin(a*2+phase)))}const curve=new THREE.CatmullRomCurve3(pts,true);const m=new THREE.Mesh(new THREE.TubeGeometry(curve,360,.009,6,true),new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:o,blending:THREE.AdditiveBlending,depthWrite:false}));m.rotation.x=rx;m.rotation.z=rz;root.add(m);return m}
+const b1=braid(1.92,.48,.08,0x75efff,.22,0),b2=braid(1.88,.50,.12,0x75efff,.14,2.1),b3=braid(1.84,-.67,.84,0x637fff,.16,.8),b4=braid(1.80,.98,-.70,0xd8fdff,.09,1.7);
+
+const N=innerWidth<600?650:1200,p=new Float32Array(N*3);for(let i=0;i<N;i++){const a=Math.random()*Math.PI*2,u=Math.random()*2-1,rr=1.84+Math.random()*.52,s=Math.sqrt(1-u*u);p[i*3]=Math.cos(a)*s*rr;p[i*3+1]=u*rr*.9;p[i*3+2]=Math.sin(a)*s*rr}const pg=new THREE.BufferGeometry();pg.setAttribute('position',new THREE.BufferAttribute(p,3));const dust=new THREE.Points(pg,new THREE.PointsMaterial({color:0xbaf8ff,size:.011,transparent:true,opacity:.18,blending:THREE.AdditiveBlending,depthWrite:false}));root.add(dust);
+
+const v='varying vec3 n;varying vec3 v;varying vec3 wp;void main(){vec4 world=modelMatrix*vec4(position,1.);wp=world.xyz;vec4 mv=modelViewMatrix*vec4(position,1.);n=normalize(normalMatrix*normal);v=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;}';
+const f='varying vec3 n;varying vec3 v;varying vec3 wp;void main(){float fr=pow(1.-max(dot(normalize(n),normalize(v)),0.),2.0);float fc=pow(max(dot(normalize(n),normalize(v)),0.),4.5);float scan=.5+.5*sin(wp.y*28.);vec3 core=vec3(.22,.57,.92);vec3 edge=vec3(.72,.98,1.);vec3 col=mix(core,edge,clamp(fr*1.45,0.,1.));float alpha=.10+fr*.44+fc*.10+scan*.012;gl_FragColor=vec4(col,alpha);}';
+const holoMat=()=>new THREE.ShaderMaterial({vertexShader:v,fragmentShader:f,transparent:true,depthWrite:false,side:THREE.DoubleSide,blending:THREE.AdditiveBlending});
+
+const AVATAR='https://models.readyplayer.me/66a282333d2df5297d0e064c.glb?morphTargets=ARKit&textureAtlas=1024';
+const loader=new GLTFLoader();
+statusEl.textContent='Загрузка женской 3D‑модели…';
+loader.load(AVATAR,g=>{
+ const model=g.scene;
+ const box0=new THREE.Box3().setFromObject(model),size0=box0.getSize(new THREE.Vector3()),center0=box0.getCenter(new THREE.Vector3());
+ const h=size0.y||1;
+ const headScale=6.8/h;model.scale.setScalar(headScale);
+ const box1=new THREE.Box3().setFromObject(model),size1=box1.getSize(new THREE.Vector3()),center1=box1.getCenter(new THREE.Vector3());
+ const top=box1.max.y;const approxHeadY=top-size1.y*.115;
+ model.position.x-=center1.x;model.position.y-=approxHeadY;model.position.z-=center1.z;
+ const headGroup=new THREE.Group();headGroup.add(model);headGroup.position.set(0,.02,.48);headGroup.rotation.set(-.015,Math.PI,0);root.add(headGroup);
+
+ const clipY=-1.32;
+ const clipPlane=new THREE.Plane(new THREE.Vector3(0,1,0),-clipY);
+ const meshes=[];model.traverse(o=>{if(o.isMesh&&o.geometry)meshes.push(o)});
+ meshes.forEach(o=>{
+   const name=(o.name||'').toLowerCase();
+   const isEye=name.includes('eye')||name.includes('iris');
+   const isTeeth=name.includes('teeth')||name.includes('mouth');
+   const isHair=name.includes('hair');
+   const base=holoMat();base.clippingPlanes=[clipPlane];base.clipShadows=false;
+   if(isEye){base.blending=THREE.AdditiveBlending}
+   o.material=base;
+   const wire=new THREE.Mesh(o.geometry,new THREE.MeshBasicMaterial({color:isEye?0xd7ffff:0x9df4ff,wireframe:true,transparent:true,opacity:isEye?.06:(isHair?.028:.045),blending:THREE.AdditiveBlending,depthWrite:false,clippingPlanes:[clipPlane]}));wire.position.copy(o.position);wire.rotation.copy(o.rotation);wire.scale.copy(o.scale);wire.morphTargetDictionary=o.morphTargetDictionary;wire.morphTargetInfluences=o.morphTargetInfluences;o.parent.add(wire);
+   if(!isTeeth){const pts=new THREE.Points(o.geometry,new THREE.PointsMaterial({color:0xc6fbff,size:.0047,transparent:true,opacity:isHair?.04:.065,blending:THREE.AdditiveBlending,depthWrite:false,clippingPlanes:[clipPlane]}));pts.position.copy(o.position);pts.rotation.copy(o.rotation);pts.scale.copy(o.scale);pts.morphTargetDictionary=o.morphTargetDictionary;pts.morphTargetInfluences=o.morphTargetInfluences;o.parent.add(pts)}
+ });
+
+ model.traverse(o=>{if(!o.isMesh||!o.morphTargetDictionary||!o.morphTargetInfluences)return;const d=o.morphTargetDictionary,inf=o.morphTargetInfluences;const set=(k,v)=>{if(d[k]!==undefined)inf[d[k]]=v};set('eyeBlinkLeft',0.02);set('eyeBlinkRight',0.02);set('mouthSmileLeft',0.05);set('mouthSmileRight',0.05);set('jawOpen',0.01)});
+ statusEl.textContent='V7 FEMALE HOLOGRAM // READY';
+},e=>{if(e.total)statusEl.textContent='Загрузка модели… '+Math.round(e.loaded/e.total*100)+'%'},err=>fail('Не удалось загрузить женскую GLB‑модель: '+(err?.message||err)));
+
+let px=0,py=0;addEventListener('pointermove',e=>{px=e.clientX/innerWidth-.5;py=e.clientY/innerHeight-.5},{passive:true});
+const clk=new THREE.Clock();function tick(){requestAnimationFrame(tick);const t=clk.getElapsedTime();root.rotation.y+=(px*.065-root.rotation.y)*.022;root.rotation.x+=(-py*.028-root.rotation.x)*.022;b1.rotation.z+=.00085;b2.rotation.z+=.00075;b3.rotation.y-=.0007;b4.rotation.x+=.00055;dust.rotation.y=t*.009;shell.rotation.y=t*.011;sphereMat.emissiveIntensity=.40+Math.sin(t*1.1)*.035;composer.render()}tick();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2))});
+}catch(e){fail(e?.stack||e?.message||e)}
+</script>
+</body></html>
