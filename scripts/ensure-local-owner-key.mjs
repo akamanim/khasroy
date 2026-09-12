@@ -32,7 +32,7 @@ if (processKey) {
 }
 
 let source = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : "";
-const keyLine = /^(\s*KHASROY_OWNER_KEY\s*=\s*)(.*)$/m;
+const keyLine = /^([ \t]*KHASROY_OWNER_KEY[ \t]*=[ \t]*)(.*)$/m;
 const match = source.match(keyLine);
 const existingValue = match ? cleanEnvValue(match[2]) : "";
 
