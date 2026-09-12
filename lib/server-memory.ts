@@ -43,6 +43,26 @@ export type SkillItem = {
   updated_at: string;
 };
 
+export type TaskQueueItem = {
+  id: string;
+  kind: string;
+  status:
+    | "waiting_for_compute"
+    | "queued"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  priority: number;
+  input: Record<string, unknown>;
+  checkpoint: Record<string, unknown>;
+  attempts: number;
+  available_at: string;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 function clip(value: string, limit: number) {
   const clean = value.trim();
   return clean.length > limit ? `${clean.slice(0, limit)}…` : clean;
@@ -164,6 +184,56 @@ export async function getSkills(ownerKey: string): Promise<SkillItem[]> {
   return memoryCall<SkillItem[]>({
     action: "skills",
     ownerKey,
+  });
+}
+
+export async function queueTask(
+  ownerKey: string,
+  task: {
+    kind: string;
+    priority?: number;
+    input: Record<string, unknown>;
+    checkpoint?: Record<string, unknown>;
+  },
+): Promise<TaskQueueItem | null> {
+  const result = await memoryCall<{ ok: boolean; task?: TaskQueueItem | null }>({
+    action: "queue_task",
+    ownerKey,
+    kind: task.kind,
+    priority: task.priority ?? 50,
+    input: task.input,
+    checkpoint: task.checkpoint || {},
+  });
+  return result.task || null;
+}
+
+export async function getPendingTasks(
+  ownerKey: string,
+  limit = 20,
+): Promise<TaskQueueItem[]> {
+  return memoryCall<TaskQueueItem[]>({
+    action: "pending_tasks",
+    ownerKey,
+    limit,
+  });
+}
+
+export async function updateTask(
+  ownerKey: string,
+  taskId: string,
+  patch: {
+    status?: TaskQueueItem["status"];
+    checkpoint?: Record<string, unknown>;
+    lastError?: string;
+    attempts?: number;
+    availableAt?: string;
+  },
+): Promise<void> {
+  await memoryCall<{ ok: boolean }>({
+    action: "update_task",
+    ownerKey,
+    taskId,
+    ...patch,
   });
 }
 
