@@ -1,8 +1,13 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
-import { getSkills } from "@/lib/server-memory";
+import { getPendingTasks, getSkills } from "@/lib/server-memory";
 import { selfHostedHealth } from "@/lib/brain/providers/self-hosted";
+import {
+  preferredResource,
+  resourceRegistry,
+  resourcePlan,
+} from "@/lib/brain/resource-router";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,9 +25,10 @@ export async function GET() {
   }
 
   try {
-    const [skills, brain] = await Promise.all([
+    const [skills, brain, pendingTasks] = await Promise.all([
       getSkills(ownerKey),
       selfHostedHealth(),
+      getPendingTasks(ownerKey, 100),
     ]);
     const verified = skills.filter((skill) => skill.status === "verified");
     const has = (slug: string) => verified.some((skill) => skill.slug === slug);
@@ -38,7 +44,13 @@ export async function GET() {
     const repairLoop = has("site_repair_loop");
     const commercialAudit = has("commercial_site_audit");
     const imageLab = has("image_generation_lab");
-    const siteAgentReady = screenshotVision && visualComparison && visualScoring && designAgent && repairLoop && commercialAudit;
+    const siteAgentReady =
+      screenshotVision &&
+      visualComparison &&
+      visualScoring &&
+      designAgent &&
+      repairLoop &&
+      commercialAudit;
 
     const selfHostedState = brain.online
       ? "ONLINE"
@@ -50,6 +62,9 @@ export async function GET() {
       : brain.online
         ? "READY"
         : "WAITING";
+
+    const resources = resourceRegistry();
+    const preferredText = preferredResource("text");
 
     return NextResponse.json({
       level: Math.max(1, verified.length),
@@ -64,7 +79,10 @@ export async function GET() {
         code: (repository ? 1 : 0) + (sandbox ? 1 : 0),
         memory: has("long_term_memory") ? 1 : 0,
         internet: has("internet_research") ? 1 : 0,
-        vision: (screenshotVision ? 1 : 0) + (visualComparison ? 1 : 0) + (visualScoring ? 1 : 0),
+        vision:
+          (screenshotVision ? 1 : 0) +
+          (visualComparison ? 1 : 0) +
+          (visualScoring ? 1 : 0),
         voice: 0,
         agents:
           (critic ? 1 : 0) +
@@ -85,12 +103,19 @@ export async function GET() {
         imageLab: imageLab ? "VERIFIED" : "WAITING",
         selfHosted: selfHostedState,
         autonomy: autonomyState,
+        survival: "ACTIVE",
       },
       brain: {
-        preferred: brain.configured ? "self-hosted" : "groq-fallback",
+        preferred: preferredText?.id || "none",
+        preferredLabel: preferredText?.label || null,
         selfHostedConfigured: brain.configured,
         selfHostedOnline: brain.online,
         selfHostedModel: brain.model,
+      },
+      survival: {
+        pendingTasks: pendingTasks.length,
+        resources,
+        plan: resourcePlan(["text", "research", "code", "memory"]),
       },
       verifiedSkills: verified.map((skill) => ({
         slug: skill.slug,
