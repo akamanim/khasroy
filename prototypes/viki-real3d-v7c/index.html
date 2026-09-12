@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Khasroy VIKI v7c</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#02050a}body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(900px 720px at 50% 44%,rgba(37,126,214,.22),transparent 62%),linear-gradient(180deg,#07111f 0%,#02050a 76%);color:#dffaff}#app{position:fixed;inset:0}canvas{display:block;width:100%;height:100%}.top{position:fixed;left:50%;top:max(16px,env(safe-area-inset-top));transform:translateX(-50%);z-index:10;font-size:10px;letter-spacing:.24em;color:rgba(220,248,255,.45);white-space:nowrap}.panel{position:fixed;left:16px;bottom:max(16px,env(safe-area-inset-bottom));z-index:10;max-width:min(430px,calc(100vw - 32px));padding:10px 12px;border-radius:14px;background:rgba(3,8,16,.36);border:1px solid rgba(145,231,255,.12);backdrop-filter:blur(12px);color:rgba(215,241,250,.7);font-size:11px;line-height:1.45}.status{display:flex;align-items:center;gap:7px;color:rgba(235,252,255,.92)}.dot{width:7px;height:7px;border-radius:50%;background:#a8f6ff;box-shadow:0 0 15px rgba(95,225,255,.9)}.error{display:none;margin-top:7px;color:#ffc9c9;white-space:pre-wrap}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}</script>
+</head>
+<body>
+<div id="app"></div><div class="top">KHASROY // VIKI FEMALE HOLOGRAM // V7C</div><div class="panel"><div class="status"><span class="dot"></span><span id="status">Инициализация V7c…</span></div><div>GitHub-hosted female GLB → hologram face → sphere projection.</div><div class="error" id="error"></div></div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+const statusEl=document.getElementById('status'),errorEl=document.getElementById('error');
+const fail=m=>{statusEl.textContent='ERROR';errorEl.style.display='block';errorEl.textContent=String(m)};
+addEventListener('error',e=>fail(e.message||e.error||'Browser error'));
+addEventListener('unhandledrejection',e=>fail(e.reason?.message||e.reason||'Promise error'));
+
+const scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0x02050a,.05);
+const camera=new THREE.PerspectiveCamera(30,innerWidth/innerHeight,.01,100);camera.position.set(0,.03,5.5);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.setClearColor(0x02050a,0);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.18;document.getElementById('app').appendChild(renderer.domElement);
+const composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.82,.66,.16));
+const root=new THREE.Group();scene.add(root);
+scene.add(new THREE.HemisphereLight(0xc7faff,0x06101f,.65));
+const key=new THREE.PointLight(0xd6fbff,12,12,2);key.position.set(-2.1,1.7,3.4);scene.add(key);
+const rim=new THREE.PointLight(0x597dff,8,10,2);rim.position.set(2.3,.5,-1.7);scene.add(rim);
+
+const sphereMat=new THREE.MeshPhysicalMaterial({color:0x173a62,emissive:0x0d3153,emissiveIntensity:.42,transparent:true,opacity:.045,roughness:.18,transmission:.55,thickness:.55,side:THREE.DoubleSide,depthWrite:false});
+const sphere=new THREE.Mesh(new THREE.SphereGeometry(1.72,96,96),sphereMat);sphere.scale.set(1.02,1.08,.92);root.add(sphere);
+const shell=new THREE.Mesh(new THREE.SphereGeometry(1.79,56,56),new THREE.MeshBasicMaterial({color:0x9cefff,wireframe:true,transparent:true,opacity:.009,blending:THREE.AdditiveBlending,depthWrite:false}));shell.scale.copy(sphere.scale);root.add(shell);
+function braid(r,rx,rz,c,o,phase){const pts=[];for(let i=0;i<240;i++){const a=i/240*Math.PI*2,w=.03*Math.sin(a*3+phase)+.012*Math.sin(a*8-phase);pts.push(new THREE.Vector3(Math.cos(a)*(r+w),Math.sin(a)*(r*.4),.13*Math.sin(a*2+phase)))}const curve=new THREE.CatmullRomCurve3(pts,true);const mesh=new THREE.Mesh(new THREE.TubeGeometry(curve,320,.0075,5,true),new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:o,blending:THREE.AdditiveBlending,depthWrite:false}));mesh.rotation.x=rx;mesh.rotation.z=rz;root.add(mesh);return mesh}
+const b1=braid(1.92,.48,.08,0x75efff,.18,0),b2=braid(1.87,.5,.12,0x75efff,.11,2.1),b3=braid(1.83,-.66,.84,0x667fff,.13,.8);
+
+const v='varying vec3 n;varying vec3 vv;varying vec3 wp;void main(){vec4 world=modelMatrix*vec4(position,1.);wp=world.xyz;vec4 mv=modelViewMatrix*vec4(position,1.);n=normalize(normalMatrix*normal);vv=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;}';
+const f='varying vec3 n;varying vec3 vv;varying vec3 wp;void main(){float fr=pow(1.-max(dot(normalize(n),normalize(vv)),0.),2.05);float fc=pow(max(dot(normalize(n),normalize(vv)),0.),4.2);float scan=.5+.5*sin(wp.y*32.);vec3 core=vec3(.20,.55,.94);vec3 edge=vec3(.68,.98,1.);vec3 col=mix(core,edge,clamp(fr*1.4,0.,1.));gl_FragColor=vec4(col,.075+fr*.40+fc*.08+scan*.008);}';
+const holo=()=>new THREE.ShaderMaterial({vertexShader:v,fragmentShader:f,transparent:true,depthWrite:false,side:THREE.DoubleSide,blending:THREE.AdditiveBlending});
+
+const urls=[
+ 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/models/gltf/Michelle.glb',
+ 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/Michelle.glb'
+];
+const loader=new GLTFLoader();
+const draco=new DRACOLoader();draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/libs/draco/');loader.setDRACOLoader(draco);
+function mount(g){
+ const model=g.scene;const box0=new THREE.Box3().setFromObject(model),size0=box0.getSize(new THREE.Vector3());const h=size0.y||1;model.scale.setScalar(6.8/h);
+ const box1=new THREE.Box3().setFromObject(model),size1=box1.getSize(new THREE.Vector3()),center1=box1.getCenter(new THREE.Vector3());const approxHeadY=box1.max.y-size1.y*.13;model.position.x-=center1.x;model.position.y-=approxHeadY;model.position.z-=center1.z;
+ const head=new THREE.Group();head.add(model);head.position.set(0,.03,.46);head.rotation.set(-.02,Math.PI,0);root.add(head);
+ const meshes=[];model.traverse(o=>{if(o.isMesh&&o.geometry)meshes.push(o)});
+ meshes.forEach(o=>{const name=(o.name||'').toLowerCase(),isHair=name.includes('hair'),isEye=name.includes('eye');o.material=holo();const w=new THREE.Mesh(o.geometry,new THREE.MeshBasicMaterial({color:isEye?0xd9ffff:0xa8f7ff,wireframe:true,transparent:true,opacity:isEye?.04:(isHair?.018:.026),blending:THREE.AdditiveBlending,depthWrite:false}));w.position.copy(o.position);w.rotation.copy(o.rotation);w.scale.copy(o.scale);o.parent.add(w);const p=new THREE.Points(o.geometry,new THREE.PointsMaterial({color:0xcffcff,size:.0038,transparent:true,opacity:isHair?.02:.036,blending:THREE.AdditiveBlending,depthWrite:false}));p.position.copy(o.position);p.rotation.copy(o.rotation);p.scale.copy(o.scale);o.parent.add(p)});
+ errorEl.style.display='none';statusEl.textContent='V7C MICHELLE HOLOGRAM // READY';
+}
+function load(i=0){if(i>=urls.length){fail('Michelle.glb не загрузилась ни через jsDelivr, ни через GitHub RAW.');return}statusEl.textContent='Загрузка Michelle '+(i+1)+'/'+urls.length+'…';loader.load(urls[i],mount,e=>{if(e.total)statusEl.textContent='Загрузка '+Math.round(e.loaded/e.total*100)+'%'},()=>load(i+1))}load();
+
+let px=0,py=0;addEventListener('pointermove',e=>{px=e.clientX/innerWidth-.5;py=e.clientY/innerHeight-.5},{passive:true});const clock=new THREE.Clock();function tick(){requestAnimationFrame(tick);const t=clock.getElapsedTime();root.rotation.y+=(px*.06-root.rotation.y)*.02;root.rotation.x+=(-py*.026-root.rotation.x)*.02;b1.rotation.z+=.0008;b2.rotation.z+=.0007;b3.rotation.y-=.00065;shell.rotation.y=t*.01;sphereMat.emissiveIntensity=.40+Math.sin(t*1.1)*.03;composer.render()}tick();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2))});
+</script>
+</body></html>
