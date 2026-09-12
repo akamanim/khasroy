@@ -27,13 +27,10 @@ function decodeHtml(value: string) {
 }
 
 function stripTags(value: string) {
-  return decodeHtml(
-    value
-      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/giu, "$1")
-      .replace(/<[^>]+>/g, " "),
-  )
-    .replace(/\s+/g, " ")
-    .trim();
+  const decoded = decodeHtml(
+    value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/giu, "$1"),
+  );
+  return decoded.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function unwrapDuckDuckGoUrl(value: string) {
@@ -81,9 +78,40 @@ function looksTechnical(query: string) {
 function normalizeTechQuery(query: string) {
   return query
     .replace(/\bИИ\b/giu, "AI artificial intelligence")
-    .replace(/искусственн(?:ый|ого|ом|ому)?\s+интеллект(?:а|ом|у)?/giu, "artificial intelligence")
+    .replace(
+      /искусственн(?:ый|ого|ом|ому)?\s+интеллект(?:а|ом|у)?/giu,
+      "artificial intelligence",
+    )
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeNewsQuery(query: string) {
+  const explicitTopic = query.match(
+    /новост(?:и|ей|ях)?\s+(?:об|о|про)\s+(.+)$/iu,
+  )?.[1];
+
+  let topic = (explicitTopic || query)
+    .replace(/^(?:найди|покажи|расскажи|дай)\s+(?:мне\s+)?/iu, "")
+    .replace(
+      /^(?:(?:самые\s+)?(?:свежие|последние|актуальные|новые)\s+)?новост(?:и|ей|ях)?\s*(?:об|о|про)?\s*/iu,
+      "",
+    )
+    .replace(/[?!.]+$/u, "")
+    .trim();
+
+  if (/^(?:ии|ai)$/iu.test(topic)) {
+    return isRussianQuery(query)
+      ? "искусственный интеллект AI"
+      : "artificial intelligence AI";
+  }
+
+  topic = topic
+    .replace(/\bИИ\b/giu, "искусственный интеллект AI")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return topic.length >= 2 ? topic : query.trim();
 }
 
 function collectSourcesFromUnknown(
@@ -162,7 +190,7 @@ async function searchWithGoogleNewsRss(
 ): Promise<WebSearchResult> {
   const russian = isRussianQuery(query);
   const params = new URLSearchParams({
-    q: query,
+    q: normalizeNewsQuery(query),
     hl: russian ? "ru" : "en-US",
     gl: russian ? "RU" : "US",
     ceid: russian ? "RU:ru" : "US:en",
@@ -255,7 +283,11 @@ async function searchWithHackerNews(
     sources.push({
       title,
       url,
-      snippet: [hit.created_at, hit.author, hit.points != null ? `${hit.points} points` : ""]
+      snippet: [
+        hit.created_at,
+        hit.author,
+        hit.points != null ? `${hit.points} points` : "",
+      ]
         .filter(Boolean)
         .join(" — "),
     });
