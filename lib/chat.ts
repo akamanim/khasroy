@@ -58,9 +58,10 @@ export function looksLikeImageGenerationRequest(text: string) {
 
   const explicitGenerator = /\b(сгенерируй|генерируй|нарисуй|отрендери|визуализируй|generate|render|draw|visualize)\b/iu.test(value);
   const imageNoun = /(фото|фотограф|картин|изображен|иллюстрац|портрет|аватар|постер|обложк|логотип|рендер|image|photo|picture|portrait|poster|cover|logo)/iu.test(value);
-  const createIntent = /(создай|сделай|сгенерируй|нарисуй|отрендери|покажи.*как.*выгляд|create|make|generate|draw|render)/iu.test(value);
+  const createIntent = /(создай|сделай|поставь|помести|размести|сгенерируй|нарисуй|отрендери|покажи.*как.*выгляд|create|make|place|generate|draw|render)/iu.test(value);
+  const visualScene = /(на фоне|в горах|у моря|на море|у океана|на берегу|на пляже|на парковке|на трассе|на дороге|в городе|в лесу|в студии|реалистич|фотореалист|кинематограф|cinematic|background|mountains?|ocean|beach|parking|road|city|forest|studio|photoreal)/iu.test(value);
 
-  return explicitGenerator || (imageNoun && createIntent);
+  return explicitGenerator || (createIntent && (imageNoun || visualScene));
 }
 
 function wait(ms: number) {
