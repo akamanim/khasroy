@@ -1,7 +1,9 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { installProviderFailover } from "@/lib/ai/provider-failover";
+import { installGroqContentGuard } from "@/lib/ai/groq-content-guard";
 
 installProviderFailover();
+installGroqContentGuard();
 
 export const OWNER_COOKIE = "khasroy_owner";
 
