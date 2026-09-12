@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Khasroy — Surface Face Projection Lab</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#010308; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    #app { position:fixed; inset:0; background:radial-gradient(circle at 50% 46%, #071a24 0%, #02070d 35%, #010205 70%, #000 100%); }
+    canvas { display:block; width:100%; height:100%; }
+    .vignette { pointer-events:none; position:fixed; inset:0; box-shadow:inset 0 0 180px rgba(0,0,0,.88); }
+    .hud { position:fixed; left:clamp(18px,3vw,44px); right:clamp(18px,3vw,44px); top:clamp(18px,3vw,36px); display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none; color:#c9f7ff; letter-spacing:.16em; text-transform:uppercase; font-size:10px; opacity:.72; }
+    .hud strong { display:block; font-size:12px; letter-spacing:.22em; color:#f1fdff; margin-bottom:6px; font-weight:600; }
+    .status { text-align:right; }
+    .status .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#8af3ff; margin-right:7px; box-shadow:0 0 14px #8af3ff; }
+    .caption { pointer-events:none; position:fixed; left:50%; bottom:clamp(24px,5vw,54px); transform:translateX(-50%); width:min(90vw,720px); text-align:center; color:#c9f7ff; text-shadow:0 0 18px rgba(112,232,255,.65); }
+    .caption .name { font-size:clamp(14px,2vw,18px); letter-spacing:.42em; margin-right:-.42em; font-weight:600; }
+    .caption .mode { margin-top:10px; font-size:10px; letter-spacing:.2em; text-transform:uppercase; opacity:.55; }
+    .scan { pointer-events:none; position:fixed; inset:0; opacity:.13; background:repeating-linear-gradient(to bottom, transparent 0, transparent 3px, rgba(123,233,255,.12) 4px); mix-blend-mode:screen; }
+    @media (max-width:600px){ .hud { font-size:8px; } .hud strong { font-size:10px; } }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div class="scan"></div>
+  <div class="vignette"></div>
+  <div class="hud">
+    <div><strong>KHASROY</strong>Projection Lab / Surface Face v0.1</div>
+    <div class="status"><strong><span class="dot"></span><span id="stateLabel">IDLE</span></strong>Female holographic surface</div>
+  </div>
+  <div class="caption"><div class="name">KHASROY</div><div class="mode">face projected directly onto the sphere surface</div></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
+
+const app = document.getElementById('app');
+const stateLabel = document.getElementById('stateLabel');
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x01040a, 0.09);
+
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(0, 0.05, 5.15);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+app.appendChild(renderer.domElement);
+
+const root = new THREE.Group();
+scene.add(root);
+const shell = new THREE.Group();
+root.add(shell);
+const face = new THREE.Group();
+root.add(face);
+
+const R = 1.48;
+const C = new THREE.Color(0x9befff);
+const C2 = new THREE.Color(0xd8fbff);
+
+const inner = new THREE.Mesh(
+  new THREE.SphereGeometry(R * 0.91, 64, 64),
+  new THREE.MeshBasicMaterial({ color:0x02131c, transparent:true, opacity:0.64 })
+);
+shell.add(inner);
+
+const glowMat = new THREE.ShaderMaterial({
+  transparent:true,
+  depthWrite:false,
+  blending:THREE.AdditiveBlending,
+  uniforms:{ uTime:{value:0}, uAlpha:{value:1} },
+  vertexShader:`
+    varying vec3 vN;
+    varying vec3 vP;
+    void main(){
+      vN = normalize(normalMatrix * normal);
+      vec4 mv = modelViewMatrix * vec4(position,1.0);
+      vP = position;
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader:`
+    uniform float uTime;
+    varying vec3 vN;
+    varying vec3 vP;
+    void main(){
+      vec3 V = vec3(0.0,0.0,1.0);
+      float fres = pow(1.0 - abs(dot(normalize(vN), V)), 2.25);
+      float lat = abs(sin((atan(vP.y, length(vP.xz)) + uTime*0.045) * 18.0));
+      float lon = abs(sin((atan(vP.z, vP.x) - uTime*0.06) * 14.0));
+      float circuit = smoothstep(.955,1.0,lat) + smoothstep(.965,1.0,lon);
+      float a = .08 + fres*.28 + circuit*.12;
+      vec3 col = mix(vec3(.25,.78,.95), vec3(.82,.98,1.0), fres);
+      gl_FragColor = vec4(col, a);
+    }
+  `
+});
+const glowSphere = new THREE.Mesh(new THREE.SphereGeometry(R, 96, 96), glowMat);
+shell.add(glowSphere);
+
+const particleCount = innerWidth < 700 ? 1300 : 2400;
+const p = new Float32Array(particleCount * 3);
+for(let i=0;i<particleCount;i++){
+  const u = Math.random(), v = Math.random();
+  const theta = 2*Math.PI*u, phi = Math.acos(2*v-1);
+  const rr = R * (1.003 + Math.random()*0.018);
+  p[i*3] = rr*Math.sin(phi)*Math.cos(theta);
+  p[i*3+1] = rr*Math.cos(phi);
+  p[i*3+2] = rr*Math.sin(phi)*Math.sin(theta);
+}
+const pg = new THREE.BufferGeometry();
+pg.setAttribute('position', new THREE.BufferAttribute(p,3));
+const points = new THREE.Points(pg, new THREE.PointsMaterial({
+  color:0x79e8ff, size:0.012, sizeAttenuation:true, transparent:true, opacity:.34,
+  depthWrite:false, blending:THREE.AdditiveBlending
+}));
+shell.add(points);
+
+function orbitCurve(phase, tilt, radius, wobble){
+  const pts=[];
+  for(let i=0;i<=260;i++){
+    const t=i/260*Math.PI*2;
+    let x=Math.cos(t)*radius;
+    let z=Math.sin(t)*radius;
+    let y=Math.sin(t*3+phase)*wobble;
+    const vv=new THREE.Vector3(x,y,z);
+    vv.applyEuler(new THREE.Euler(tilt, phase*.17, phase*.11));
+    pts.push(vv);
+  }
+  return new THREE.CatmullRomCurve3(pts,true,'catmullrom',.25);
+}
+for(let i=0;i<3;i++){
+  const curve=orbitCurve(i*2.094, .45+i*.14, R*1.07, .09);
+  const tube=new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 320, .0075, 5, true),
+    new THREE.MeshBasicMaterial({color:i===1?0xc8f9ff:0x76e8ff,transparent:true,opacity:.38,blending:THREE.AdditiveBlending,depthWrite:false})
+  );
+  shell.add(tube);
+}
+
+function onSphere(x,y,extra=.012){
+  const d = Math.max(.01, R*R - x*x - y*y);
+  const z = Math.sqrt(d) + extra;
+  return new THREE.Vector3(x,y,z);
+}
+function lineFrom2D(coords, opacity=.0, widthColor=C){
+  const geom=new THREE.BufferGeometry().setFromPoints(coords.map(([x,y])=>onSphere(x,y)));
+  const mat=new THREE.LineBasicMaterial({ color:widthColor, transparent:true, opacity, blending:THREE.AdditiveBlending, depthWrite:false });
+  const line=new THREE.Line(geom,mat);
+  face.add(line);
+  return { line, mat, base:coords.map(c=>[...c]) };
+}
+function arc(cx,cy,rx,ry,a0,a1,n=30){
+  const out=[];
+  for(let i=0;i<n;i++){
+    const t=a0+(a1-a0)*(i/(n-1));
+    out.push([cx+Math.cos(t)*rx, cy+Math.sin(t)*ry]);
+  }
+  return out;
+}
+
+const features=[];
+features.push(lineFrom2D(arc(-.42,.42,.27,.09,Math.PI*1.05,Math.PI*1.92),0,C2));
+features.push(lineFrom2D(arc(.42,.42,.27,.09,Math.PI*1.08,Math.PI*1.95),0,C2));
+features.push(lineFrom2D([[-.67,.24],[-.57,.31],[-.43,.34],[-.28,.30],[-.17,.23]],0,C2));
+features.push(lineFrom2D([[-.67,.24],[-.55,.18],[-.42,.17],[-.28,.18],[-.17,.23]],0,C));
+features.push(lineFrom2D([[.17,.23],[.28,.30],[.43,.34],[.57,.31],[.67,.24]],0,C2));
+features.push(lineFrom2D([[.17,.23],[.28,.18],[.42,.17],[.55,.18],[.67,.24]],0,C));
+features.push(lineFrom2D([[-.05,.32],[-.08,.11],[-.10,-.08],[-.07,-.22],[0,-.29],[.08,-.22]],0,C));
+features.push(lineFrom2D([[-.19,-.27],[-.12,-.32],[0,-.34],[.12,-.32],[.19,-.27]],0,C));
+features.push(lineFrom2D([[-.89,.35],[-.96,.08],[-.91,-.27],[-.72,-.63],[-.39,-.87],[-.12,-.97]],0,C));
+features.push(lineFrom2D([[.89,.35],[.96,.08],[.91,-.27],[.72,-.63],[.39,-.87],[.12,-.97]],0,C));
+features.push(lineFrom2D([[-.78,-.07],[-.59,-.02],[-.40,-.06]],0,C));
+features.push(lineFrom2D([[.78,-.07],[.59,-.02],[.40,-.06]],0,C));
+features.push(lineFrom2D([[-.26,-.92],[-.12,-1.00],[0,-1.025],[.12,-1.00],[.26,-.92]],0,C));
+
+const lipUpper = lineFrom2D([[-.34,-.55],[-.21,-.49],[-.10,-.52],[0,-.48],[.10,-.52],[.21,-.49],[.34,-.55]],0,C2);
+const lipLower = lineFrom2D([[-.34,-.55],[-.21,-.61],[-.08,-.65],[0,-.66],[.08,-.65],[.21,-.61],[.34,-.55]],0,C2);
+features.push(lipUpper, lipLower);
+
+const eyeGeom = new THREE.BufferGeometry().setFromPoints([onSphere(-.42,.245,.025), onSphere(.42,.245,.025)]);
+const eyeMat = new THREE.PointsMaterial({color:0xe9fdff,size:.115,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true});
+const eyes = new THREE.Points(eyeGeom,eyeMat); face.add(eyes);
+const eyeHaloMat = new THREE.PointsMaterial({color:0x6eeaff,size:.22,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true});
+const eyeHalos = new THREE.Points(eyeGeom.clone(),eyeHaloMat); face.add(eyeHalos);
+
+const fp=[];
+for(let i=0;i<700;i++){
+  const ang=Math.random()*Math.PI*2;
+  const rr=Math.sqrt(Math.random());
+  const x=Math.cos(ang)*rr*.92;
+  const y=Math.sin(ang)*rr*1.02-.12;
+  if(x*x/(.96*.96)+((y+.08)*(y+.08))/(1.08*1.08)>1) continue;
+  const v=onSphere(x,y,.008+Math.random()*.015);
+  fp.push(v.x,v.y,v.z);
+}
+const fpg=new THREE.BufferGeometry(); fpg.setAttribute('position',new THREE.Float32BufferAttribute(fp,3));
+const fpMat=new THREE.PointsMaterial({color:0xb6f7ff,size:.015,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending});
+face.add(new THREE.Points(fpg,fpMat));
+
+const dustN=420; const dust=[];
+for(let i=0;i<dustN;i++) dust.push((Math.random()-.5)*11,(Math.random()-.5)*7,(Math.random()-.5)*6-2);
+const dg=new THREE.BufferGeometry(); dg.setAttribute('position',new THREE.Float32BufferAttribute(dust,3));
+const dustPoints=new THREE.Points(dg,new THREE.PointsMaterial({color:0x5ec8df,size:.012,transparent:true,opacity:.18,depthWrite:false}));
+scene.add(dustPoints);
+
+function clamp01(v){return Math.max(0,Math.min(1,v));}
+function smooth(v){v=clamp01(v); return v*v*(3-2*v);}
+function cycleState(t){
+  const c=t%18;
+  if(c<3) return {name:'IDLE', face:0, speak:0};
+  if(c<6) return {name:'FORMING', face:smooth((c-3)/3), speak:0};
+  if(c<14) return {name:'SPEAKING', face:1, speak:1};
+  if(c<17) return {name:'DISSOLVE', face:1-smooth((c-14)/3), speak:0};
+  return {name:'IDLE', face:0, speak:0};
+}
+function updateLip(feature, lower, open){
+  const coords=feature.base.map(([x,y])=>{
+    const center=1-Math.min(1,Math.abs(x)/.34);
+    return [x, y + (lower?-1:1)*open*center*(lower?.055:.035)];
+  });
+  feature.line.geometry.setFromPoints(coords.map(([x,y])=>onSphere(x,y,.016)));
+}
+
+const clock=new THREE.Clock();
+let mx=0,my=0;
+addEventListener('pointermove',e=>{mx=(e.clientX/innerWidth-.5); my=(e.clientY/innerHeight-.5);},{passive:true});
+
+function animate(){
+  const t=clock.getElapsedTime();
+  const s=cycleState(t);
+  stateLabel.textContent=s.name;
+  glowMat.uniforms.uTime.value=t;
+
+  shell.rotation.y=t*.055;
+  shell.rotation.x=Math.sin(t*.18)*.045;
+  points.rotation.y=-t*.032;
+  dustPoints.rotation.y=t*.007;
+
+  root.rotation.y += ((mx*.12)-root.rotation.y)*.025;
+  root.rotation.x += ((-my*.08)-root.rotation.x)*.025;
+  root.position.y=Math.sin(t*.7)*.035;
+
+  const shimmer = s.speak ? .88 + Math.sin(t*11)*.06 + Math.sin(t*19)*.03 : 1;
+  features.forEach((f,i)=>{
+    const stagger=Math.max(0,Math.min(1,s.face*1.28-i*.018));
+    f.mat.opacity=stagger*(i<6?.90:.66)*shimmer;
+  });
+  fpMat.opacity=s.face*(s.speak?.20:.14);
+  eyeMat.opacity=s.face*(.76 + (s.speak?Math.sin(t*5)*.12:0));
+  eyeHaloMat.opacity=s.face*.15;
+
+  let open=0;
+  if(s.speak){
+    open=(.55+.45*Math.sin(t*6.2))*(.45+.35*Math.sin(t*10.7+1.4));
+    open=Math.abs(open)*.95;
+  }
+  updateLip(lipUpper,false,open);
+  updateLip(lipLower,true,open);
+
+  face.rotation.z=Math.sin(t*.56)*.006*s.face;
+  face.position.y=Math.sin(t*.92)*.006*s.face;
+  const breathe=1+Math.sin(t*1.35)*.004*s.face;
+  face.scale.setScalar(breathe);
+
+  renderer.render(scene,camera);
+  requestAnimationFrame(animate);
+}
+animate();
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(devicePixelRatio,1.8)); renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
