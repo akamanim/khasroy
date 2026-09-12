@@ -12,6 +12,7 @@
     "start": "next start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test:local-owner-key": "node tests/local-owner-key.mjs",
+    "test:image-intent": "node --experimental-strip-types tests/image-intent.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
