@@ -31,14 +31,13 @@ jobs:
         run: |
           if [ -z "$VERCEL_TOKEN" ]; then
             echo "VERCEL_TOKEN_MISSING"
-            echo "Add a GitHub Actions repository secret named VERCEL_TOKEN (or temporary fallback VERSEL_TOKEN)."
             exit 1
           fi
 
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Resolve Vercel project directly
+      - name: Resolve Vercel project settings directly
         shell: bash
         run: |
           HTTP_CODE=$(curl --silent --show-error \
@@ -61,22 +60,77 @@ jobs:
             console.error('Vercel project response is missing id/accountId');
             process.exit(1);
           }
-          fs.mkdirSync('.vercel', { recursive: true });
-          fs.writeFileSync('.vercel/project.json', JSON.stringify({
+
+          let analyticsId;
+          if (project.analytics?.id && (!project.analytics.disabledAt || (project.analytics.enabledAt && project.analytics.enabledAt > project.analytics.disabledAt))) {
+            analyticsId = project.analytics.id;
+          }
+
+          const projectJson = {
             projectId: project.id,
-            orgId: project.accountId
-          }));
+            orgId: project.accountId,
+            projectName: project.name || 'khasroy',
+            settings: {
+              createdAt: project.createdAt ?? null,
+              framework: project.framework ?? null,
+              devCommand: project.devCommand ?? null,
+              installCommand: project.installCommand ?? null,
+              buildCommand: project.buildCommand ?? null,
+              outputDirectory: project.outputDirectory ?? null,
+              rootDirectory: project.rootDirectory ?? null,
+              directoryListing: project.directoryListing ?? false,
+              nodeVersion: project.nodeVersion ?? '22.x',
+              ...(analyticsId ? { analyticsId } : {})
+            }
+          };
+
+          fs.mkdirSync('.vercel', { recursive: true });
+          fs.writeFileSync('.vercel/project.json', JSON.stringify(projectJson, null, 2));
           fs.appendFileSync(process.env.GITHUB_ENV, `VERCEL_PROJECT_ID=${project.id}\nVERCEL_ORG_ID=${project.accountId}\n`);
-          console.log(`Resolved project: ${project.name || 'khasroy'}`);
-          console.log(`Project ID: ${project.id}`);
-          console.log(`Org ID: ${project.accountId}`);
+          console.log(`Resolved project: ${projectJson.projectName}`);
+          console.log(`Framework: ${projectJson.settings.framework || 'auto'}`);
           NODE
 
-      - name: Pull production environment
-        run: npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+      - name: Pull production env through REST API
+        shell: bash
+        run: |
+          HTTP_CODE=$(curl --silent --show-error \
+            --output /tmp/vercel-env.json \
+            --write-out "%{http_code}" \
+            "https://api.vercel.com/v10/projects/$VERCEL_PROJECT_ID/env?decrypt=true&source=vercel-cli%3Apull" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json")
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "VERCEL_ENV_LOOKUP_FAILED_HTTP_$HTTP_CODE"
+            node -e 'const fs=require("fs"); const p="/tmp/vercel-env.json"; if(fs.existsSync(p)){try{const x=JSON.parse(fs.readFileSync(p,"utf8")); console.log(x.error?.message || x.message || "Unknown Vercel API error");}catch{console.log("Non-JSON Vercel API response");}}'
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require('fs');
+          const payload = JSON.parse(fs.readFileSync('/tmp/vercel-env.json', 'utf8'));
+          const envs = Array.isArray(payload.envs) ? payload.envs : [];
+          const production = envs.filter(env => {
+            const target = Array.isArray(env.target) ? env.target : [env.target];
+            return target.includes('production') && typeof env.key === 'string' && typeof env.value !== 'undefined';
+          });
+
+          const deduped = new Map();
+          for (const env of production) deduped.set(env.key, String(env.value ?? ''));
+          const lines = [...deduped.entries()].map(([key, value]) => `${key}=${JSON.stringify(value)}`);
+          fs.writeFileSync('.vercel/.env.production.local', lines.join('\n') + (lines.length ? '\n' : ''));
+          console.log(`Prepared ${lines.length} production environment variables.`);
+          NODE
 
       - name: Build on GitHub runner
-        run: npx --yes vercel@latest build --prod --token="$VERCEL_TOKEN"
+        run: npx --yes vercel@latest build --prod
+
+      - name: Verify prebuilt output
+        shell: bash
+        run: |
+          test -f .vercel/output/config.json
+          echo "PREBUILT_OUTPUT_READY"
 
       - name: Deploy prebuilt output to production
         run: npx --yes vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN"
