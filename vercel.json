@@ -4,10 +4,6 @@
     {
       "path": "/api/vision-school/cron",
       "schedule": "17 22 * * *"
-    },
-    {
-      "path": "/api/survival/recover",
-      "schedule": "*/10 * * * *"
     }
   ]
 }
