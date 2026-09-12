@@ -45,7 +45,7 @@ if (existingValue) {
 const generated = randomBytes(32).toString("hex");
 
 if (match) {
-  source = source.replace(keyLine, `$1${generated}`);
+  source = source.replace(keyLine, (_line, prefix) => `${prefix}${generated}`);
 } else {
   if (source && !source.endsWith("\n")) source += "\n";
   source += `${OWNER_KEY_NAME}=${generated}\n`;
