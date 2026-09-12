@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { generateImage } from "ai";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
@@ -16,10 +17,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const MAX_ATTEMPTS = 2;
-const COMPUTE_BUDGET_MS = 42_000;
-const MIN_RETRY_BUDGET_MS = 18_000;
-const GENERATION_TIMEOUT_MS = 12_000;
-const FALLBACK_GENERATION_TIMEOUT_MS = 9_000;
+const COMPUTE_BUDGET_MS = 54_000;
+const MIN_RETRY_BUDGET_MS = 12_000;
+const GATEWAY_GENERATION_TIMEOUT_MS = 26_000;
+const POLLINATIONS_GENERATION_TIMEOUT_MS = 18_000;
+const GATEWAY_GENERATION_MODEL =
+  process.env.KHASROY_IMAGE_GENERATION_MODEL || "openai/gpt-image-2.5-flare";
 
 const ACCEPTANCE_THRESHOLDS = Object.freeze({
   subjectMatch: 72,
@@ -39,7 +42,7 @@ type AcceptanceContract = {
 type GeneratedImage = {
   image: string;
   mediaType: string;
-  provider: "pollinations";
+  provider: "vercel-ai-gateway" | "pollinations";
   requestedModel: string;
   actualModel: string;
 };
@@ -91,36 +94,60 @@ function technicalFailure(stage: TechnicalFailure["stage"], error: unknown): Tec
     code = `${stage}_configuration_error`;
     retryable = false;
   }
-  return { code, stage, detail: message.slice(0, 320), retryable };
+  return { code, stage, detail: message.slice(0, 480), retryable };
 }
 
-function compactProviderPrompt(prompt: string, maxChars = 620) {
+function compactProviderPrompt(prompt: string, maxChars = 1500) {
   return prompt.replace(/\s+/gu, " ").trim().slice(0, maxChars);
+}
+
+async function generateGatewayImage(prompt: string, timeoutMs: number): Promise<GeneratedImage> {
+  const compact = compactProviderPrompt(prompt, 1500);
+  if (!compact) throw new Error("gateway_prompt_empty");
+
+  const result = await generateImage({
+    model: GATEWAY_GENERATION_MODEL,
+    prompt: compact,
+    aspectRatio: "1:1",
+    n: 1,
+    maxRetries: 1,
+    abortSignal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!result.image?.base64) {
+    throw new Error(`gateway_model_${GATEWAY_GENERATION_MODEL}_returned_no_image`);
+  }
+  const mediaType = result.image.mediaType || "image/png";
+  return {
+    image: `data:${mediaType};base64,${result.image.base64}`,
+    mediaType,
+    provider: "vercel-ai-gateway",
+    requestedModel: GATEWAY_GENERATION_MODEL,
+    actualModel: GATEWAY_GENERATION_MODEL,
+  };
 }
 
 async function fetchPollinationsImage(args: {
   prompt: string;
   timeoutMs: number;
-  seedOffset?: number;
 }): Promise<GeneratedImage> {
-  const compact = compactProviderPrompt(args.prompt);
+  const compact = compactProviderPrompt(args.prompt, 620);
   const encoded = encodeURIComponent(compact);
   if (!compact || encoded.length > 1800) {
     throw new Error("provider_prompt_path_too_long");
   }
 
-  const seed = (Date.now() + (args.seedOffset || 0)) % 2147483647;
+  const seed = Date.now() % 2147483647;
   const requestedModel = "flux";
   const url = `https://image.pollinations.ai/prompt/${encoded}?model=${requestedModel}&width=1024&height=1024&nologo=true&seed=${seed}`;
   const response = await fetch(url, {
-    headers: { "user-agent": "Khasroy-Image-Executor/3.1" },
+    headers: { "user-agent": "Khasroy-Image-Executor/4.0" },
     signal: AbortSignal.timeout(args.timeoutMs),
     cache: "no-store",
   });
   const mediaType = (response.headers.get("content-type") || "").split(";")[0].trim();
   if (!response.ok || !/^image\/(?:png|jpeg|jpg|webp)$/iu.test(mediaType)) {
     const text = await response.text().catch(() => "");
-    throw new Error(`pollinations_${response.status}: ${text.slice(0, 160)}`);
+    throw new Error(`pollinations_${response.status}: ${text.slice(0, 220)}`);
   }
 
   const bytes = Buffer.from(await response.arrayBuffer());
@@ -134,30 +161,39 @@ async function fetchPollinationsImage(args: {
   };
 }
 
-async function generatePollinations(
-  prompt: string,
-  timeoutMs: number,
-  fallbackPrompt: string,
-): Promise<GeneratedImage> {
-  try {
-    return await fetchPollinationsImage({ prompt, timeoutMs });
-  } catch (primaryError) {
-    const fallback = compactProviderPrompt(fallbackPrompt, 420);
-    if (!fallback) throw primaryError;
+async function generateWithProviders(args: {
+  prompt: string;
+  pollinationsPrompt: string;
+  availableMs: number;
+}): Promise<GeneratedImage> {
+  const startedAt = Date.now();
+  const gatewayBudget = Math.max(
+    8_000,
+    Math.min(GATEWAY_GENERATION_TIMEOUT_MS, args.availableMs - 12_000),
+  );
+  let gatewayError: unknown = null;
 
-    try {
-      return await fetchPollinationsImage({
-        prompt: fallback,
-        timeoutMs: Math.max(4_000, Math.min(FALLBACK_GENERATION_TIMEOUT_MS, timeoutMs)),
-        seedOffset: 997,
-      });
-    } catch (fallbackError) {
-      const first = primaryError instanceof Error ? primaryError.message : String(primaryError);
-      const second = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-      throw new Error(
-        `primary_generation_failed=${first.slice(0, 145)}; fallback_generation_failed=${second.slice(0, 145)}`,
-      );
-    }
+  try {
+    return await generateGatewayImage(args.prompt, gatewayBudget);
+  } catch (error) {
+    gatewayError = error;
+  }
+
+  const remaining = args.availableMs - (Date.now() - startedAt);
+  if (remaining < 6_000) throw gatewayError;
+
+  try {
+    return await fetchPollinationsImage({
+      prompt: args.pollinationsPrompt,
+      timeoutMs: Math.max(6_000, Math.min(POLLINATIONS_GENERATION_TIMEOUT_MS, remaining)),
+    });
+  } catch (pollinationsError) {
+    const first = gatewayError instanceof Error ? gatewayError.message : String(gatewayError);
+    const second =
+      pollinationsError instanceof Error ? pollinationsError.message : String(pollinationsError);
+    throw new Error(
+      `gateway_generation_failed=${first.slice(0, 210)}; pollinations_generation_failed=${second.slice(0, 210)}`,
+    );
   }
 }
 
@@ -332,12 +368,12 @@ export async function POST(request: Request) {
 
     let image: GeneratedImage;
     try {
-      const available = Math.max(4_000, deadline - Date.now() - 9_000);
-      image = await generatePollinations(
-        compiledPrompt,
-        Math.min(GENERATION_TIMEOUT_MS, available),
-        fallbackPrompt,
-      );
+      const available = Math.max(8_000, deadline - Date.now() - 9_000);
+      image = await generateWithProviders({
+        prompt: compiledPrompt,
+        pollinationsPrompt: fallbackPrompt,
+        availableMs: available,
+      });
     } catch (error) {
       techFailure = technicalFailure("generation", error);
       break;
@@ -411,7 +447,7 @@ export async function POST(request: Request) {
     prompt: contract.prompt,
     model: `${finalImage.provider}-${finalImage.actualModel}`,
     mediaType: finalImage.mediaType,
-    mode: "executor_v3_semantic",
+    mode: "executor_v4_multi_provider",
     runtimeMs: Date.now() - startedAt,
     attempts,
     audit: lastAudit,
@@ -443,7 +479,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    mode: "executor_v3_semantic",
+    mode: "executor_v4_multi_provider",
     image: finalImage.image,
     model: `${finalImage.provider}-${finalImage.actualModel}`,
     provider: finalImage.provider,
