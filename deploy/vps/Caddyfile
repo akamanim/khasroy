@@ -1,0 +1,10 @@
+{$KHASROY_DOMAIN:localhost} {
+  encode zstd gzip
+  reverse_proxy khasroy-web:3000
+
+  header {
+    -Server
+    X-Content-Type-Options nosniff
+    Referrer-Policy strict-origin-when-cross-origin
+  }
+}
