@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { assertImagePromptPreflight } from "@/lib/image-prompt-preflight.mjs";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import { runImageLab, type ImageAudit } from "@/lib/server-image-lab";
 import { recordChatImageGenerationTrial } from "@/lib/server-learning";
@@ -84,6 +85,10 @@ async function runVerifiedEmergencyImage(args: {
       const compiledPrompt = compileImagePrompt(args.prompt, {
         lessons,
         repairPrompt: repairPrompt || undefined,
+      });
+      assertImagePromptPreflight({
+        originalRequest: args.prompt,
+        compiledPrompt,
       });
       const image = await runEmergencyImage(compiledPrompt, 18_000);
       const audit = await verifyGeneratedImage({
