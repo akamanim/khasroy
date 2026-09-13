@@ -23,6 +23,9 @@ import {
   rememberKnowledge,
   upsertSkill,
 } from "@/lib/server-memory";
+import { buildWebsite } from "@/lib/web-studio";
+import { looksLikeWebsiteBuildRequest } from "@/lib/web-studio-intent";
+import { createSocialDraft, instagramRuntimeStatus, looksLikeSocialRequest } from "@/lib/social-studio";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -251,6 +254,84 @@ export async function POST(request: Request) {
   const latestUser = [...messages].reverse().find((message) => message.role === "user");
   if (!latestUser) {
     return NextResponse.json({ error: "Нет пользовательского сообщения." }, { status: 400 });
+  }
+
+  if (looksLikeWebsiteBuildRequest(latestUser.content)) {
+    try {
+      const built = await buildWebsite({
+        ownerKey,
+        apiKey,
+        brief: latestUser.content,
+        publish: true,
+      });
+      const content = built.published?.deployUrl
+        ? `Готово. Я собрал сайт, создал отдельный GitHub-репозиторий и запустил production deployment.\n\nСайт: ${built.published.deployUrl}\nРепозиторий: ${built.published.repoUrl}\n\nПроект сохранён в Web Studio, поэтому его можно дальше дорабатывать из этого же чата.`
+        : built.publishingConfigured
+          ? "Я собрал структуру и исходники сайта, но публикация не завершилась. Проект сохранён в Web Studio; следующий запуск сможет продолжить после устранения ошибки публикации."
+          : "Я уже собрал спецификацию и production-ready исходники сайта и сохранил проект в Web Studio. Для полностью автоматической публикации Хасрою ещё нужны серверные GitHub/Vercel credentials; после их подключения он сможет сам создавать репозитории и выкатывать сайт без ручной работы.";
+      await Promise.allSettled([
+        appendMessage(ownerKey, "user", latestUser.content),
+        appendMessage(ownerKey, "assistant", content),
+      ]);
+      return NextResponse.json({
+        content,
+        provider: "web-studio",
+        model: "web-studio-v1",
+        brainMode: "website_build",
+        memory: "active",
+        webStudio: built,
+      });
+    } catch (error) {
+      console.error("Khasroy Web Studio chat execution failed", error);
+      const detail = error instanceof Error ? error.message : "web_studio_failed";
+      const content = `Я начал сборку сайта, но публикационный этап остановился: ${detail.slice(0, 220)}. Проект и спецификация сохранены, поэтому работу можно продолжить без начала с нуля.`;
+      await Promise.allSettled([
+        appendMessage(ownerKey, "user", latestUser.content),
+        appendMessage(ownerKey, "assistant", content),
+      ]);
+      return NextResponse.json({
+        content,
+        provider: "web-studio",
+        model: "web-studio-v1",
+        brainMode: "website_build",
+        memory: "active",
+        webStudio: { ok: false, detail },
+      });
+    }
+  }
+
+  if (looksLikeSocialRequest(latestUser.content)) {
+    try {
+      const social = await createSocialDraft({ ownerKey, apiKey, request: latestUser.content });
+      const ig = instagramRuntimeStatus();
+      const d = social.draft;
+      const content = [
+        `Готово. Я подготовил ${d.contentType.toUpperCase()} и сохранил его в SMM-очередь.`,
+        `\n**${d.title}**`,
+        `\nХук: ${d.hook}`,
+        `\nСценарий:\n${d.script}`,
+        `\nПодпись:\n${d.caption}`,
+        `\nCTA: ${d.cta}`,
+        `\nКадры: ${d.shotList.join(" → ")}`,
+        ig.configured
+          ? "\nInstagram publishing подключён: когда будет публичный media URL, я могу отправить материал на публикацию через Social Studio."
+          : "\nАвтопубликация в Instagram пока не активирована серверными Instagram Graph credentials; контент-планирование и очередь уже работают.",
+      ].join("\n");
+      await Promise.allSettled([
+        appendMessage(ownerKey, "user", latestUser.content),
+        appendMessage(ownerKey, "assistant", content),
+      ]);
+      return NextResponse.json({
+        content,
+        provider: "social-studio",
+        model: "social-studio-v1",
+        brainMode: "social_marketing",
+        memory: "active",
+        socialStudio: social,
+      });
+    } catch (error) {
+      console.error("Khasroy Social Studio chat execution failed", error);
+    }
   }
 
   let memoryContext = "";

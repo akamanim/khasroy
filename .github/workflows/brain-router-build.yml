@@ -7,9 +7,14 @@ on:
       - "lib/survival/**"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
+      - "lib/web-studio.ts"
+      - "lib/web-studio-intent.ts"
+      - "lib/social-studio.ts"
       - "app/api/chat/**"
       - "app/api/status/**"
       - "app/api/image-*/**"
+      - "app/api/web-studio/**"
+      - "app/api/social-studio/**"
       - ".github/workflows/brain-router-build.yml"
   push:
     branches: [main]
@@ -18,9 +23,14 @@ on:
       - "lib/survival/**"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
+      - "lib/web-studio.ts"
+      - "lib/web-studio-intent.ts"
+      - "lib/social-studio.ts"
       - "app/api/chat/**"
       - "app/api/status/**"
       - "app/api/image-*/**"
+      - "app/api/web-studio/**"
+      - "app/api/social-studio/**"
       - ".github/workflows/brain-router-build.yml"
 
 concurrency:
