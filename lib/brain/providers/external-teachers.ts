@@ -1,4 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 export type ExternalTeacher = "openai" | "gemini" | "kimi";
+export type ExternalTeacherKeys = Partial<Record<ExternalTeacher, string>>;
 
 export type TeacherMessage = {
   role: "user" | "assistant";
@@ -35,6 +38,7 @@ type RunArgs = {
 };
 
 const DEFAULT_TIMEOUT_MS = 16_000;
+const requestKeys = new AsyncLocalStorage<ExternalTeacherKeys>();
 
 function env(name: string) {
   return process.env[name]?.trim() || "";
@@ -46,19 +50,32 @@ function enabledFlag(name: string, defaultEnabled: boolean) {
   return !["0", "false", "off", "disabled", "no"].includes(value);
 }
 
+function requestKey(provider: ExternalTeacher) {
+  const contextual = requestKeys.getStore()?.[provider]?.trim();
+  if (contextual) return contextual;
+  if (provider === "openai") return env("OPENAI_API_KEY");
+  if (provider === "gemini") return env("GEMINI_API_KEY");
+  return env("MOONSHOT_API_KEY") || env("KIMI_API_KEY");
+}
+
+function hasContextKey(provider: ExternalTeacher) {
+  return Boolean(requestKeys.getStore()?.[provider]?.trim());
+}
+
+export function withExternalTeacherKeys<T>(keys: ExternalTeacherKeys, run: () => T): T {
+  return requestKeys.run(keys, run);
+}
+
 export function externalTeacherConfigured(provider: ExternalTeacher) {
+  const key = requestKey(provider);
+  if (!key) return false;
   switch (provider) {
     case "openai":
-      // Temporarily opt-in while the OpenAI API account has no credits.
-      return enabledFlag("KHASROY_OPENAI_ENABLED", false) && Boolean(env("OPENAI_API_KEY"));
+      return enabledFlag("KHASROY_OPENAI_ENABLED", hasContextKey(provider));
     case "gemini":
-      return enabledFlag("KHASROY_GEMINI_ENABLED", true) && Boolean(env("GEMINI_API_KEY"));
+      return enabledFlag("KHASROY_GEMINI_ENABLED", true);
     case "kimi":
-      // Temporarily opt-in while the Moonshot/Kimi account is balance-suspended.
-      return (
-        enabledFlag("KHASROY_KIMI_ENABLED", false) &&
-        Boolean(env("MOONSHOT_API_KEY") || env("KIMI_API_KEY"))
-      );
+      return enabledFlag("KHASROY_KIMI_ENABLED", hasContextKey(provider));
   }
 }
 
@@ -118,7 +135,7 @@ async function openAIRequest(args: RunArgs): Promise<TeacherRun> {
   const provider: ExternalTeacher = "openai";
   const model = externalTeacherModel(provider);
   const started = Date.now();
-  const key = env("OPENAI_API_KEY");
+  const key = requestKey(provider);
   if (!key) {
     const data = errorData("OpenAI key missing", "config", "missing_key");
     return {
@@ -147,12 +164,12 @@ async function openAIRequest(args: RunArgs): Promise<TeacherRun> {
       signal: AbortSignal.timeout(args.timeoutMs || DEFAULT_TIMEOUT_MS),
     });
     const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-    const text = payload ? outputTextFromOpenAI(payload) : "";
+    const output = payload ? outputTextFromOpenAI(payload) : "";
     const remoteError = payload?.error as Record<string, unknown> | undefined;
-    const data: TeacherResponseData = text
+    const data: TeacherResponseData = output
       ? {
           model: typeof payload?.model === "string" ? payload.model : model,
-          choices: [{ message: { content: text } }],
+          choices: [{ message: { content: output } }],
         }
       : errorData(
           typeof remoteError?.message === "string" ? remoteError.message : "OpenAI returned no text",
@@ -186,7 +203,7 @@ async function geminiRequest(args: RunArgs): Promise<TeacherRun> {
   const provider: ExternalTeacher = "gemini";
   const model = externalTeacherModel(provider);
   const started = Date.now();
-  const key = env("GEMINI_API_KEY");
+  const key = requestKey(provider);
   if (!key) {
     const data = errorData("Gemini key missing", "config", "missing_key");
     return {
@@ -224,7 +241,7 @@ async function geminiRequest(args: RunArgs): Promise<TeacherRun> {
     const first = candidates[0] as Record<string, unknown> | undefined;
     const content = first?.content as Record<string, unknown> | undefined;
     const parts = Array.isArray(content?.parts) ? content.parts : [];
-    const text = parts
+    const output = parts
       .map((part) =>
         part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string"
           ? String((part as Record<string, unknown>).text)
@@ -234,8 +251,8 @@ async function geminiRequest(args: RunArgs): Promise<TeacherRun> {
       .join("\n")
       .trim();
     const remoteError = payload?.error as Record<string, unknown> | undefined;
-    const data: TeacherResponseData = text
-      ? { model, choices: [{ message: { content: text } }] }
+    const data: TeacherResponseData = output
+      ? { model, choices: [{ message: { content: output } }] }
       : errorData(
           typeof remoteError?.message === "string" ? remoteError.message : "Gemini returned no text",
           typeof remoteError?.status === "string" ? remoteError.status : "empty_response",
@@ -268,7 +285,7 @@ async function kimiRequest(args: RunArgs): Promise<TeacherRun> {
   const provider: ExternalTeacher = "kimi";
   const model = externalTeacherModel(provider);
   const started = Date.now();
-  const key = env("MOONSHOT_API_KEY") || env("KIMI_API_KEY");
+  const key = requestKey(provider);
   if (!key) {
     const data = errorData("Kimi key missing", "config", "missing_key");
     return {
@@ -300,12 +317,12 @@ async function kimiRequest(args: RunArgs): Promise<TeacherRun> {
     const choices = Array.isArray(payload?.choices) ? payload.choices : [];
     const first = choices[0] as Record<string, unknown> | undefined;
     const message = first?.message as Record<string, unknown> | undefined;
-    const text = typeof message?.content === "string" ? message.content.trim() : "";
+    const output = typeof message?.content === "string" ? message.content.trim() : "";
     const remoteError = payload?.error as Record<string, unknown> | undefined;
-    const data: TeacherResponseData = text
+    const data: TeacherResponseData = output
       ? {
           model: typeof payload?.model === "string" ? payload.model : model,
-          choices: [{ message: { content: text } }],
+          choices: [{ message: { content: output } }],
         }
       : errorData(
           typeof remoteError?.message === "string" ? remoteError.message : "Kimi returned no text",
