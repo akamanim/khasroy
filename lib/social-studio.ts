@@ -1,5 +1,6 @@
 import { runBrain } from "@/lib/brain/router";
 import { upsertSkill } from "@/lib/server-memory";
+import { getIntegration, resolveSecret } from "@/lib/server-integrations";
 
 const STORE_ENDPOINT =
   process.env.KHASROY_WEB_STUDIO_ENDPOINT ||
@@ -94,31 +95,50 @@ export async function createSocialDraft(args: { ownerKey: string; apiKey: string
     title: fallback.title,
     caption: fallback.caption,
     script: fallback.script,
-    metadata: { hook: fallback.hook, cta: fallback.cta, shotList: fallback.shotList, engine: "social_studio_v1" },
+    metadata: { hook: fallback.hook, cta: fallback.cta, shotList: fallback.shotList, engine: "social_studio_v2" },
   }).catch(() => null);
 
+  const instagram = await getInstagramRuntimeStatus(args.ownerKey).catch(() => instagramRuntimeStatus());
   await upsertSkill(args.ownerKey, {
     slug: "instagram_smm_studio",
     name: "Instagram SMM Studio",
     description: "Хасрой готовит Reels, посты, Stories, captions и CTA для продвижения услуг веб-разработки и сохраняет их в контент-очередь.",
     status: "verified",
-    level: 1,
+    level: 2,
     testsPassed: 1,
-    metadata: { engine: "social_studio_v1", publishingConfigured: instagramRuntimeStatus().configured },
+    metadata: { engine: "social_studio_v2", publishingConfigured: instagram.configured, credentialSource: instagram.source },
   }).catch(() => undefined);
 
-  return { draft: fallback, queued };
+  return { draft: fallback, queued, instagram };
 }
 
 export function instagramRuntimeStatus() {
+  const configured = Boolean(process.env.INSTAGRAM_ACCESS_TOKEN?.trim() && process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID?.trim());
   return {
-    configured: Boolean(process.env.INSTAGRAM_ACCESS_TOKEN?.trim() && process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID?.trim()),
+    configured,
+    source: configured ? "environment" : "none",
+    vaultSupported: true,
   };
 }
 
-export async function publishInstagram(args: { mediaUrl: string; caption: string; contentType: SocialDraft["contentType"] }) {
-  const token = process.env.INSTAGRAM_ACCESS_TOKEN?.trim() || "";
-  const accountId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID?.trim() || "";
+export async function getInstagramRuntimeStatus(ownerKey: string) {
+  const env = instagramRuntimeStatus();
+  if (env.configured) return env;
+  const stored = await getIntegration(ownerKey, "instagram");
+  const accountId = stored?.config?.businessAccountId || stored?.config?.accountId;
+  const configured = Boolean(stored?.secret?.trim() && typeof accountId === "string" && accountId.trim());
+  return {
+    configured,
+    source: configured ? "encrypted_vault" : "none",
+    vaultSupported: true,
+  };
+}
+
+export async function publishInstagram(args: { ownerKey: string; mediaUrl: string; caption: string; contentType: SocialDraft["contentType"] }) {
+  const token = await resolveSecret(args.ownerKey, "instagram", [process.env.INSTAGRAM_ACCESS_TOKEN]);
+  const stored = await getIntegration(args.ownerKey, "instagram").catch(() => null);
+  const storedAccount = stored?.config?.businessAccountId || stored?.config?.accountId;
+  const accountId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID?.trim() || (typeof storedAccount === "string" ? storedAccount.trim() : "");
   if (!token || !accountId) throw new Error("instagram_credentials_missing");
   if (!/^https:\/\//iu.test(args.mediaUrl)) throw new Error("instagram_media_url_must_be_public_https");
 
@@ -152,5 +172,16 @@ export async function publishInstagram(args: { mediaUrl: string; caption: string
   });
   const result = await publish.json().catch(() => null) as { id?: string; error?: { message?: string } } | null;
   if (!publish.ok || !result?.id) throw new Error(`instagram_publish_${publish.status}:${result?.error?.message || "failed"}`);
+
+  await upsertSkill(args.ownerKey, {
+    slug: "instagram_autopublish",
+    name: "Instagram Autopublish",
+    description: "Хасрой публикует подготовленный медиаматериал в подключённый Instagram Business через Graph API.",
+    status: "verified",
+    level: 1,
+    testsPassed: 1,
+    metadata: { mediaId: result.id, containerId: container.id, credentialSource: process.env.INSTAGRAM_ACCESS_TOKEN?.trim() ? "environment" : "encrypted_vault" },
+  }).catch(() => undefined);
+
   return { id: result.id, containerId: container.id };
 }
