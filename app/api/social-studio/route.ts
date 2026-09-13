@@ -1,6 +1,11 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { installImageFetchHardening } from "@/lib/ai/image-fetch-hardening";
+import { installPersistentProviderGate } from "@/lib/ai/persistent-provider-gate";
+import { installProviderFailover } from "@/lib/ai/provider-failover";
+import { installVisionFailover } from "@/lib/ai/vision-failover";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
+import { resolveAISecrets } from "@/lib/server-integrations";
 import {
   createSocialDraft,
   getInstagramRuntimeStatus,
@@ -11,6 +16,14 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+// Social Studio must survive the same provider outages as Site Agent and Web
+// Studio. The global fetch stack can skip a quota-blocked Groq request, try AI
+// Gateway, and fall through to direct Gemini when Gateway itself is unhealthy.
+installImageFetchHardening();
+installVisionFailover();
+installProviderFailover();
+installPersistentProviderGate();
 
 export async function GET() {
   const ownerKey = process.env.KHASROY_OWNER_KEY?.trim();
@@ -26,7 +39,6 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const ownerKey = process.env.KHASROY_OWNER_KEY?.trim();
-  const apiKey = process.env.GROQ_API_KEY?.trim() || "";
   if (!ownerKey) return NextResponse.json({ error: "owner_not_configured" }, { status: 503 });
   const cookieStore = await cookies();
   const session = cookieStore.get(OWNER_COOKIE)?.value;
@@ -56,6 +68,14 @@ export async function POST(request: Request) {
 
     const requestText = typeof body?.request === "string" ? body.request.trim().slice(0, 8000) : "";
     if (!requestText) return NextResponse.json({ error: "request_required" }, { status: 400 });
+
+    // Resolve Groq from either Vercel env or the encrypted Integration Vault.
+    // The survival stack above handles quota failures and can continue through
+    // the configured fallback providers without changing Social Studio logic.
+    const secrets = await resolveAISecrets(ownerKey);
+    const apiKey = secrets.groq;
+    if (!apiKey) return NextResponse.json({ error: "brain_not_configured" }, { status: 503 });
+
     const result = await createSocialDraft({ ownerKey, apiKey, request: requestText });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
