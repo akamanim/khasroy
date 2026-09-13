@@ -4,7 +4,11 @@ import { runWebStudioTurnkeyE2E, type WebStudioTurnkeyE2EResult } from "@/lib/we
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// The turnkey factory creates a GitHub repository, provisions a Vercel project,
+// waits for its production deployment, verifies HTTP, then submits and checks a
+// Supabase lead. Sixty seconds was shorter than the real critical path and caused
+// the CI runner to repeatedly restart the same side-effectful test.
+export const maxDuration = 300;
 
 const CATEGORY = "web_studio_e2e";
 

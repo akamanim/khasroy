@@ -12,14 +12,14 @@ jobs:
   turnkey-e2e:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[webstudio-e2e]')
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - name: Run production-side turnkey factory self-test
         env:
           RELEASE: ${{ github.sha }}
         shell: bash
         run: |
-          python - <<'PY'
+          python -u - <<'PY'
           import json, os, time, urllib.error, urllib.request
 
           full_release = os.environ["RELEASE"]
@@ -31,16 +31,16 @@ jobs:
               with urllib.request.urlopen("https://api.github.com/repos/akamanim/khasroy/commits/main", timeout=15) as response:
                   return json.load(response)["sha"]
 
-          for attempt in range(42):
-              if attempt % 4 == 0:
+          for attempt in range(16):
+              if attempt % 2 == 0:
                   try:
                       if current_main() != full_release:
-                          print("A newer main commit superseded this E2E run; exiting cleanly.")
+                          print("A newer main commit superseded this E2E run; exiting cleanly.", flush=True)
                           raise SystemExit(0)
                   except SystemExit:
                       raise
                   except Exception as exc:
-                      print("Could not verify main commit yet:", type(exc).__name__)
+                      print("Could not verify main commit yet:", type(exc).__name__, flush=True)
 
               payload = json.dumps({"runnerRelease": expected}).encode()
               request = urllib.request.Request(
@@ -48,20 +48,21 @@ jobs:
                   data=payload,
                   headers={
                       "Content-Type": "application/json",
-                      "User-Agent": "Khasroy-WebStudio-Production-E2E/4.0",
+                      "User-Agent": "Khasroy-WebStudio-Production-E2E/5.0",
                   },
                   method="POST",
               )
 
               try:
-                  with urllib.request.urlopen(request, timeout=75) as response:
+                  print(f"Starting production factory attempt {attempt + 1}/16 for {expected}", flush=True)
+                  with urllib.request.urlopen(request, timeout=290) as response:
                       data = json.load(response)
                   if data.get("ok") is True:
                       with open(result_path, "w", encoding="utf-8") as handle:
                           json.dump(data, handle, ensure_ascii=False, indent=2)
-                      print(json.dumps(data, ensure_ascii=False))
+                      print(json.dumps(data, ensure_ascii=False), flush=True)
                       raise SystemExit(0)
-                  print("Production returned an incomplete E2E result; retrying.")
+                  print("Production returned an incomplete E2E result; retrying.", flush=True)
               except urllib.error.HTTPError as exc:
                   body = exc.read().decode("utf-8", "replace")[:1200]
                   try:
@@ -70,23 +71,23 @@ jobs:
                       data = {}
 
                   if exc.code == 409:
-                      print(f"Production is not on {expected} yet; waiting for release.")
+                      print(f"Production is not on {expected} yet; waiting for release.", flush=True)
                       time.sleep(10)
                       continue
 
                   detail = str(data.get("detail") or body)
                   retryable = bool(data.get("retryable")) or exc.code in (429, 503, 504)
                   if retryable:
-                      print(f"Transient Web Studio E2E block (HTTP {exc.code}): {detail[:300]}")
+                      print(f"Transient Web Studio E2E block (HTTP {exc.code}): {detail[:300]}", flush=True)
                       time.sleep(20)
                       continue
 
-                  print(f"Web Studio E2E failed (HTTP {exc.code}): {detail[:600]}")
+                  print(f"Web Studio E2E failed (HTTP {exc.code}): {detail[:600]}", flush=True)
                   with open(result_path, "w", encoding="utf-8") as handle:
                       json.dump(data or {"ok": False, "http": exc.code}, handle, ensure_ascii=False, indent=2)
                   raise SystemExit(1)
               except (TimeoutError, urllib.error.URLError) as exc:
-                  print("Temporary production transport error:", type(exc).__name__)
+                  print("Temporary production transport error:", type(exc).__name__, flush=True)
 
               time.sleep(10)
 
