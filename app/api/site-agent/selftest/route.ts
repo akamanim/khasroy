@@ -1,15 +1,19 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { installProviderFailover } from "@/lib/ai/provider-failover";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
+import { resolveAISecrets } from "@/lib/server-integrations";
 import { recallKnowledge, rememberKnowledge } from "@/lib/server-memory";
 import {
   createSiteAgentJob,
   stepSiteAgentJob,
-} from "@/lib/site-agent-job-v7";
+} from "@/lib/site-agent-job-v8";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+installProviderFailover();
 
 const SELFTEST_KEY = "site_agent_selftest_latest";
 const SELFTEST_CATEGORY = "site_agent_selftest";
@@ -116,10 +120,21 @@ function publicState(state: SelfTestState) {
 
 export async function POST(request: Request) {
   const ownerKey = process.env.KHASROY_OWNER_KEY?.trim();
-  const apiKey = process.env.GROQ_API_KEY?.trim();
-  if (!ownerKey || !apiKey) {
+  if (!ownerKey) {
     return NextResponse.json(
       { error: "Self-test не настроен на сервере." },
+      { status: 503 },
+    );
+  }
+
+  const ai = await resolveAISecrets(ownerKey).catch(() => ({
+    groq: process.env.GROQ_API_KEY?.trim() || "",
+    teachers: {},
+  }));
+  const apiKey = ai.groq;
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "Для Site Agent нужен Groq API key в env или Integration Vault." },
       { status: 503 },
     );
   }
@@ -185,7 +200,7 @@ export async function POST(request: Request) {
       const retryable = /(timeout|AbortError|429|rate limit|screenshot|temporar|memory)/iu.test(message);
       if (retryable) {
         state.progress = `Self-test: временная ошибка этапа, повторю его позже — ${message.slice(0, 180)}`;
-        state.retryAfterMs = /429|rate limit/iu.test(message) ? 65_000 : 3_000;
+        state.retryAfterMs = /429|rate limit/iu.test(message) ? 15_000 : 3_000;
         await saveState(ownerKey, state);
         return NextResponse.json({ ok: true, retryable: true, ...publicState(state) });
       }
