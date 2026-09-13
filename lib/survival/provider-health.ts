@@ -1,6 +1,9 @@
 export type SurvivalProvider =
   | "self-hosted"
   | "groq"
+  | "openai"
+  | "gemini"
+  | "kimi"
   | "vercel-gateway"
   | "emergency-gateway"
   | "web-search"
@@ -16,6 +19,9 @@ type ProviderState = {
   cooldownUntil: number;
   lastStatus: number | null;
   lastError: string | null;
+  totalLatencyMs: number;
+  latencySamples: number;
+  lastLatencyMs: number | null;
 };
 
 type SurvivalState = Record<SurvivalProvider, ProviderState>;
@@ -32,6 +38,9 @@ function blank(): ProviderState {
     cooldownUntil: 0,
     lastStatus: null,
     lastError: null,
+    totalLatencyMs: 0,
+    latencySamples: 0,
+    lastLatencyMs: null,
   };
 }
 
@@ -39,6 +48,9 @@ function initialState(): SurvivalState {
   return {
     "self-hosted": blank(),
     groq: blank(),
+    openai: blank(),
+    gemini: blank(),
+    kimi: blank(),
     "vercel-gateway": blank(),
     "emergency-gateway": blank(),
     "web-search": blank(),
@@ -49,12 +61,36 @@ function initialState(): SurvivalState {
 
 function store(): SurvivalState {
   const root = globalThis as typeof globalThis & Record<string, unknown>;
-  let value = root[GLOBAL_KEY] as SurvivalState | undefined;
+  let value = root[GLOBAL_KEY] as Partial<SurvivalState> | undefined;
   if (!value) {
     value = initialState();
     root[GLOBAL_KEY] = value;
   }
-  return value;
+
+  const providers: SurvivalProvider[] = [
+    "self-hosted",
+    "groq",
+    "openai",
+    "gemini",
+    "kimi",
+    "vercel-gateway",
+    "emergency-gateway",
+    "web-search",
+    "sandbox",
+    "memory",
+  ];
+  for (const provider of providers) {
+    const current = value[provider];
+    if (!current) {
+      value[provider] = blank();
+      continue;
+    }
+    current.totalLatencyMs ??= 0;
+    current.latencySamples ??= 0;
+    current.lastLatencyMs ??= null;
+  }
+
+  return value as SurvivalState;
 }
 
 function cooldownMs(status: number | null, consecutiveFailures: number) {
@@ -64,6 +100,14 @@ function cooldownMs(status: number | null, consecutiveFailures: number) {
   return Math.min(5_000 * 2 ** exponent, 120_000);
 }
 
+function recordLatency(state: ProviderState, latencyMs?: number | null) {
+  if (!Number.isFinite(latencyMs) || Number(latencyMs) < 0) return;
+  const safe = Math.round(Number(latencyMs));
+  state.lastLatencyMs = safe;
+  state.totalLatencyMs += safe;
+  state.latencySamples += 1;
+}
+
 export function canAttemptProvider(provider: SurvivalProvider) {
   return store()[provider].cooldownUntil <= Date.now();
 }
@@ -71,6 +115,7 @@ export function canAttemptProvider(provider: SurvivalProvider) {
 export function recordProviderSuccess(
   provider: SurvivalProvider,
   status = 200,
+  latencyMs?: number | null,
 ) {
   const state = store()[provider];
   state.successes += 1;
@@ -79,11 +124,12 @@ export function recordProviderSuccess(
   state.cooldownUntil = 0;
   state.lastStatus = status;
   state.lastError = null;
+  recordLatency(state, latencyMs);
 }
 
 export function recordProviderFailure(
   provider: SurvivalProvider,
-  options: { status?: number | null; error?: unknown } = {},
+  options: { status?: number | null; error?: unknown; latencyMs?: number | null } = {},
 ) {
   const state = store()[provider];
   const status = options.status ?? null;
@@ -98,6 +144,7 @@ export function recordProviderFailure(
         ? options.error.slice(0, 240)
         : null;
   state.cooldownUntil = Date.now() + cooldownMs(status, state.consecutiveFailures);
+  recordLatency(state, options.latencyMs);
 }
 
 export function providerHealthSnapshot() {
@@ -119,6 +166,10 @@ export function providerHealthSnapshot() {
           : null,
         lastStatus: state.lastStatus,
         lastError: state.lastError,
+        lastLatencyMs: state.lastLatencyMs,
+        averageLatencyMs: state.latencySamples
+          ? Math.round(state.totalLatencyMs / state.latencySamples)
+          : null,
       },
     ]),
   );
