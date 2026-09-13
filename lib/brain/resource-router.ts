@@ -16,6 +16,9 @@ export type ResourceCapability =
 export type ResourceId =
   | "self-hosted"
   | "groq"
+  | "openai"
+  | "gemini"
+  | "kimi"
   | "vercel-gateway"
   | "emergency-gateway"
   | "web-search"
@@ -49,14 +52,18 @@ function env(name: string) {
 function configured(id: ResourceId) {
   switch (id) {
     case "self-hosted":
-      // A generic Supabase brain gateway existing is not the same thing as a
-      // configured GPU/model. Runtime health should override this value.
       return Boolean(
         process.env.KHASROY_SELF_HOSTED_BASE_URL?.trim() &&
           process.env.KHASROY_SELF_HOSTED_MODEL?.trim(),
       );
     case "groq":
       return env("GROQ_API_KEY");
+    case "openai":
+      return env("OPENAI_API_KEY");
+    case "gemini":
+      return env("GEMINI_API_KEY");
+    case "kimi":
+      return env("MOONSHOT_API_KEY") || env("KIMI_API_KEY");
     case "vercel-gateway":
       return env("AI_GATEWAY_API_KEY") || Boolean(process.env.VERCEL);
     case "emergency-gateway":
@@ -79,10 +86,28 @@ const DEFINITIONS: Array<Omit<ResourceDescriptor, "configured" | "available">> =
     priority: 100,
   },
   {
+    id: "openai",
+    label: "OpenAI",
+    capabilities: ["text", "reasoning"],
+    priority: 96,
+  },
+  {
+    id: "gemini",
+    label: "Google Gemini",
+    capabilities: ["text", "reasoning"],
+    priority: 94,
+  },
+  {
     id: "groq",
     label: "Groq",
     capabilities: ["text", "reasoning"],
     priority: 90,
+  },
+  {
+    id: "kimi",
+    label: "Kimi",
+    capabilities: ["text", "reasoning"],
+    priority: 88,
   },
   {
     id: "vercel-gateway",
