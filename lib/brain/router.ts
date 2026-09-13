@@ -15,9 +15,14 @@ import {
 export { selectBrainMode };
 export type { BrainMessage, BrainMode, BrainResponseData };
 
-export type BrainProvider = "self-hosted" | "groq" | "openai" | "gemini" | "kimi";
+// Keep the public provider type stable for existing autonomy/storage code.
+// The exact external teacher is exposed through providerDetail.
+export type BrainProvider = "self-hosted" | "groq";
 export type BrainProviderDetail =
   | BrainProvider
+  | "openai"
+  | "gemini"
+  | "kimi"
   | "groq-fallback"
   | "gateway"
   | "server-search"
@@ -73,7 +78,7 @@ function normalizeLegacy(
 ): BrainRun {
   return {
     ...run,
-    provider: run.provider,
+    provider: run.provider === "self-hosted" ? "self-hosted" : "groq",
     providerDetail: observedProvider(run.response, run.provider),
     mode,
   };
