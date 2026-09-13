@@ -187,7 +187,23 @@ export function installPersistentProviderGate() {
     console.warn("Khasroy persistent provider gate: Groq is blocked, routing directly to AI Gateway", {
       vision: hasVision(body),
     });
-    return gatewayRequest(current.originalFetch, body, init);
+
+    const gateway = await gatewayRequest(current.originalFetch, body, init);
+    if (gateway.ok) return gateway;
+
+    // Persistent health is an optimization, not a single point of failure. A live
+    // production probe can show the Gateway itself is auth/quota blocked (for
+    // example 403) while direct Gemini is healthy. In that case, discard the
+    // failed Gateway response and hand the original Groq-shaped request back to
+    // the already-installed provider/vision compatibility chain. `originalFetch`
+    // was captured before this outer gate, so this cannot recurse into this gate;
+    // it can still reach direct Gemini and other working fallbacks.
+    console.warn("Khasroy persistent provider gate: AI Gateway failed, resuming provider compatibility chain", {
+      status: gateway.status,
+      vision: hasVision(body),
+    });
+    await gateway.body?.cancel().catch(() => undefined);
+    return current.originalFetch(input, init);
   }) as typeof fetch;
 
   current.installed = true;
