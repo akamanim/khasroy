@@ -5,16 +5,22 @@ on:
     paths:
       - "lib/brain/**"
       - "lib/survival/**"
+      - "lib/chat.ts"
+      - "lib/image-intent.ts"
       - "app/api/chat/**"
       - "app/api/status/**"
+      - "app/api/image-*/**"
       - ".github/workflows/brain-router-build.yml"
   push:
     branches: [main]
     paths:
       - "lib/brain/**"
       - "lib/survival/**"
+      - "lib/chat.ts"
+      - "lib/image-intent.ts"
       - "app/api/chat/**"
       - "app/api/status/**"
+      - "app/api/image-*/**"
       - ".github/workflows/brain-router-build.yml"
 
 concurrency:
