@@ -1,6 +1,11 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { installImageFetchHardening } from "@/lib/ai/image-fetch-hardening";
+import { installPersistentProviderGate } from "@/lib/ai/persistent-provider-gate";
+import { installProviderFailover } from "@/lib/ai/provider-failover";
+import { installVisionFailover } from "@/lib/ai/vision-failover";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
+import { resolveAISecrets } from "@/lib/server-integrations";
 import { buildWebsite, webStudioRuntimeStatus } from "@/lib/web-studio";
 import {
   editWebsite,
@@ -13,6 +18,14 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+// Web Studio must use the same survival stack as Site Agent. This keeps planning
+// and edit requests alive when Groq is quota blocked: persistent health can try
+// Gateway, and a failed Gateway can fall through to the direct Gemini layer.
+installImageFetchHardening();
+installVisionFailover();
+installProviderFailover();
+installPersistentProviderGate();
 
 async function ownerContext() {
   const ownerKey = process.env.KHASROY_OWNER_KEY?.trim();
@@ -39,7 +52,6 @@ export async function GET() {
 export async function POST(request: Request) {
   const auth = await ownerContext();
   if ("error" in auth) return auth.error;
-  const apiKey = process.env.GROQ_API_KEY?.trim() || "";
 
   const body = (await request.json().catch(() => null)) as {
     action?: unknown;
@@ -80,6 +92,12 @@ export async function POST(request: Request) {
       await updateSiteLeadStatus(auth.ownerKey, leadId, status as "new" | "contacted" | "qualified" | "won" | "lost" | "spam");
       return NextResponse.json({ ok: true });
     }
+
+    // Resolve the brain credential from either Vercel env or the encrypted
+    // Integration Vault. The old route only accepted GROQ_API_KEY from env,
+    // making key rotation and the Vault ineffective for the actual Web Studio.
+    const secrets = await resolveAISecrets(auth.ownerKey);
+    const apiKey = secrets.groq;
 
     if (action === "edit") {
       if (!apiKey) return NextResponse.json({ error: "brain_not_configured" }, { status: 503 });
