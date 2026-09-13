@@ -67,7 +67,7 @@ export async function POST(request: Request) {
         "услуги Автоматизация, Сайты, AI; форма заявки обязательна.",
       publish: true,
     });
-    return NextResponse.json({ ok: true, release, ...result });
+    return NextResponse.json({ release, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "web_studio_selftest_failed";
     return NextResponse.json({ ok: false, release, error: message.slice(0, 500) }, { status: 502 });
