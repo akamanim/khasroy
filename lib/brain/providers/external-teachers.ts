@@ -40,14 +40,25 @@ function env(name: string) {
   return process.env[name]?.trim() || "";
 }
 
+function enabledFlag(name: string, defaultEnabled: boolean) {
+  const value = env(name).toLowerCase();
+  if (!value) return defaultEnabled;
+  return !["0", "false", "off", "disabled", "no"].includes(value);
+}
+
 export function externalTeacherConfigured(provider: ExternalTeacher) {
   switch (provider) {
     case "openai":
-      return Boolean(env("OPENAI_API_KEY"));
+      // Temporarily opt-in while the OpenAI API account has no credits.
+      return enabledFlag("KHASROY_OPENAI_ENABLED", false) && Boolean(env("OPENAI_API_KEY"));
     case "gemini":
-      return Boolean(env("GEMINI_API_KEY"));
+      return enabledFlag("KHASROY_GEMINI_ENABLED", true) && Boolean(env("GEMINI_API_KEY"));
     case "kimi":
-      return Boolean(env("MOONSHOT_API_KEY") || env("KIMI_API_KEY"));
+      // Temporarily opt-in while the Moonshot/Kimi account is balance-suspended.
+      return (
+        enabledFlag("KHASROY_KIMI_ENABLED", false) &&
+        Boolean(env("MOONSHOT_API_KEY") || env("KIMI_API_KEY"))
+      );
   }
 }
 
@@ -139,7 +150,10 @@ async function openAIRequest(args: RunArgs): Promise<TeacherRun> {
     const text = payload ? outputTextFromOpenAI(payload) : "";
     const remoteError = payload?.error as Record<string, unknown> | undefined;
     const data: TeacherResponseData = text
-      ? { model: typeof payload?.model === "string" ? payload.model : model, choices: [{ message: { content: text } }] }
+      ? {
+          model: typeof payload?.model === "string" ? payload.model : model,
+          choices: [{ message: { content: text } }],
+        }
       : errorData(
           typeof remoteError?.message === "string" ? remoteError.message : "OpenAI returned no text",
           typeof remoteError?.type === "string" ? remoteError.type : "empty_response",

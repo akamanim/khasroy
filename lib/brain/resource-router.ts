@@ -1,3 +1,4 @@
+import { externalTeacherConfigured } from "@/lib/brain/providers/external-teachers";
 import {
   canAttemptProvider,
   providerHealthSnapshot,
@@ -59,11 +60,11 @@ function configured(id: ResourceId) {
     case "groq":
       return env("GROQ_API_KEY");
     case "openai":
-      return env("OPENAI_API_KEY");
+      return externalTeacherConfigured("openai");
     case "gemini":
-      return env("GEMINI_API_KEY");
+      return externalTeacherConfigured("gemini");
     case "kimi":
-      return env("MOONSHOT_API_KEY") || env("KIMI_API_KEY");
+      return externalTeacherConfigured("kimi");
     case "vercel-gateway":
       return env("AI_GATEWAY_API_KEY") || Boolean(process.env.VERCEL);
     case "emergency-gateway":
@@ -86,28 +87,28 @@ const DEFINITIONS: Array<Omit<ResourceDescriptor, "configured" | "available">> =
     priority: 100,
   },
   {
-    id: "openai",
-    label: "OpenAI",
-    capabilities: ["text", "reasoning"],
-    priority: 96,
-  },
-  {
     id: "gemini",
     label: "Google Gemini",
     capabilities: ["text", "reasoning"],
-    priority: 94,
+    priority: 98,
   },
   {
     id: "groq",
     label: "Groq",
     capabilities: ["text", "reasoning"],
-    priority: 90,
+    priority: 96,
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    capabilities: ["text", "reasoning"],
+    priority: 92,
   },
   {
     id: "kimi",
     label: "Kimi",
     capabilities: ["text", "reasoning"],
-    priority: 88,
+    priority: 90,
   },
   {
     id: "vercel-gateway",
@@ -169,7 +170,7 @@ export function resourceRegistry(
       reason:
         override?.reason ||
         (!isConfigured
-          ? "not_configured"
+          ? "not_configured_or_paused"
           : !healthAllows
             ? `cooldown_${Math.max(0, Number(health?.cooldownRemainingMs) || 0)}ms`
             : !runtimeAllows
