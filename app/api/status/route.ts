@@ -9,6 +9,7 @@ import {
   resourcePlan,
   type ResourceRuntimeOverrides,
 } from "@/lib/brain/resource-router";
+import { webStudioRuntimeStatus } from "@/lib/web-studio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,6 +69,7 @@ export async function GET() {
     const commercialAudit = has("commercial_site_audit");
     const imageLab = has("chat_image_generation") || has("image_generation_lab");
     const imageLabLearning = learningHas("chat_image_generation");
+    const webStudioSkill = has("turnkey_website_delivery") || has("website_project_compiler");
     const siteAgentReady =
       screenshotVision &&
       visualComparison &&
@@ -75,6 +77,8 @@ export async function GET() {
       designAgent &&
       repairLoop &&
       commercialAudit;
+    const studioRuntime = webStudioRuntimeStatus();
+    const studioPublishReady = studioRuntime.githubConfigured && studioRuntime.vercelConfigured;
 
     const selfHostedState = brain.online
       ? "ONLINE"
@@ -130,7 +134,7 @@ export async function GET() {
       capabilities: {
         intelligence: has("live_ai_dialogue") ? 1 : 0,
         security: has("owner_access_control") ? 1 : 0,
-        code: (repository ? 1 : 0) + (sandbox ? 1 : 0),
+        code: (repository ? 1 : 0) + (sandbox ? 1 : 0) + (webStudioSkill ? 1 : 0),
         memory: has("long_term_memory") ? 1 : 0,
         internet: has("internet_research") ? 1 : 0,
         vision:
@@ -143,7 +147,8 @@ export async function GET() {
           (autonomy ? 1 : 0) +
           (designAgent ? 1 : 0) +
           (repairLoop ? 1 : 0) +
-          (commercialAudit ? 1 : 0),
+          (commercialAudit ? 1 : 0) +
+          (webStudioSkill ? 1 : 0),
         images: imageLab ? 1 : 0,
       },
       modules: {
@@ -156,9 +161,15 @@ export async function GET() {
         siteAgent: siteAgentReady ? "VERIFIED" : "WAITING",
         imageLab: imageLab ? "VERIFIED" : imageLabLearning ? "READY" : "WAITING",
         autoSkill: autoSkill ? "VERIFIED" : autoSkillLearning ? "READY" : "WAITING",
+        webStudio: webStudioSkill ? "VERIFIED" : studioPublishReady ? "READY" : "WAITING",
         selfHosted: selfHostedState,
         autonomy: autonomyState,
         survival: "ACTIVE",
+      },
+      webStudio: {
+        ...studioRuntime,
+        publishReady: studioPublishReady,
+        skillVerified: webStudioSkill,
       },
       brain: {
         preferred: preferredText?.id || "none",
