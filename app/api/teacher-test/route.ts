@@ -1,13 +1,17 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
-import { runExternalTeacher } from "@/lib/brain/providers/external-teachers";
+import {
+  runExternalTeacher,
+  withExternalTeacherKeys,
+  type ExternalTeacherKeys,
+} from "@/lib/brain/providers/external-teachers";
+import { resolveAISecrets } from "@/lib/server-integrations";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function testGroq() {
-  const key = process.env.GROQ_API_KEY?.trim();
+async function testGroq(key: string) {
   const model = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
   if (!key) {
     return { provider: "groq", configured: false, ok: false, status: 503, model, latencyMs: 0, error: "missing_key" };
@@ -93,16 +97,24 @@ export async function GET() {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const tests = await Promise.all([
-    testGroq(),
-    testExternal("openai"),
-    testExternal("gemini"),
-    testExternal("kimi"),
-  ]);
+  const resolved = await resolveAISecrets(ownerKey).catch(() => ({
+    groq: process.env.GROQ_API_KEY?.trim() || "",
+    teachers: {} as ExternalTeacherKeys,
+  }));
+
+  const tests = await withExternalTeacherKeys(resolved.teachers, () =>
+    Promise.all([
+      testGroq(resolved.groq),
+      testExternal("openai"),
+      testExternal("gemini"),
+      testExternal("kimi"),
+    ]),
+  );
 
   return NextResponse.json({
     ok: tests.every((test) => test.ok),
     testedAt: new Date().toISOString(),
+    credentialSource: "environment-or-encrypted-vault",
     tests,
   });
 }
