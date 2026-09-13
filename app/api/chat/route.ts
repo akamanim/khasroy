@@ -25,6 +25,7 @@ import {
 } from "@/lib/server-memory";
 import { buildWebsite } from "@/lib/web-studio";
 import { looksLikeWebsiteBuildRequest } from "@/lib/web-studio-intent";
+import { createSocialDraft, instagramRuntimeStatus, looksLikeSocialRequest } from "@/lib/social-studio";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -296,6 +297,40 @@ export async function POST(request: Request) {
         memory: "active",
         webStudio: { ok: false, detail },
       });
+    }
+  }
+
+  if (looksLikeSocialRequest(latestUser.content)) {
+    try {
+      const social = await createSocialDraft({ ownerKey, apiKey, request: latestUser.content });
+      const ig = instagramRuntimeStatus();
+      const d = social.draft;
+      const content = [
+        `Готово. Я подготовил ${d.contentType.toUpperCase()} и сохранил его в SMM-очередь.`,
+        `\n**${d.title}**`,
+        `\nХук: ${d.hook}`,
+        `\nСценарий:\n${d.script}`,
+        `\nПодпись:\n${d.caption}`,
+        `\nCTA: ${d.cta}`,
+        `\nКадры: ${d.shotList.join(" → ")}`,
+        ig.configured
+          ? "\nInstagram publishing подключён: когда будет публичный media URL, я могу отправить материал на публикацию через Social Studio."
+          : "\nАвтопубликация в Instagram пока не активирована серверными Instagram Graph credentials; контент-планирование и очередь уже работают.",
+      ].join("\n");
+      await Promise.allSettled([
+        appendMessage(ownerKey, "user", latestUser.content),
+        appendMessage(ownerKey, "assistant", content),
+      ]);
+      return NextResponse.json({
+        content,
+        provider: "social-studio",
+        model: "social-studio-v1",
+        brainMode: "social_marketing",
+        memory: "active",
+        socialStudio: social,
+      });
+    } catch (error) {
+      console.error("Khasroy Social Studio chat execution failed", error);
     }
   }
 
