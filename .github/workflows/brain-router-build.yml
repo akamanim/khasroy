@@ -5,6 +5,8 @@ on:
     paths:
       - "lib/brain/**"
       - "lib/survival/**"
+      - "lib/ai/provider-failover.ts"
+      - "lib/site-agent*.ts"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
       - "lib/web-studio.ts"
@@ -16,6 +18,7 @@ on:
       - "app/settings/**"
       - "app/api/chat/**"
       - "app/api/status/**"
+      - "app/api/site-agent/**"
       - "app/api/image-*/**"
       - "app/api/web-studio/**"
       - "app/api/social-studio/**"
@@ -26,6 +29,8 @@ on:
     paths:
       - "lib/brain/**"
       - "lib/survival/**"
+      - "lib/ai/provider-failover.ts"
+      - "lib/site-agent*.ts"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
       - "lib/web-studio.ts"
@@ -37,6 +42,7 @@ on:
       - "app/settings/**"
       - "app/api/chat/**"
       - "app/api/status/**"
+      - "app/api/site-agent/**"
       - "app/api/image-*/**"
       - "app/api/web-studio/**"
       - "app/api/social-studio/**"
