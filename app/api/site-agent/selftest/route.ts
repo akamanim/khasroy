@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { installImageFetchHardening } from "@/lib/ai/image-fetch-hardening";
 import { installProviderFailover } from "@/lib/ai/provider-failover";
 import { installVisionFailover } from "@/lib/ai/vision-failover";
+import { installPersistentProviderGate } from "@/lib/ai/persistent-provider-gate";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import { resolveAISecrets } from "@/lib/server-integrations";
 import { recallKnowledge, rememberKnowledge } from "@/lib/server-memory";
@@ -15,14 +16,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// WordPress mshots can briefly return throttled/placeholder responses. Install
-// screenshot fetch hardening first so the direct Gemini fallback captures and
-// reuses the browser-like retrying fetcher for every screenshot it inlines.
 installImageFetchHardening();
-// Vision/plain JSON translation sits closer to native fetch than the generic
-// provider router, allowing exhausted Groq requests to jump directly to Gemini.
 installVisionFailover();
 installProviderFailover();
+// Outermost gate: if persistent health says Groq is quota/billing blocked, skip
+// both Groq and its direct-Gemini compatibility path and use the independent
+// Vercel AI Gateway immediately.
+installPersistentProviderGate();
 
 const SELFTEST_KEY = "site_agent_selftest_latest";
 const SELFTEST_CATEGORY = "site_agent_selftest";
@@ -206,10 +206,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, ...publicState(state) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Self-test step failed";
-      const retryable = /(timeout|AbortError|429|rate limit|screenshot|temporar|memory)/iu.test(message);
+      const retryable = /(timeout|AbortError|429|rate limit|screenshot|temporar|memory|gateway|503)/iu.test(message);
       if (retryable) {
         state.progress = `Self-test: временная ошибка этапа, повторю его позже — ${message.slice(0, 180)}`;
-        state.retryAfterMs = /429|rate limit/iu.test(message) ? 15_000 : 3_000;
+        state.retryAfterMs = /429|rate limit|gateway|503/iu.test(message) ? 15_000 : 3_000;
         await saveState(ownerKey, state);
         return NextResponse.json({ ok: true, retryable: true, ...publicState(state) });
       }
