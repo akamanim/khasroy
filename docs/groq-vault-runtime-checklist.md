@@ -1,0 +1,5 @@
+- Typecheck must pass.
+- Next production build must pass.
+- Existing env-based Groq configuration remains compatible.
+- If env key is absent, runtime attempts encrypted Integration Vault resolution.
+- If Vault lookup fails, existing multi-teacher fallback remains available.
