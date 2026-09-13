@@ -5,7 +5,7 @@ on:
     paths:
       - "lib/brain/**"
       - "lib/survival/**"
-      - "lib/ai/provider-failover.ts"
+      - "lib/ai/**"
       - "lib/site-agent*.ts"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
@@ -29,7 +29,7 @@ on:
     paths:
       - "lib/brain/**"
       - "lib/survival/**"
-      - "lib/ai/provider-failover.ts"
+      - "lib/ai/**"
       - "lib/site-agent*.ts"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
