@@ -84,7 +84,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          scp -i ~/.ssh/khasroy_vps -P "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST:$HOME/khasroy/e2e-output/web-studio-e2e-result.json" web-studio-e2e-result.json 2>/dev/null || true
+          scp -i ~/.ssh/khasroy_vps -P "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST:~/khasroy/e2e-output/web-studio-e2e-result.json" web-studio-e2e-result.json 2>/dev/null || true
 
       - name: Upload sanitized E2E result
         if: always()
