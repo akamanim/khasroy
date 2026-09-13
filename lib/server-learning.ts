@@ -79,18 +79,20 @@ async function createImageCandidate(ownerKey: string) {
     skillSlug: "chat_image_generation",
     artifactType: "procedure",
     sourceType: "self",
-    sourceRef: "khasroy-image-semantic-learning-loop-v2",
+    sourceRef: "khasroy-autoskill-image-bootstrap-v3",
     content: [
-      "SKILL: Generate, verify, repair and deliver an image directly in Khasroy chat.",
-      "1. Detect an image-generation or visual-scene request and route it to Image Lab.",
-      "2. Compile the owner's short request into explicit subject, environment and anti-substitution constraints.",
-      "3. Generate a real image using an available image provider.",
-      "4. Use an independent vision model to compare visible content with the owner's original request.",
-      "5. A real image media type alone is NOT success.",
-      "6. If subject/scene verification fails, save the mismatch as a learning lesson, strengthen the prompt and retry once.",
-      "7. Do not show a final image that still fails semantic verification.",
-      "8. One owner request counts as one practical trial, regardless of internal retries.",
-      "9. Promote only after repeated semantically verified real chat generations.",
+      "SKILL: Acquire, generate, verify, repair and deliver an image directly in Khasroy chat.",
+      "1. Detect an image-generation or visual-scene request as a missing/learning capability request.",
+      "2. Activate the existing server image runtime automatically; do not require the owner to wire a separate image key when Vercel AI Gateway/OIDC is available.",
+      "3. Probe the approved image-model failover list and select a working runtime at execution time.",
+      "4. Compile the owner's short request into explicit subject, environment and anti-substitution constraints.",
+      "5. Generate a real image using an available image provider.",
+      "6. Use an independent vision model to compare visible content with the owner's original request.",
+      "7. A real image media type alone is NOT success.",
+      "8. If subject/scene verification fails, save the mismatch as a learning lesson, strengthen the prompt and retry once.",
+      "9. Do not show a final image that still fails semantic verification.",
+      "10. One owner request counts as one practical trial, regardless of internal retries.",
+      "11. Promote only after repeated semantically verified real chat generations.",
     ].join("\n"),
   });
 
@@ -118,23 +120,44 @@ export async function ensureChatImageGenerationCandidate(ownerKey: string) {
   const current = candidates.find((artifact) => artifact.version >= 2) || null;
   const artifact = current || (await createImageCandidate(ownerKey));
 
-  await upsertSkill(ownerKey, {
-    slug: "chat_image_generation",
-    name: "Генерация изображений прямо в чате",
-    description:
-      "Хасрой распознаёт визуальный запрос, генерирует изображение, самостоятельно сверяет видимый результат с заданием, исправляет провал и только после проверки возвращает картинку владельцу.",
-    status: "learning",
-    level: 2,
-    testsPassed: 0,
-    testsFailed: 0,
-    metadata: {
-      learningCore: true,
-      artifactId: artifact.id,
-      artifactVersion: artifact.version,
-      stage: "semantic_practical_verification",
-      verification: "independent_vision_required",
-    },
-  });
+  await Promise.all([
+    upsertSkill(ownerKey, {
+      slug: "chat_image_generation",
+      name: "Генерация изображений прямо в чате",
+      description:
+        "Хасрой сам активирует доступный image-runtime, генерирует изображение, сверяет видимый результат с заданием, исправляет провал и только после проверки возвращает картинку владельцу.",
+      status: "learning",
+      level: 2,
+      testsPassed: 0,
+      testsFailed: 0,
+      metadata: {
+        learningCore: true,
+        artifactId: artifact.id,
+        artifactVersion: artifact.version,
+        stage: "semantic_practical_verification",
+        verification: "independent_vision_required",
+        acquisitionMode: "on_demand",
+        runtimeDiscovery: "vercel_ai_gateway_oidc_failover",
+        manualImageKeyRequired: false,
+      },
+    }),
+    upsertSkill(ownerKey, {
+      slug: "on_demand_skill_acquisition",
+      name: "Освоение навыков по запросу",
+      description:
+        "Когда владелец просит способность, которая ещё не подтверждена, Хасрой создаёт учебный артефакт, активирует доступный runtime, выполняет практический экзамен и сохраняет результат в Learning Core.",
+      status: "learning",
+      level: 1,
+      testsPassed: 0,
+      testsFailed: 0,
+      metadata: {
+        engine: "AutoSkill v1",
+        firstCapability: "image_generation",
+        stage: "practical_exam",
+        productionSelfModification: false,
+      },
+    }),
+  ]);
 
   return { artifact, status: "learning" as const };
 }
@@ -218,6 +241,8 @@ export async function recordChatImageGenerationTrial(
         artifactId: current.artifact.id,
         artifactVersion: current.artifact.version,
         verification: trial.stats,
+        acquisitionMode: "on_demand",
+        runtimeDiscovery: "vercel_ai_gateway_oidc_failover",
         lastAudit: {
           passed,
           subjectMatch: args.audit.subjectMatch,
@@ -230,6 +255,27 @@ export async function recordChatImageGenerationTrial(
       },
     });
   }
+
+  await upsertSkill(ownerKey, {
+    slug: "on_demand_skill_acquisition",
+    name: "Освоение навыков по запросу",
+    description:
+      "Хасрой может по запросу владельца активировать ещё не подтверждённую способность, создать учебный артефакт, провести практический экзамен и сохранить доказательства результата.",
+    status: passed ? "verified" : "learning",
+    level: 1,
+    testsPassed: passed ? 1 : 0,
+    testsFailed: passed ? 0 : 1,
+    metadata: {
+      engine: "AutoSkill v1",
+      capability: "image_generation",
+      runtime: args.model,
+      firstPracticalExamPassed: passed,
+      learningArtifactId: current.artifact.id,
+      imageSkillStatus: status,
+      productionSelfModification: false,
+      ownerApprovalRequiredForSecretsOrPaidResources: true,
+    },
+  });
 
   return {
     skill: "chat_image_generation",
