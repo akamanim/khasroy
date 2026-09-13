@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { recallKnowledge, rememberKnowledge } from "@/lib/server-memory";
+import { ensureChatImageGenerationCandidate } from "@/lib/server-learning";
 
 const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const GATEWAY_ENDPOINT = "https://ai-gateway.vercel.sh/v1/chat/completions";
@@ -227,6 +228,17 @@ function auditFromContent(content: string, model: string): ImageSemanticAudit {
   };
 }
 
+async function bootstrapImageSkill() {
+  const ownerKey = process.env.KHASROY_OWNER_KEY?.trim();
+  if (!ownerKey) return;
+  await Promise.race([
+    ensureChatImageGenerationCandidate(ownerKey),
+    new Promise<void>((resolve) => setTimeout(resolve, 2_500)),
+  ]).catch((error) => {
+    console.error("Khasroy AutoSkill image bootstrap failed", error);
+  });
+}
+
 export async function verifyGeneratedImage(args: {
   apiKey: string;
   prompt: string;
@@ -237,6 +249,8 @@ export async function verifyGeneratedImage(args: {
   if (!/^data:image\/(?:png|jpeg|jpg|webp);base64,/iu.test(args.imageDataUrl)) {
     throw new Error("visual_verifier_invalid_image");
   }
+
+  await bootstrapImageSkill();
 
   const model = process.env.GROQ_VISION_MODEL?.trim() || DEFAULT_VISION_MODEL;
   let primaryError = "";

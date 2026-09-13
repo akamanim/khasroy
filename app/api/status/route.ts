@@ -50,18 +50,24 @@ export async function GET() {
 
     const verified = skills.filter((skill) => skill.status === "verified");
     const has = (slug: string) => verified.some((skill) => skill.slug === slug);
+    const learningHas = (slug: string) =>
+      skills.some((skill) => skill.slug === slug && skill.status === "learning");
 
     const repository = has("github_self_repository_reader");
     const sandbox = has("cloud_code_sandbox");
     const critic = has("independent_response_critic");
-    const autonomy = has("autonomous_learning_loop");
+    const scheduledAutonomy = has("autonomous_learning_loop");
+    const autoSkill = has("on_demand_skill_acquisition");
+    const autoSkillLearning = learningHas("on_demand_skill_acquisition");
+    const autonomy = scheduledAutonomy || autoSkill;
     const screenshotVision = has("screenshot_vision");
     const visualComparison = has("visual_before_after_comparison");
     const visualScoring = has("visual_site_scoring");
     const designAgent = has("site_design_agent");
     const repairLoop = has("site_repair_loop");
     const commercialAudit = has("commercial_site_audit");
-    const imageLab = has("image_generation_lab");
+    const imageLab = has("chat_image_generation") || has("image_generation_lab");
+    const imageLabLearning = learningHas("chat_image_generation");
     const siteAgentReady =
       screenshotVision &&
       visualComparison &&
@@ -77,9 +83,11 @@ export async function GET() {
         : "WAITING";
     const autonomyState = autonomy
       ? "VERIFIED"
-      : brain.online
+      : autoSkillLearning
         ? "READY"
-        : "WAITING";
+        : brain.online
+          ? "READY"
+          : "WAITING";
 
     const overrides: ResourceRuntimeOverrides = {
       "self-hosted": {
@@ -146,7 +154,8 @@ export async function GET() {
         critic: critic ? "VERIFIED" : "LOCKED",
         vision: screenshotVision ? "VERIFIED" : "WAITING",
         siteAgent: siteAgentReady ? "VERIFIED" : "WAITING",
-        imageLab: imageLab ? "VERIFIED" : "WAITING",
+        imageLab: imageLab ? "VERIFIED" : imageLabLearning ? "READY" : "WAITING",
+        autoSkill: autoSkill ? "VERIFIED" : autoSkillLearning ? "READY" : "WAITING",
         selfHosted: selfHostedState,
         autonomy: autonomyState,
         survival: "ACTIVE",
@@ -171,6 +180,15 @@ export async function GET() {
         level: skill.level,
         testsPassed: skill.tests_passed,
       })),
+      learningSkills: skills
+        .filter((skill) => skill.status === "learning")
+        .map((skill) => ({
+          slug: skill.slug,
+          name: skill.name,
+          level: skill.level,
+          testsPassed: skill.tests_passed,
+          testsFailed: skill.tests_failed,
+        })),
     });
   } catch (error) {
     console.error("Khasroy status read failed", error);
