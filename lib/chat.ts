@@ -194,6 +194,15 @@ function imageMarkdown(data: ChatApiResponse, callbacks?: ChatCallbacks) {
   return content;
 }
 
+function imageFailure(content: string, callbacks?: ChatCallbacks) {
+  callbacks?.onProgress?.({
+    stage: "IMAGE_WAITING",
+    message: "Генерацию завершить не удалось. Объясняю без технического мусора…",
+  });
+  callbacks?.onChunk?.(content, content);
+  return content;
+}
+
 async function runImageGeneration(query: string, callbacks?: ChatCallbacks): Promise<string> {
   callbacks?.onProgress?.({
     stage: "IMAGE",
@@ -264,13 +273,15 @@ async function runImageGeneration(query: string, callbacks?: ChatCallbacks): Pro
     fallbackStatus === 422;
 
   if (semanticFailure) {
-    throw new Error(
-      "Я попробовал два способа генерации, но результат не прошёл мою визуальную проверку. Я не буду показывать плохую картинку — попробуй чуть уточнить сцену и отправь запрос ещё раз.",
+    return imageFailure(
+      "Я попробовал два способа генерации, но результат не прошёл мою визуальную проверку. Я не буду показывать плохую картинку. Уточни сцену одним сообщением — я попробую снова.",
+      callbacks,
     );
   }
 
-  throw new Error(
-    "Сейчас генераторы не смогли завершить изображение. Я уже автоматически переключился с основного на резервный способ. Попробуй ещё раз через минуту.",
+  return imageFailure(
+    "Сейчас генераторы не смогли завершить изображение. Я уже автоматически переключился с основного на резервный способ. Код и навык не сломаны — внешний генератор временно не дал пригодный результат. Попробуй ещё раз через минуту.",
+    callbacks,
   );
 }
 
