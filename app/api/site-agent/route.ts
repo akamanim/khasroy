@@ -1,6 +1,11 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { installImageFetchHardening } from "@/lib/ai/image-fetch-hardening";
+import { installPersistentProviderGate } from "@/lib/ai/persistent-provider-gate";
+import { installProviderFailover } from "@/lib/ai/provider-failover";
+import { installVisionFailover } from "@/lib/ai/vision-failover";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
+import { resolveAISecrets } from "@/lib/server-integrations";
 import {
   createSiteAgentJob,
   extractSiteUrl,
@@ -12,6 +17,14 @@ export const dynamic = "force-dynamic";
 // Every request performs one bounded stage. Upstream calls have their own deadlines
 // well below this Vercel ceiling, so the route can always return retryable JSON.
 export const maxDuration = 60;
+
+// Keep the real owner-facing Site Agent on the exact same resilient transport stack
+// as the production self-test. Persistent provider health is installed last so it is
+// the outermost gate and can bypass a known-bad Groq path before spending quota/time.
+installImageFetchHardening();
+installVisionFailover();
+installProviderFailover();
+installPersistentProviderGate();
 
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Site Agent failed.";
@@ -30,11 +43,22 @@ function errorResponse(error: unknown) {
   if (/(429|rate limit|tokens per minute|otpm|quota|request too large)/iu.test(message)) {
     return NextResponse.json(
       {
-        error: "Vision-модель временно упёрлась в лимит Groq. Этот этап сохранён и будет повторён.",
+        error: "AI-провайдер временно упёрся в лимит. Этот этап сохранён и будет повторён через резервный маршрут.",
         retryable: true,
-        retryAfterMs: 65000,
+        retryAfterMs: 15000,
       },
       { status: 429 },
+    );
+  }
+
+  if (/(gateway|503)/iu.test(message)) {
+    return NextResponse.json(
+      {
+        error: "Резервный AI-маршрут временно недоступен. Прогресс сохранён, этап можно повторить.",
+        retryable: true,
+        retryAfterMs: 15000,
+      },
+      { status: 503 },
     );
   }
 
@@ -66,8 +90,7 @@ function errorResponse(error: unknown) {
 
 export async function POST(request: Request) {
   const ownerKey = process.env.KHASROY_OWNER_KEY;
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!ownerKey || !apiKey) {
+  if (!ownerKey) {
     return NextResponse.json({ error: "Site Agent ещё не настроен на сервере." }, { status: 503 });
   }
 
@@ -95,6 +118,20 @@ export async function POST(request: Request) {
       if (typeof body.jobId !== "string" || !body.jobId.trim()) {
         return NextResponse.json({ error: "Не передан jobId Site Agent." }, { status: 400 });
       }
+
+      // The real route used to require GROQ_API_KEY specifically from Vercel env,
+      // even though /settings already stores provider credentials in the encrypted
+      // Integration Vault. Resolve from env OR Vault so rotating a key never needs
+      // a redeploy and the persistent provider gate can use the same runtime path.
+      const secrets = await resolveAISecrets(ownerKey);
+      const apiKey = secrets.groq;
+      if (!apiKey) {
+        return NextResponse.json(
+          { error: "Для Site Agent не найден Groq-ключ ни в окружении, ни в Integration Vault." },
+          { status: 503 },
+        );
+      }
+
       const result = await stepSiteAgentJob({ ownerKey, apiKey, jobId: body.jobId.trim() });
       return NextResponse.json({ ok: true, ...result });
     }
