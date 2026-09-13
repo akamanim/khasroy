@@ -101,8 +101,10 @@ function cooldownMs(status: number | null, consecutiveFailures: number) {
 }
 
 function recordLatency(state: ProviderState, latencyMs?: number | null) {
-  if (!Number.isFinite(latencyMs) || Number(latencyMs) < 0) return;
-  const safe = Math.round(Number(latencyMs));
+  if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs) || latencyMs < 0) {
+    return;
+  }
+  const safe = Math.round(latencyMs);
   state.lastLatencyMs = safe;
   state.totalLatencyMs += safe;
   state.latencySamples += 1;
