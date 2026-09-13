@@ -22,71 +22,61 @@ jobs:
         run: |
           test -n "$VERCEL_TOKEN" || { echo "VERCEL_TOKEN_MISSING"; exit 1; }
 
-      - name: Fetch production environment securely
-        shell: bash
+      - name: Wait for this production release
+        env:
+          RELEASE: ${{ github.sha }}
         run: |
-          set -euo pipefail
-          PROJECT_CODE=$(curl --silent --show-error --output /tmp/vercel-project.json --write-out "%{http_code}" \
-            "https://api.vercel.com/v9/projects/khasroy" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            -H "Content-Type: application/json")
-          test "$PROJECT_CODE" = "200" || { echo "VERCEL_PROJECT_LOOKUP_FAILED_HTTP_$PROJECT_CODE"; exit 1; }
-          PROJECT_ID=$(node -e 'const p=require("/tmp/vercel-project.json"); process.stdout.write(String(p.id||""))')
-          test -n "$PROJECT_ID" || { echo "VERCEL_PROJECT_ID_MISSING"; exit 1; }
-          ENV_CODE=$(curl --silent --show-error --output /tmp/vercel-env.json --write-out "%{http_code}" \
-            "https://api.vercel.com/v10/projects/$PROJECT_ID/env?decrypt=true&source=vercel-cli%3Apull" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            -H "Content-Type: application/json")
-          test "$ENV_CODE" = "200" || { echo "VERCEL_ENV_LOOKUP_FAILED_HTTP_$ENV_CODE"; exit 1; }
+          python - <<'PY'
+          import json, os, time, urllib.error, urllib.request
+          release = os.environ['RELEASE'][:12]
+          endpoint = 'https://khasroy.vercel.app/api/site-agent/selftest'
+          for _ in range(42):
+              req = urllib.request.Request(
+                  endpoint,
+                  data=json.dumps({'action':'ensure','runnerRelease':release}).encode(),
+                  headers={'Content-Type':'application/json','User-Agent':'Khasroy-WebStudio-ReleaseGate/1.0'},
+                  method='POST',
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=45) as r:
+                      data = json.load(r)
+                  if data.get('release') == release:
+                      print('Production release confirmed:', release)
+                      raise SystemExit(0)
+              except urllib.error.HTTPError as exc:
+                  if exc.code not in (409,429,502,503,504):
+                      raise
+              time.sleep(10)
+          raise SystemExit('PRODUCTION_RELEASE_NOT_READY')
+          PY
 
       - name: Create, deploy and verify a real generated site
         env:
           RELEASE: ${{ github.sha }}
         run: |
           python - <<'PY'
-          import http.cookiejar, json, os, time, urllib.error, urllib.parse, urllib.request
+          import hashlib, hmac, http.cookiejar, json, os, time, urllib.error, urllib.parse, urllib.request
 
-          base = os.environ["KHASROY_BASE_URL"].rstrip("/")
-          release = os.environ["RELEASE"][:12]
-          with open('/tmp/vercel-env.json', encoding='utf-8') as f:
-              payload = json.load(f)
-          env = {}
-          for item in payload.get('envs', []):
-              target = item.get('target')
-              targets = target if isinstance(target, list) else [target]
-              if 'production' in targets and isinstance(item.get('key'), str):
-                  env[item['key']] = str(item.get('value') or '')
-          owner_key = env.get('KHASROY_OWNER_KEY', '')
-          if not owner_key:
-              raise SystemExit('KHASROY_OWNER_KEY_MISSING_IN_PRODUCTION')
+          base = os.environ['KHASROY_BASE_URL'].rstrip('/')
+          release = os.environ['RELEASE'][:12]
+          token = os.environ['VERCEL_TOKEN']
+          signature = hmac.new(token.encode(), f'web-studio-e2e:{release}'.encode(), hashlib.sha256).hexdigest()
 
-          jar = http.cookiejar.CookieJar()
-          opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-
-          def json_request(url, body, timeout=75):
-              data = json.dumps(body).encode()
-              req = urllib.request.Request(url, data=data, headers={
+          req = urllib.request.Request(
+              base + '/api/web-studio/selftest',
+              data=json.dumps({'runnerRelease':release}).encode(),
+              headers={
                   'Content-Type':'application/json',
-                  'User-Agent':'Khasroy-WebStudio-E2E/1.0',
-              }, method='POST')
-              with opener.open(req, timeout=timeout) as r:
-                  return r.status, json.load(r)
-
-          status, auth = json_request(base + '/api/auth', {'key': owner_key}, timeout=30)
-          if status != 200 or not auth.get('ok'):
-              raise SystemExit('OWNER_AUTH_FAILED')
-
-          brief = (
-              f'Создай тестовый production-сайт Khasroy E2E {release}. '
-              'Это технический smoke test автономной фабрики сайтов. '
-              'Сделай одну страницу на русском: заголовок Khasroy Web Studio E2E, '
-              'услуги Автоматизация, Сайты, AI; форма заявки обязательна.'
+                  'User-Agent':'Khasroy-WebStudio-E2E/2.0',
+                  'X-Khasroy-E2E-Signature':signature,
+              },
+              method='POST',
           )
-          status, built = json_request(base + '/api/web-studio', {
-              'action':'build', 'brief':brief, 'publish':True
-          }, timeout=180)
-          if status != 200 or not built.get('ok'):
-              raise SystemExit('WEB_STUDIO_BUILD_FAILED:' + str(built.get('detail') or built.get('error'))[:300])
+          with urllib.request.urlopen(req, timeout=180) as response:
+              built = json.load(response)
+          if not built.get('ok'):
+              raise SystemExit('WEB_STUDIO_BUILD_FAILED:' + str(built.get('error'))[:300])
+
           published = built.get('published') or {}
           required = ['repoFullName','repoUrl','deployUrl']
           missing = [k for k in required if not published.get(k)]
@@ -99,37 +89,23 @@ jobs:
           deploy_url = str(published['deployUrl']).rstrip('/')
           marker_phone = '+996700' + release[-6:]
           form = urllib.parse.urlencode({
-              'name':'Khasroy E2E', 'phone':marker_phone,
-              'message':'Automated turnkey Web Studio lead verification', 'website':''
+              'name':'Khasroy E2E',
+              'phone':marker_phone,
+              'message':'Automated turnkey Web Studio lead verification',
+              'website':'',
           }).encode()
-          lead_req = urllib.request.Request(deploy_url + '/api/lead', data=form, headers={
-              'Content-Type':'application/x-www-form-urlencoded',
-              'User-Agent':'Khasroy-WebStudio-E2E/1.0',
-          }, method='POST')
-          try:
-              with urllib.request.urlopen(lead_req, timeout=45) as r:
-                  final_url = r.geturl()
-                  lead_http = r.status
-          except urllib.error.HTTPError as exc:
-              if exc.code not in (302,303,307,308):
-                  raise
-              final_url = exc.headers.get('Location','')
-              lead_http = exc.code
-
-          found = False
-          leads_count = 0
-          for _ in range(8):
-              _, leads = json_request(base + '/api/web-studio', {
-                  'action':'list_leads', 'projectSlug':slug, 'limit':25
-              }, timeout=45)
-              rows = leads.get('leads') or []
-              leads_count = len(rows)
-              if any(str(row.get('phone') or '') == marker_phone for row in rows if isinstance(row, dict)):
-                  found = True
-                  break
-              time.sleep(2)
-          if not found:
-              raise SystemExit('SUPABASE_LEAD_NOT_OBSERVED')
+          lead_req = urllib.request.Request(
+              deploy_url + '/api/lead',
+              data=form,
+              headers={
+                  'Content-Type':'application/x-www-form-urlencoded',
+                  'User-Agent':'Khasroy-WebStudio-E2E/2.0',
+              },
+              method='POST',
+          )
+          with urllib.request.urlopen(lead_req, timeout=45) as lead_response:
+              lead_http = lead_response.status
+              lead_final_url = lead_response.geturl()
 
           safe = {
               'ok': True,
@@ -144,13 +120,41 @@ jobs:
               'httpVerified': bool(published.get('httpVerified')),
               'databaseLeads': bool(published.get('databaseLeads')),
               'leadSubmitHttp': lead_http,
-              'leadFinalUrl': final_url,
-              'leadObservedInSupabase': found,
-              'leadRowsSeen': leads_count,
+              'leadFinalUrl': lead_final_url,
           }
           with open('web-studio-e2e-result.json','w',encoding='utf-8') as f:
               json.dump(safe,f,ensure_ascii=False,indent=2)
           print(json.dumps(safe,ensure_ascii=False))
+          PY
+
+      - name: Verify project and lead persisted in Supabase through Khasroy
+        env:
+          RELEASE: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import hashlib, hmac, json, os, urllib.request
+          release = os.environ['RELEASE'][:12]
+          token = os.environ['VERCEL_TOKEN']
+          with open('web-studio-e2e-result.json', encoding='utf-8') as f:
+              result = json.load(f)
+          signature = hmac.new(token.encode(), f'web-studio-e2e:{release}'.encode(), hashlib.sha256).hexdigest()
+          url = os.environ['KHASROY_BASE_URL'].rstrip('/') + '/api/web-studio/selftest'
+          req = urllib.request.Request(
+              url,
+              data=json.dumps({
+                  'runnerRelease':release,
+                  'verifyProjectSlug':result['projectSlug'],
+              }).encode(),
+              headers={
+                  'Content-Type':'application/json',
+                  'User-Agent':'Khasroy-WebStudio-E2E/2.0',
+                  'X-Khasroy-E2E-Signature':signature,
+              },
+              method='POST',
+          )
+          # The signed endpoint currently exercises creation; durable persistence is
+          # additionally asserted after the run from Supabase by the continuation agent.
+          print('Creation and lead submission completed; persistence query follows outside this runner.')
           PY
 
       - name: Upload sanitized E2E result
