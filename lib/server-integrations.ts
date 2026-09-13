@@ -20,6 +20,15 @@ export type IntegrationInfo = {
   updated_at?: string | null;
 };
 
+export type ResolvedAISecrets = {
+  groq: string;
+  teachers: {
+    openai?: string;
+    gemini?: string;
+    kimi?: string;
+  };
+};
+
 async function call<T>(ownerKey: string, payload: Record<string, unknown>): Promise<T> {
   const response = await fetch(INTEGRATION_ENDPOINT, {
     method: "POST",
@@ -87,4 +96,21 @@ export async function resolveSecret(
   }
   const stored = await getIntegration(ownerKey, provider);
   return stored?.secret?.trim() || "";
+}
+
+export async function resolveAISecrets(ownerKey: string): Promise<ResolvedAISecrets> {
+  const [groq, openai, gemini, kimi] = await Promise.all([
+    resolveSecret(ownerKey, "groq", [process.env.GROQ_API_KEY]).catch(() => process.env.GROQ_API_KEY?.trim() || ""),
+    resolveSecret(ownerKey, "openai", [process.env.OPENAI_API_KEY]).catch(() => process.env.OPENAI_API_KEY?.trim() || ""),
+    resolveSecret(ownerKey, "gemini", [process.env.GEMINI_API_KEY]).catch(() => process.env.GEMINI_API_KEY?.trim() || ""),
+    resolveSecret(ownerKey, "kimi", [process.env.MOONSHOT_API_KEY, process.env.KIMI_API_KEY]).catch(() => process.env.MOONSHOT_API_KEY?.trim() || process.env.KIMI_API_KEY?.trim() || ""),
+  ]);
+  return {
+    groq,
+    teachers: {
+      ...(openai ? { openai } : {}),
+      ...(gemini ? { gemini } : {}),
+      ...(kimi ? { kimi } : {}),
+    },
+  };
 }
