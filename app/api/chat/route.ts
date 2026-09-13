@@ -25,10 +25,18 @@ import {
 } from "@/lib/server-memory";
 import { buildWebsite } from "@/lib/web-studio";
 import { looksLikeWebsiteBuildRequest } from "@/lib/web-studio-intent";
+import {
+  editWebsite,
+  listSiteLeads,
+  listWebProjects,
+  looksLikeLeadRequest,
+  looksLikeWebsiteRevisionRequest,
+  resolveWebProject,
+} from "@/lib/web-studio-editor";
 import { createSocialDraft, instagramRuntimeStatus, looksLikeSocialRequest } from "@/lib/social-studio";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 const EMERGENCY_CHAT_GATEWAY =
   "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-chat-live";
@@ -83,6 +91,13 @@ function criticEvidence(args: {
     : "";
   const toolText = args.toolsUsed.length ? `\nTools: ${args.toolsUsed.join(", ")}` : "";
   return `${sourceText}${toolText}`.trim();
+}
+
+async function saveDirectReply(ownerKey: string, user: string, content: string) {
+  await Promise.allSettled([
+    appendMessage(ownerKey, "user", user),
+    appendMessage(ownerKey, "assistant", content),
+  ]);
 }
 
 async function runEmergencyChat(args: {
@@ -256,6 +271,48 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Нет пользовательского сообщения." }, { status: 400 });
   }
 
+  if (looksLikeWebsiteRevisionRequest(latestUser.content)) {
+    try {
+      const project = await resolveWebProject(ownerKey, latestUser.content);
+      if (!project) {
+        const projects = await listWebProjects(ownerKey, 12);
+        const choices = projects.map((item) => item.project_slug).join(", ");
+        const content = choices
+          ? `В Web Studio несколько проектов. Укажи, какой доработать: ${choices}.`
+          : "В Web Studio пока нет сохранённого сайта для доработки.";
+        await saveDirectReply(ownerKey, latestUser.content, content);
+        return NextResponse.json({ content, provider: "web-studio", model: "web-studio-v2", brainMode: "website_edit", memory: "active" });
+      }
+      const edited = await editWebsite({ ownerKey, apiKey, projectSlug: project.project_slug, instruction: latestUser.content });
+      const content = `Готово. Я обновил существующий сайт, записал изменения в тот же GitHub-репозиторий и проверил новый production deployment.\n\nСайт: ${edited.deployUrl || project.deploy_url || "URL сохранён в проекте"}\nРепозиторий: ${edited.repoUrl || project.repo_url || edited.repoFullName}`;
+      await saveDirectReply(ownerKey, latestUser.content, content);
+      return NextResponse.json({ content, provider: "web-studio", model: "web-studio-v2", brainMode: "website_edit", memory: "active", webStudio: edited });
+    } catch (error) {
+      console.error("Khasroy Web Studio edit failed", error);
+      const detail = error instanceof Error ? error.message : "website_edit_failed";
+      const content = `Доработка сайта остановилась на техническом этапе: ${detail.slice(0, 220)}. Существующий проект не потерян.`;
+      await saveDirectReply(ownerKey, latestUser.content, content);
+      return NextResponse.json({ content, provider: "web-studio", model: "web-studio-v2", brainMode: "website_edit", memory: "active", webStudio: { ok: false, detail } });
+    }
+  }
+
+  if (looksLikeLeadRequest(latestUser.content)) {
+    try {
+      const project = await resolveWebProject(ownerKey, latestUser.content);
+      const leads = await listSiteLeads(ownerKey, project?.project_slug, 10);
+      const content = leads.length
+        ? [
+            `Нашёл ${leads.length} последних заявок${project ? ` по сайту ${project.project_slug}` : ""}:`,
+            ...leads.map((lead, index) => `${index + 1}. ${lead.name} — ${lead.phone}${lead.message ? ` — ${lead.message}` : ""} [${lead.status}]`),
+          ].join("\n")
+        : `Новых заявок${project ? ` по сайту ${project.project_slug}` : ""} пока нет.`;
+      await saveDirectReply(ownerKey, latestUser.content, content);
+      return NextResponse.json({ content, provider: "web-studio-crm", model: "web-studio-v2", brainMode: "website_leads", memory: "active", leads });
+    } catch (error) {
+      console.error("Khasroy Web Studio leads read failed", error);
+    }
+  }
+
   if (looksLikeWebsiteBuildRequest(latestUser.content)) {
     try {
       const built = await buildWebsite({
@@ -265,18 +322,15 @@ export async function POST(request: Request) {
         publish: true,
       });
       const content = built.published?.deployUrl
-        ? `Готово. Я собрал сайт, создал отдельный GitHub-репозиторий и запустил production deployment.\n\nСайт: ${built.published.deployUrl}\nРепозиторий: ${built.published.repoUrl}\n\nПроект сохранён в Web Studio, поэтому его можно дальше дорабатывать из этого же чата.`
+        ? `Готово. Я собрал сайт, создал отдельный GitHub-репозиторий, подключил базу заявок и проверил production deployment.\n\nСайт: ${built.published.deployUrl}\nРепозиторий: ${built.published.repoUrl}\n\nПроект сохранён в Web Studio и теперь может дорабатываться из этого же чата.`
         : built.publishingConfigured
           ? "Я собрал структуру и исходники сайта, но публикация не завершилась. Проект сохранён в Web Studio; следующий запуск сможет продолжить после устранения ошибки публикации."
-          : "Я уже собрал спецификацию и production-ready исходники сайта и сохранил проект в Web Studio. Для полностью автоматической публикации Хасрою ещё нужны серверные GitHub/Vercel credentials; после их подключения он сможет сам создавать репозитории и выкатывать сайт без ручной работы.";
-      await Promise.allSettled([
-        appendMessage(ownerKey, "user", latestUser.content),
-        appendMessage(ownerKey, "assistant", content),
-      ]);
+          : "Я собрал спецификацию и production-ready исходники сайта и сохранил проект в Web Studio. Для полностью автоматической публикации серверу Хасроя ещё нужны GitHub/Vercel credentials.";
+      await saveDirectReply(ownerKey, latestUser.content, content);
       return NextResponse.json({
         content,
         provider: "web-studio",
-        model: "web-studio-v1",
+        model: "web-studio-v2",
         brainMode: "website_build",
         memory: "active",
         webStudio: built,
@@ -285,14 +339,11 @@ export async function POST(request: Request) {
       console.error("Khasroy Web Studio chat execution failed", error);
       const detail = error instanceof Error ? error.message : "web_studio_failed";
       const content = `Я начал сборку сайта, но публикационный этап остановился: ${detail.slice(0, 220)}. Проект и спецификация сохранены, поэтому работу можно продолжить без начала с нуля.`;
-      await Promise.allSettled([
-        appendMessage(ownerKey, "user", latestUser.content),
-        appendMessage(ownerKey, "assistant", content),
-      ]);
+      await saveDirectReply(ownerKey, latestUser.content, content);
       return NextResponse.json({
         content,
         provider: "web-studio",
-        model: "web-studio-v1",
+        model: "web-studio-v2",
         brainMode: "website_build",
         memory: "active",
         webStudio: { ok: false, detail },
@@ -317,10 +368,7 @@ export async function POST(request: Request) {
           ? "\nInstagram publishing подключён: когда будет публичный media URL, я могу отправить материал на публикацию через Social Studio."
           : "\nАвтопубликация в Instagram пока не активирована серверными Instagram Graph credentials; контент-планирование и очередь уже работают.",
       ].join("\n");
-      await Promise.allSettled([
-        appendMessage(ownerKey, "user", latestUser.content),
-        appendMessage(ownerKey, "assistant", content),
-      ]);
+      await saveDirectReply(ownerKey, latestUser.content, content);
       return NextResponse.json({
         content,
         provider: "social-studio",
