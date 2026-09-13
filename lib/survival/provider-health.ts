@@ -149,6 +149,46 @@ export function recordProviderFailure(
   recordLatency(state, options.latencyMs);
 }
 
+export function applyPersistentProviderHealth(
+  provider: SurvivalProvider,
+  input: {
+    state?: string | null;
+    lastStatus?: number | null;
+    lastErrorCategory?: string | null;
+    blockedUntil?: string | null;
+    successes?: number | null;
+    failures?: number | null;
+    lastSuccessAt?: string | null;
+    lastFailureAt?: string | null;
+    lastLatencyMs?: number | null;
+  },
+) {
+  const current = store()[provider];
+  const blockedUntil = input.blockedUntil ? Date.parse(input.blockedUntil) : 0;
+  const successAt = input.lastSuccessAt ? Date.parse(input.lastSuccessAt) : NaN;
+  const failureAt = input.lastFailureAt ? Date.parse(input.lastFailureAt) : NaN;
+
+  current.successes = Math.max(current.successes, Math.max(0, Number(input.successes) || 0));
+  current.failures = Math.max(current.failures, Math.max(0, Number(input.failures) || 0));
+  current.lastStatus = typeof input.lastStatus === "number" ? input.lastStatus : current.lastStatus;
+  current.lastError = input.lastErrorCategory || current.lastError;
+  current.lastLatencyMs = typeof input.lastLatencyMs === "number" ? input.lastLatencyMs : current.lastLatencyMs;
+  if (Number.isFinite(successAt)) current.lastSuccessAt = Math.max(current.lastSuccessAt || 0, successAt);
+  if (Number.isFinite(failureAt)) current.lastFailureAt = Math.max(current.lastFailureAt || 0, failureAt);
+
+  if (input.state === "healthy" && (!Number.isFinite(failureAt) || (Number.isFinite(successAt) && successAt >= failureAt))) {
+    current.cooldownUntil = 0;
+    current.consecutiveFailures = 0;
+    current.lastError = null;
+    return;
+  }
+
+  if (Number.isFinite(blockedUntil) && blockedUntil > Date.now()) {
+    current.cooldownUntil = Math.max(current.cooldownUntil, blockedUntil);
+    current.consecutiveFailures = Math.max(current.consecutiveFailures, 1);
+  }
+}
+
 export function providerHealthSnapshot() {
   const now = Date.now();
   return Object.fromEntries(
