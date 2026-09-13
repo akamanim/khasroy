@@ -5,6 +5,7 @@ import {
   type BrainMode,
   type BrainResponseData,
 } from "@/lib/brain/router-legacy";
+import { resolveSecret } from "@/lib/server-integrations";
 import { searchWebDirect, type WebSearchResult } from "@/lib/server-web";
 import {
   runCodeSandbox,
@@ -57,6 +58,20 @@ type SandboxPlan = {
 
 const TEXT_ONLY_QUERY =
   "Сформируй итоговый ответ только по переданному контексту. Не запускай веб-поиск и код.";
+
+async function resolveRuntimeArgs(args: RunArgs): Promise<RunArgs> {
+  if (args.apiKey.trim()) return args;
+  const ownerKey = process.env.KHASROY_OWNER_KEY?.trim();
+  if (!ownerKey) return args;
+
+  try {
+    const apiKey = await resolveSecret(ownerKey, "groq", [process.env.GROQ_API_KEY]);
+    return apiKey ? { ...args, apiKey } : args;
+  } catch (error) {
+    console.error("Khasroy Groq vault credential lookup failed", error);
+    return args;
+  }
+}
 
 function observedProvider(response: Response, fallback: string): BrainProviderDetail {
   const marked = response.headers.get("x-khasroy-ai-provider");
@@ -416,24 +431,25 @@ async function runIndependentAgentic(
 }
 
 export async function runBrain(args: RunArgs): Promise<BrainRun> {
-  const mode = selectBrainMode(args.query, args.repositoryRead);
+  const runtimeArgs = await resolveRuntimeArgs(args);
+  const mode = selectBrainMode(runtimeArgs.query, runtimeArgs.repositoryRead);
 
   if (mode === "research") {
-    const independent = await runIndependentResearch(args);
+    const independent = await runIndependentResearch(runtimeArgs);
     if (independent) return independent;
   }
 
   if (mode === "sandbox") {
-    const independent = await runIndependentSandbox(args);
+    const independent = await runIndependentSandbox(runtimeArgs);
     if (independent) return independent;
   }
 
   if (mode === "agentic") {
-    const independent = await runIndependentAgentic(args);
+    const independent = await runIndependentAgentic(runtimeArgs);
     if (independent) return independent;
   }
 
-  return normalizeLegacy(await runLegacyBrain(args));
+  return normalizeLegacy(await runLegacyBrain(runtimeArgs));
 }
 
 export function usedWebTool(run: BrainRun) {
