@@ -25,6 +25,7 @@ on:
       - "app/api/social-studio/**"
       - "app/api/integrations/**"
       - ".github/workflows/brain-router-build.yml"
+      - ".github/workflows/web-studio-turnkey-e2e.yml"
   push:
     branches: [main]
     paths:
@@ -50,6 +51,7 @@ on:
       - "app/api/social-studio/**"
       - "app/api/integrations/**"
       - ".github/workflows/brain-router-build.yml"
+      - ".github/workflows/web-studio-turnkey-e2e.yml"
 
 concurrency:
   group: brain-router-${{ github.ref }}
