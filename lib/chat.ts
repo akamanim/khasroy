@@ -161,7 +161,13 @@ async function resolveImageExecutorIntent(text: string) {
     if (!response.ok) return null;
     const payload = await readApiResponse(response);
     if (payload.data.execution === "image_generation" && typeof payload.data.prompt === "string") {
-      return detectImageGenerationIntent(payload.data.prompt);
+      const prompt = payload.data.prompt.trim();
+      if (!prompt) return null;
+      return {
+        kind: "image_generation" as const,
+        prompt,
+        confidence: payload.data.confidence === "explicit" ? "explicit" as const : "visual_scene" as const,
+      };
     }
   } catch (error) {
     if (error instanceof KhasroyAuthError) throw error;
@@ -170,55 +176,110 @@ async function resolveImageExecutorIntent(text: string) {
   return null;
 }
 
-async function runImageGeneration(query: string, callbacks?: ChatCallbacks): Promise<string> {
-  callbacks?.onProgress?.({
-    stage: "IMAGE",
-    message: "Executor Lock активен: создаю изображение, затем сам проверяю результат…",
-  });
+function imageMarkdown(data: ChatApiResponse, callbacks?: ChatCallbacks) {
+  const image = typeof data.image === "string" ? data.image.trim() : "";
+  if (!image || !/^data:image\/(?:png|jpeg|jpg|webp);base64,/iu.test(image)) return null;
 
-  const response = await fetchWithTimeout(
-    "/api/image-executor",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ prompt: query }),
-    },
-    70_000,
-  );
-
-  if (response.status === 401) throw new KhasroyAuthError();
-  const payload = await readApiResponse(response);
-  if (!response.ok) {
-    if (payload.data.failureClass === "semantic") {
-      throw new Error(payload.data.error || "Изображение не прошло визуальный экзамен.");
-    }
-    if (payload.data.failureClass === "technical") {
-      throw new Error(
-        payload.data.error ||
-          "Технический ресурс генерации или проверки временно недоступен. Этот случай не засчитан как провал навыка.",
-      );
-    }
-    throw new Error(payload.data.error || "Image Executor временно не смог завершить задачу.");
-  }
-
-  const image = typeof payload.data.image === "string" ? payload.data.image.trim() : "";
-  if (!image || !/^data:image\/(?:png|jpeg|jpg|webp);base64,/iu.test(image)) {
-    throw new Error("Image Executor завершил работу без проверенного изображения.");
-  }
-
-  const model = typeof payload.data.model === "string" && payload.data.model.trim()
-    ? payload.data.model.trim()
-    : "Image Executor";
-  const attempts = typeof payload.data.attempts === "number" ? payload.data.attempts : 1;
-  const content = `Готово. Изображение прошло визуальную проверку${attempts > 1 ? ` после ${attempts} попыток` : ""}.\n\n![Сгенерированное изображение](${image})\n\n*Модель: ${model}*`;
+  const model = typeof data.model === "string" && data.model.trim()
+    ? data.model.trim()
+    : "Image Runtime";
+  const attempts = typeof data.attempts === "number" ? data.attempts : 1;
+  const content = `Готово${attempts > 1 ? ` — понадобилось ${attempts} попытки` : ""}. Я проверил изображение перед показом.\n\n![Сгенерированное изображение](${image})\n\n*Модель: ${model}*`;
 
   callbacks?.onProgress?.({
     stage: "IMAGE_DONE",
-    message: "Изображение прошло экзамен. Показываю только проверенный результат…",
+    message: "Готово. Изображение прошло проверку.",
   });
   callbacks?.onChunk?.(content, content);
   return content;
+}
+
+async function runImageGeneration(query: string, callbacks?: ChatCallbacks): Promise<string> {
+  callbacks?.onProgress?.({
+    stage: "IMAGE",
+    message: "Понял: это запрос на изображение. Создаю и проверяю результат…",
+  });
+
+  let primaryData: ChatApiResponse = {};
+  let primaryStatus = 0;
+  try {
+    const response = await fetchWithTimeout(
+      "/api/image-executor",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ prompt: query }),
+      },
+      70_000,
+    );
+    if (response.status === 401) throw new KhasroyAuthError();
+    primaryStatus = response.status;
+    const payload = await readApiResponse(response);
+    primaryData = payload.data;
+    if (response.ok) {
+      const rendered = imageMarkdown(payload.data, callbacks);
+      if (rendered) return rendered;
+    }
+  } catch (error) {
+    if (error instanceof KhasroyAuthError) throw error;
+    console.warn("Primary Khasroy image executor failed", error);
+  }
+
+  callbacks?.onProgress?.({
+    stage: "IMAGE_FALLBACK",
+    message: "Первый генератор не завершил задачу. Переключаюсь на резервный способ…",
+  });
+
+  let fallbackData: ChatApiResponse = {};
+  let fallbackStatus = 0;
+  try {
+    const response = await fetchWithTimeout(
+      "/api/image-lab",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ prompt: query, fast: true }),
+      },
+      70_000,
+    );
+    if (response.status === 401) throw new KhasroyAuthError();
+    fallbackStatus = response.status;
+    const payload = await readApiResponse(response);
+    fallbackData = payload.data;
+    if (response.ok) {
+      const rendered = imageMarkdown(payload.data, callbacks);
+      if (rendered) return rendered;
+    }
+  } catch (error) {
+    if (error instanceof KhasroyAuthError) throw error;
+    console.warn("Fallback Khasroy image lab failed", error);
+  }
+
+  const semanticFailure =
+    primaryData.failureClass === "semantic" ||
+    fallbackData.failureClass === "semantic" ||
+    primaryStatus === 422 ||
+    fallbackStatus === 422;
+
+  if (semanticFailure) {
+    throw new Error(
+      "Я попробовал два способа генерации, но результат не прошёл мою визуальную проверку. Я не буду показывать плохую картинку — попробуй чуть уточнить сцену и отправь запрос ещё раз.",
+    );
+  }
+
+  throw new Error(
+    "Сейчас генераторы не смогли завершить изображение. Я уже автоматически переключился с основного на резервный способ. Попробуй ещё раз через минуту.",
+  );
+}
+
+function looksLikeImageCapabilityRefusal(content: string) {
+  return /(не могу|не умею|невозможно).{0,80}(создава|сгенерир|генерир|изображ|картин|фото)|cannot.{0,80}(create|generate).{0,40}(image|photo|picture)/iu.test(content);
+}
+
+function latentVisualRequest(text: string) {
+  return /(сгенерир|генерир|нарис|визуализир|изобраз|фото|фотк|картин|изображ|портрет|логотип|за рул[её]м|рядом с|на фоне)/iu.test(text);
 }
 
 async function runSiteAgent(query: string, callbacks?: ChatCallbacks): Promise<string> {
@@ -334,6 +395,21 @@ export async function chat(messages: Message[], callbacks?: ChatCallbacks): Prom
     throw new Error("Хасрой вернул пустой ответ.");
   }
   const content = payload.data.content.trim();
+
+  // Safety net: a text model must never end an image request with the old
+  // "I cannot create images" boilerplate. If one slips through, reroute it.
+  if (
+    latestUser &&
+    looksLikeImageCapabilityRefusal(content) &&
+    (looksLikeImageGenerationRequest(latestUser.content) || latentVisualRequest(latestUser.content))
+  ) {
+    callbacks?.onProgress?.({
+      stage: "IMAGE_REROUTE",
+      message: "Текстовый мозг выбрал неверный путь. Исправляю маршрут и запускаю генерацию…",
+    });
+    return runImageGeneration(latestUser.content, callbacks);
+  }
+
   callbacks?.onProgress?.({ stage: "RESPONSE", message: "Ответ готов. Показываю его постепенно…" });
   await revealContent(content, callbacks);
   return content;
