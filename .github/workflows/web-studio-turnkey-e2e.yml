@@ -12,79 +12,86 @@ jobs:
   turnkey-e2e:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[webstudio-e2e]')
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    env:
-      VPS_HOST: ${{ secrets.VPS_HOST }}
-      VPS_USER: ${{ secrets.VPS_USER }}
-      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-      VPS_PORT: ${{ secrets.VPS_PORT }}
+    timeout-minutes: 12
     steps:
-      - name: Validate VPS credentials
-        shell: bash
-        run: |
-          test -n "$VPS_HOST" || { echo "VPS_HOST_MISSING"; exit 1; }
-          test -n "$VPS_USER" || { echo "VPS_USER_MISSING"; exit 1; }
-          test -n "$VPS_SSH_KEY" || { echo "VPS_SSH_KEY_MISSING"; exit 1; }
-
-      - name: Configure SSH
-        shell: bash
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/khasroy_vps
-          chmod 600 ~/.ssh/khasroy_vps
-          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
-
-      - name: Run real factory E2E inside trusted production environment
-        shell: bash
+      - name: Run production-side turnkey factory self-test
         env:
           RELEASE: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          ssh -i ~/.ssh/khasroy_vps -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "RELEASE='$RELEASE' bash -s" <<'REMOTE'
-          set -euo pipefail
-          APP_DIR="$HOME/khasroy"
-          test -d "$APP_DIR/.git" || { echo "KHASROY_REPO_MISSING_ON_VPS"; exit 1; }
-          cd "$APP_DIR"
-          git fetch origin main
-          CURRENT_MAIN="$(git rev-parse origin/main)"
-          if [ "$CURRENT_MAIN" != "$RELEASE" ]; then
-            echo "A newer main commit superseded this E2E run; exiting cleanly."
-            exit 0
-          fi
-          git reset --hard "$RELEASE"
-          test -f deploy/vps/.env || { echo "VPS_PRODUCTION_ENV_MISSING"; exit 1; }
-
-          IMAGE="khasroy-e2e:${RELEASE:0:12}"
-          docker build --target builder -t "$IMAGE" .
-          rm -rf e2e-output
-          mkdir -p e2e-output
-
-          docker run --rm \
-            --env-file deploy/vps/.env \
-            -e GITHUB_SHA="$RELEASE" \
-            -e GITHUB_TOKEN= \
-            -e VERCEL_TOKEN= \
-            -e KHASROY_GITHUB_TOKEN= \
-            -e KHASROY_VERCEL_TOKEN= \
-            -e GROQ_API_KEY= \
-            -e OPENAI_API_KEY= \
-            -e GEMINI_API_KEY= \
-            -e MOONSHOT_API_KEY= \
-            -e KIMI_API_KEY= \
-            -v "$APP_DIR/e2e-output:/out" \
-            "$IMAGE" \
-            sh -lc 'test -n "${KHASROY_OWNER_KEY:-}" || { echo KHASROY_OWNER_KEY_MISSING_ON_VPS; exit 1; }; npx --yes tsx scripts/web-studio-turnkey-e2e.ts; cp web-studio-e2e-result.json /out/web-studio-e2e-result.json'
-
-          test -f e2e-output/web-studio-e2e-result.json || { echo "E2E_RESULT_MISSING"; exit 1; }
-          cat e2e-output/web-studio-e2e-result.json
-          REMOTE
-
-      - name: Download sanitized E2E result
-        if: always()
         shell: bash
         run: |
-          scp -i ~/.ssh/khasroy_vps -P "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST:~/khasroy/e2e-output/web-studio-e2e-result.json" web-studio-e2e-result.json 2>/dev/null || true
+          python - <<'PY'
+          import json, os, time, urllib.error, urllib.request
+
+          full_release = os.environ["RELEASE"]
+          expected = full_release[:12]
+          endpoint = "https://khasroy.vercel.app/api/web-studio/selftest"
+          result_path = "web-studio-e2e-result.json"
+
+          def current_main():
+              with urllib.request.urlopen("https://api.github.com/repos/akamanim/khasroy/commits/main", timeout=15) as response:
+                  return json.load(response)["sha"]
+
+          for attempt in range(42):
+              if attempt % 4 == 0:
+                  try:
+                      if current_main() != full_release:
+                          print("A newer main commit superseded this E2E run; exiting cleanly.")
+                          raise SystemExit(0)
+                  except SystemExit:
+                      raise
+                  except Exception as exc:
+                      print("Could not verify main commit yet:", type(exc).__name__)
+
+              payload = json.dumps({"runnerRelease": expected}).encode()
+              request = urllib.request.Request(
+                  endpoint,
+                  data=payload,
+                  headers={
+                      "Content-Type": "application/json",
+                      "User-Agent": "Khasroy-WebStudio-Production-E2E/4.0",
+                  },
+                  method="POST",
+              )
+
+              try:
+                  with urllib.request.urlopen(request, timeout=75) as response:
+                      data = json.load(response)
+                  if data.get("ok") is True:
+                      with open(result_path, "w", encoding="utf-8") as handle:
+                          json.dump(data, handle, ensure_ascii=False, indent=2)
+                      print(json.dumps(data, ensure_ascii=False))
+                      raise SystemExit(0)
+                  print("Production returned an incomplete E2E result; retrying.")
+              except urllib.error.HTTPError as exc:
+                  body = exc.read().decode("utf-8", "replace")[:1200]
+                  try:
+                      data = json.loads(body)
+                  except Exception:
+                      data = {}
+
+                  if exc.code == 409:
+                      print(f"Production is not on {expected} yet; waiting for release.")
+                      time.sleep(10)
+                      continue
+
+                  detail = str(data.get("detail") or body)
+                  retryable = bool(data.get("retryable")) or exc.code in (429, 503, 504)
+                  if retryable:
+                      print(f"Transient Web Studio E2E block (HTTP {exc.code}): {detail[:300]}")
+                      time.sleep(20)
+                      continue
+
+                  print(f"Web Studio E2E failed (HTTP {exc.code}): {detail[:600]}")
+                  with open(result_path, "w", encoding="utf-8") as handle:
+                      json.dump(data or {"ok": False, "http": exc.code}, handle, ensure_ascii=False, indent=2)
+                  raise SystemExit(1)
+              except (TimeoutError, urllib.error.URLError) as exc:
+                  print("Temporary production transport error:", type(exc).__name__)
+
+              time.sleep(10)
+
+          raise SystemExit("Production-side Web Studio E2E did not complete inside the bounded retry window")
+          PY
 
       - name: Upload sanitized E2E result
         if: always()
