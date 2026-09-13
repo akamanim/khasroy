@@ -1,0 +1,39 @@
+name: Brain Router Build Verification
+
+on:
+  pull_request:
+    paths:
+      - "lib/brain/**"
+      - "lib/survival/**"
+      - "app/api/chat/**"
+      - "app/api/status/**"
+      - ".github/workflows/brain-router-build.yml"
+  push:
+    branches: [main]
+    paths:
+      - "lib/brain/**"
+      - "lib/survival/**"
+      - "app/api/chat/**"
+      - "app/api/status/**"
+      - ".github/workflows/brain-router-build.yml"
+
+concurrency:
+  group: brain-router-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Next production build
+        run: npm run build

@@ -15,9 +15,14 @@ import {
 export { selectBrainMode };
 export type { BrainMessage, BrainMode, BrainResponseData };
 
+// Keep the public provider type stable for existing autonomy/storage code.
+// The exact external teacher is exposed through providerDetail.
 export type BrainProvider = "self-hosted" | "groq";
 export type BrainProviderDetail =
   | BrainProvider
+  | "openai"
+  | "gemini"
+  | "kimi"
   | "groq-fallback"
   | "gateway"
   | "server-search"
@@ -57,7 +62,13 @@ function observedProvider(response: Response, fallback: string): BrainProviderDe
   const marked = response.headers.get("x-khasroy-ai-provider");
   if (marked === "gateway") return "gateway";
   if (marked === "groq-fallback") return "groq-fallback";
+  if (marked === "openai") return "openai";
+  if (marked === "gemini") return "gemini";
+  if (marked === "kimi") return "kimi";
   if (fallback === "self-hosted") return "self-hosted";
+  if (fallback === "openai") return "openai";
+  if (fallback === "gemini") return "gemini";
+  if (fallback === "kimi") return "kimi";
   return "groq";
 }
 
@@ -67,7 +78,7 @@ function normalizeLegacy(
 ): BrainRun {
   return {
     ...run,
-    provider: run.provider,
+    provider: run.provider === "self-hosted" ? "self-hosted" : "groq",
     providerDetail: observedProvider(run.response, run.provider),
     mode,
   };

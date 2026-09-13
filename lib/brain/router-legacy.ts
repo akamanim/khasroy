@@ -4,6 +4,18 @@ import {
   selfHostedChat,
   selfHostedHealth,
 } from "@/lib/brain/providers/self-hosted";
+import {
+  externalTeacherConfigured,
+  runExternalTeacher,
+  type ExternalTeacher,
+} from "@/lib/brain/providers/external-teachers";
+import {
+  canAttemptProvider,
+  providerHealthSnapshot,
+  recordProviderFailure,
+  recordProviderSuccess,
+  type SurvivalProvider,
+} from "@/lib/survival/provider-health";
 
 export type BrainMessage = {
   role: "user" | "assistant";
@@ -11,7 +23,7 @@ export type BrainMessage = {
 };
 
 export type BrainMode = "chat" | "repository" | "research" | "sandbox" | "agentic";
-export type BrainProvider = "self-hosted" | "groq";
+export type BrainProvider = "self-hosted" | "groq" | "openai" | "gemini" | "kimi";
 
 type ExecutedTool = {
   type?: string;
@@ -58,6 +70,14 @@ export type BrainRun = {
 const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions";
 const GATEWAY_MODEL =
   process.env.KHASROY_GATEWAY_TEXT_MODEL?.trim() || "openai/gpt-4o-mini";
+const PROVIDER_TIMEOUT_MS = Math.min(
+  Math.max(Number(process.env.KHASROY_PROVIDER_TIMEOUT_MS) || 16_000, 8_000),
+  30_000,
+);
+const MAX_TEACHER_ATTEMPTS = Math.min(
+  Math.max(Number(process.env.KHASROY_TEACHER_MAX_ATTEMPTS) || 3, 1),
+  3,
+);
 
 function forbidsWeb(text: string) {
   const normalized = text.toLowerCase().replace(/\s+/gu, " ").trim();
@@ -123,6 +143,7 @@ async function gatewayRequest(args: {
   history: BrainMessage[];
   maxCompletion: number;
 }) {
+  const started = Date.now();
   try {
     const token = await gatewayToken();
     const response = await fetch(GATEWAY_URL, {
@@ -141,7 +162,7 @@ async function gatewayRequest(args: {
         stream: false,
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(40_000),
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
 
     const data = (await response.json().catch(() => null)) as BrainResponseData | null;
@@ -152,14 +173,27 @@ async function gatewayRequest(args: {
         "x-khasroy-ai-provider": "gateway",
       },
     });
+    const latencyMs = Date.now() - started;
+    if (response.ok && data?.choices?.[0]?.message?.content) {
+      recordProviderSuccess("vercel-gateway", response.status, latencyMs);
+    } else {
+      recordProviderFailure("vercel-gateway", {
+        status: response.status,
+        error: data?.error?.message,
+        latencyMs,
+      });
+    }
 
     return {
       response: normalized,
       data,
       provider: "groq" as const,
       model: data?.model || GATEWAY_MODEL,
+      latencyMs,
     };
   } catch (error) {
+    const latencyMs = Date.now() - started;
+    recordProviderFailure("vercel-gateway", { error, latencyMs });
     console.error("Khasroy AI Gateway request failed", error);
     const data: BrainResponseData = {
       error: {
@@ -179,6 +213,7 @@ async function gatewayRequest(args: {
       data,
       provider: "groq" as const,
       model: GATEWAY_MODEL,
+      latencyMs,
     };
   }
 }
@@ -192,6 +227,7 @@ async function groqRequest(args: {
   reasoning?: "low" | "medium";
   compoundTools?: string[];
 }) {
+  const started = Date.now();
   if (!args.apiKey) {
     const data: BrainResponseData = {
       error: { message: "Groq key missing", type: "config", code: "missing_key" },
@@ -202,6 +238,7 @@ async function groqRequest(args: {
         headers: { "Content-Type": "application/json" },
       }),
       data,
+      latencyMs: 0,
     };
   }
 
@@ -229,10 +266,12 @@ async function groqRequest(args: {
     },
     body: JSON.stringify(body),
     cache: "no-store",
-    signal: AbortSignal.timeout(35_000),
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
   }).catch(() => null);
 
+  const latencyMs = Date.now() - started;
   if (!response) {
+    recordProviderFailure("groq", { error: "network_error", latencyMs });
     const data: BrainResponseData = {
       error: { message: "Groq unavailable", type: "network", code: "network_error" },
     };
@@ -242,11 +281,137 @@ async function groqRequest(args: {
         headers: { "Content-Type": "application/json" },
       }),
       data,
+      latencyMs,
     };
   }
 
   const data = (await response.json().catch(() => null)) as BrainResponseData | null;
-  return { response, data };
+  if (response.ok && data?.choices?.[0]?.message?.content) {
+    recordProviderSuccess("groq", response.status, latencyMs);
+  } else {
+    recordProviderFailure("groq", {
+      status: response.status,
+      error: data?.error?.message,
+      latencyMs,
+    });
+  }
+  return { response, data, latencyMs };
+}
+
+type TeacherProfile = "fast" | "reasoning" | "code" | "long-context" | "research";
+type TextTeacher = "self-hosted" | "groq" | ExternalTeacher | "vercel-gateway";
+
+function teacherProfile(query: string, mode: BrainMode): TeacherProfile {
+  if (mode === "research") return "research";
+  if (mode === "repository") return "code";
+  const normalized = query.toLowerCase();
+  if (query.length > 7_000 || /(длинн|документ|контекст|книг|pdf|суммариз|summary)/iu.test(normalized)) {
+    return "long-context";
+  }
+  if (/(код|typescript|javascript|python|react|next\.?js|архитектур|api|sql|github|верстк|програм)/iu.test(normalized)) {
+    return "code";
+  }
+  if (/(проанализ|сравни|докажи|почему|логик|рассужд|план|стратег|сложн|математ)/iu.test(normalized)) {
+    return "reasoning";
+  }
+  return "fast";
+}
+
+const TEACHER_BASE_SCORE: Record<TeacherProfile, Record<TextTeacher, number>> = {
+  fast: {
+    "self-hosted": 104,
+    groq: 100,
+    openai: 88,
+    gemini: 86,
+    kimi: 90,
+    "vercel-gateway": 65,
+  },
+  reasoning: {
+    "self-hosted": 92,
+    groq: 84,
+    openai: 105,
+    gemini: 98,
+    kimi: 96,
+    "vercel-gateway": 70,
+  },
+  code: {
+    "self-hosted": 90,
+    groq: 86,
+    openai: 108,
+    gemini: 97,
+    kimi: 99,
+    "vercel-gateway": 72,
+  },
+  "long-context": {
+    "self-hosted": 85,
+    groq: 78,
+    openai: 96,
+    gemini: 108,
+    kimi: 103,
+    "vercel-gateway": 70,
+  },
+  research: {
+    "self-hosted": 88,
+    groq: 86,
+    openai: 102,
+    gemini: 106,
+    kimi: 96,
+    "vercel-gateway": 72,
+  },
+};
+
+function teacherConfigured(
+  teacher: TextTeacher,
+  args: { apiKey: string; selfHostedOnline: boolean },
+) {
+  if (teacher === "self-hosted") return args.selfHostedOnline;
+  if (teacher === "groq") return Boolean(args.apiKey);
+  if (teacher === "vercel-gateway") {
+    return Boolean(process.env.AI_GATEWAY_API_KEY?.trim() || process.env.VERCEL);
+  }
+  return externalTeacherConfigured(teacher);
+}
+
+function teacherScore(teacher: TextTeacher, profile: TeacherProfile) {
+  const snapshot = providerHealthSnapshot() as Record<
+    string,
+    {
+      successes?: number;
+      failures?: number;
+      consecutiveFailures?: number;
+      averageLatencyMs?: number | null;
+    }
+  >;
+  const health = snapshot[teacher];
+  const successes = Number(health?.successes) || 0;
+  const failures = Number(health?.failures) || 0;
+  const total = successes + failures;
+  const reliability = total ? (successes / total - 0.5) * 20 : 0;
+  const failurePenalty = (Number(health?.consecutiveFailures) || 0) * 12;
+  const averageLatency = Number(health?.averageLatencyMs) || 0;
+  const latencyPenalty = averageLatency ? Math.min(averageLatency / 2_500, 8) : 0;
+  return TEACHER_BASE_SCORE[profile][teacher] + reliability - failurePenalty - latencyPenalty;
+}
+
+function rankedTeachers(args: {
+  query: string;
+  mode: BrainMode;
+  apiKey: string;
+  selfHostedOnline: boolean;
+}) {
+  const profile = teacherProfile(args.query, args.mode);
+  const all: TextTeacher[] = [
+    "self-hosted",
+    "groq",
+    "openai",
+    "gemini",
+    "kimi",
+    "vercel-gateway",
+  ];
+  return all
+    .filter((teacher) => teacherConfigured(teacher, args))
+    .filter((teacher) => canAttemptProvider(teacher as SurvivalProvider))
+    .sort((a, b) => teacherScore(b, profile) - teacherScore(a, profile));
 }
 
 async function preferredTextRequest(args: {
@@ -257,29 +422,123 @@ async function preferredTextRequest(args: {
   maxCompletion: number;
   reasoning?: "low" | "medium";
   selfHostedOnline: boolean;
+  query: string;
+  mode: BrainMode;
 }) {
-  if (args.selfHostedOnline) {
-    const local = await selfHostedChat({
-      messages: [
-        { role: "system", content: args.systemContent },
-        ...args.history,
-      ],
-      maxTokens: args.maxCompletion,
-    });
-    if (local?.response.ok && local.data?.choices?.[0]?.message?.content) {
-      const data: BrainResponseData = {
-        model: local.model,
-        choices: local.data.choices,
-        error: local.data.error,
+  const teachers = rankedTeachers({
+    query: args.query,
+    mode: args.mode,
+    apiKey: args.apiKey,
+    selfHostedOnline: args.selfHostedOnline,
+  }).slice(0, MAX_TEACHER_ATTEMPTS);
+
+  let last:
+    | {
+        response: Response;
+        data: BrainResponseData | null;
+        provider: BrainProvider;
+        model: string;
+      }
+    | null = null;
+
+  for (const teacher of teachers) {
+    if (teacher === "self-hosted") {
+      const started = Date.now();
+      const local = await selfHostedChat({
+        messages: [
+          { role: "system", content: args.systemContent },
+          ...args.history,
+        ],
+        maxTokens: args.maxCompletion,
+      });
+      const latencyMs = Date.now() - started;
+      if (local?.response.ok && local.data?.choices?.[0]?.message?.content) {
+        recordProviderSuccess("self-hosted", local.response.status, latencyMs);
+        const data: BrainResponseData = {
+          model: local.model,
+          choices: local.data.choices,
+          error: local.data.error,
+        };
+        return {
+          response: local.response,
+          data,
+          provider: "self-hosted" as const,
+          model: local.model,
+        };
+      }
+      recordProviderFailure("self-hosted", {
+        status: local?.response.status,
+        error: local?.data?.error?.message || "empty_response",
+        latencyMs,
+      });
+      continue;
+    }
+
+    if (teacher === "groq") {
+      const groq = await groqRequest({
+        apiKey: args.apiKey,
+        model: args.fallbackModel,
+        systemContent: args.systemContent,
+        history: args.history,
+        maxCompletion: args.maxCompletion,
+        reasoning: args.reasoning,
+      });
+      last = {
+        response: groq.response,
+        data: groq.data,
+        provider: "groq",
+        model: groq.data?.model || args.fallbackModel,
       };
+      if (groq.response.ok && groq.data?.choices?.[0]?.message?.content) return last;
+      continue;
+    }
+
+    if (teacher === "vercel-gateway") {
+      const gateway = await gatewayRequest({
+        systemContent: args.systemContent,
+        history: args.history,
+        maxCompletion: args.maxCompletion,
+      });
+      last = {
+        response: gateway.response,
+        data: gateway.data,
+        provider: "groq",
+        model: gateway.model,
+      };
+      if (gateway.response.ok && gateway.data?.choices?.[0]?.message?.content) return last;
+      continue;
+    }
+
+    const external = await runExternalTeacher(teacher, {
+      systemContent: args.systemContent,
+      history: args.history,
+      maxCompletion: args.maxCompletion,
+      timeoutMs: PROVIDER_TIMEOUT_MS,
+    });
+    const survivalTeacher = teacher as SurvivalProvider;
+    if (external.response.ok && external.data?.choices?.[0]?.message?.content) {
+      recordProviderSuccess(survivalTeacher, external.response.status, external.latencyMs);
       return {
-        response: local.response,
-        data,
-        provider: "self-hosted" as const,
-        model: local.model,
+        response: external.response,
+        data: external.data,
+        provider: teacher,
+        model: external.model,
       };
     }
+    recordProviderFailure(survivalTeacher, {
+      status: external.response.status,
+      error: external.data?.error?.message,
+      latencyMs: external.latencyMs,
+    });
+    last = {
+      response: external.response,
+      data: external.data,
+      provider: teacher,
+      model: external.model,
+    };
   }
+
+  if (last) return last;
 
   const groq = await groqRequest({
     apiKey: args.apiKey,
@@ -289,24 +548,7 @@ async function preferredTextRequest(args: {
     maxCompletion: args.maxCompletion,
     reasoning: args.reasoning,
   });
-  if (groq.response.ok && groq.data?.choices?.[0]?.message?.content) {
-    return {
-      ...groq,
-      provider: "groq" as const,
-      model: groq.data.model || args.fallbackModel,
-    };
-  }
-
-  const gateway = await gatewayRequest({
-    systemContent: args.systemContent,
-    history: args.history,
-    maxCompletion: args.maxCompletion,
-  });
-  if (gateway.response.ok && gateway.data?.choices?.[0]?.message?.content) {
-    return gateway;
-  }
-
-  return gateway.response.status < 500 ? gateway : {
+  return {
     ...groq,
     provider: "groq" as const,
     model: groq.data?.model || args.fallbackModel,
@@ -347,6 +589,8 @@ export async function runBrain(args: {
         maxCompletion: 1000,
         reasoning: "low",
         selfHostedOnline,
+        query: args.query,
+        mode,
       });
       if (result.response.ok && result.data?.choices?.[0]?.message?.content) {
         return {
@@ -400,6 +644,8 @@ export async function runBrain(args: {
       maxCompletion: mode === "repository" ? 1200 : 2200,
       reasoning: mode === "repository" ? "low" : "medium",
       selfHostedOnline,
+      query: args.query,
+      mode,
     });
 
     return {
@@ -452,6 +698,8 @@ export async function runBrain(args: {
     maxCompletion: 900,
     reasoning: "low",
     selfHostedOnline,
+    query: args.query,
+    mode,
   });
 
   return {
