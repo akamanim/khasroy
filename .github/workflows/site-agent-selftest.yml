@@ -35,6 +35,38 @@ jobs:
               time.sleep(2)
           PY
 
+      - name: Capture sanitized Gemini runtime probe
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          url = "https://khasroy.vercel.app/api/internal/vision-diagnostic?probe=khasroy-vision-probe-9f83c2d7"
+          result = {"probeFetchOk": False}
+          try:
+              req = urllib.request.Request(url, headers={"User-Agent": "Khasroy-GitHub-Diagnostic/1.0"})
+              with urllib.request.urlopen(req, timeout=45) as r:
+                  data = json.load(r)
+              allowed = [
+                  "release", "geminiConfigured", "credentialSource", "model",
+                  "imageStatus", "imageMime", "imageBytes", "imageUsable", "imageError",
+                  "geminiStatus", "geminiOk", "geminiTextPresent", "geminiJsonValid",
+                  "geminiErrorCode", "geminiErrorStatus", "geminiError",
+              ]
+              result = {"probeFetchOk": True, **{k: data.get(k) for k in allowed if k in data}}
+          except Exception as exc:
+              result = {"probeFetchOk": False, "transportError": type(exc).__name__}
+          with open("vision-probe.json", "w", encoding="utf-8") as f:
+              json.dump(result, f, ensure_ascii=False, indent=2)
+          print(json.dumps(result, ensure_ascii=False))
+          PY
+
+      - name: Upload vision probe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vision-probe-${{ github.sha }}
+          path: vision-probe.json
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Run resumable PROMBAZA self-test
         env:
           RELEASE: ${{ github.sha }}
