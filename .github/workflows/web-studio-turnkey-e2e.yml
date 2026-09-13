@@ -12,7 +12,7 @@ jobs:
   turnkey-e2e:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[webstudio-e2e]')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN || secrets.VERSEL_TOKEN }}
       GITHUB_TOKEN: ${{ secrets.KHASROY_GITHUB_TOKEN || secrets.GITHUB_PAT || github.token }}
@@ -28,34 +28,6 @@ jobs:
         shell: bash
         run: |
           test -n "$VERCEL_TOKEN" || { echo "VERCEL_TOKEN_MISSING"; exit 1; }
-
-      - name: Wait for this Khasroy production release
-        env:
-          RELEASE: ${{ github.sha }}
-        run: |
-          python - <<'PY'
-          import json, os, time, urllib.error, urllib.request
-          release = os.environ['RELEASE'][:12]
-          endpoint = 'https://khasroy.vercel.app/api/site-agent/selftest'
-          for _ in range(42):
-              req = urllib.request.Request(
-                  endpoint,
-                  data=json.dumps({'action':'ensure','runnerRelease':release}).encode(),
-                  headers={'Content-Type':'application/json','User-Agent':'Khasroy-WebStudio-ReleaseGate/1.0'},
-                  method='POST',
-              )
-              try:
-                  with urllib.request.urlopen(req, timeout=45) as r:
-                      data = json.load(r)
-                  if data.get('release') == release:
-                      print('Production release confirmed:', release)
-                      raise SystemExit(0)
-              except urllib.error.HTTPError as exc:
-                  if exc.code not in (409,429,502,503,504):
-                      raise
-              time.sleep(10)
-          raise SystemExit('PRODUCTION_RELEASE_NOT_READY')
-          PY
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -74,17 +46,91 @@ jobs:
           node <<'NODE'
           const fs = require('fs');
           const project = JSON.parse(fs.readFileSync('/tmp/vercel-project.json', 'utf8'));
-          if (!project.id || !project.accountId) process.exit(1);
-          fs.mkdirSync('.vercel', { recursive: true });
-          fs.writeFileSync('.vercel/project.json', JSON.stringify({
+          if (!project.id || !project.accountId) {
+            console.error('VERCEL_PROJECT_RESPONSE_INCOMPLETE');
+            process.exit(1);
+          }
+          let analyticsId;
+          if (project.analytics?.id && (!project.analytics.disabledAt || (project.analytics.enabledAt && project.analytics.enabledAt > project.analytics.disabledAt))) {
+            analyticsId = project.analytics.id;
+          }
+          const projectJson = {
             projectId: project.id,
             orgId: project.accountId,
-            projectName: project.name || 'khasroy'
-          }, null, 2));
+            projectName: project.name || 'khasroy',
+            settings: {
+              createdAt: project.createdAt ?? null,
+              framework: project.framework ?? null,
+              devCommand: project.devCommand ?? null,
+              installCommand: project.installCommand ?? null,
+              buildCommand: project.buildCommand ?? null,
+              outputDirectory: project.outputDirectory ?? null,
+              rootDirectory: project.rootDirectory ?? null,
+              directoryListing: project.directoryListing ?? false,
+              nodeVersion: project.nodeVersion ?? '22.x',
+              ...(analyticsId ? { analyticsId } : {})
+            }
+          };
+          fs.mkdirSync('.vercel', { recursive: true });
+          fs.writeFileSync('.vercel/project.json', JSON.stringify(projectJson, null, 2));
+          console.log(`Resolved project: ${projectJson.projectName}`);
           NODE
           npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN" >/dev/null
-          test -f .vercel/.env.production.local
+          test -f .vercel/.env.production.local || { echo "VERCEL_PRODUCTION_ENV_FILE_MISSING"; exit 1; }
           echo "PRODUCTION_ENV_READY"
+
+      - name: Build Khasroy production bundle
+        run: npx --yes vercel@latest build --prod
+
+      - name: Verify prebuilt output
+        shell: bash
+        run: |
+          test -f .vercel/output/config.json || { echo "PREBUILT_OUTPUT_MISSING"; exit 1; }
+          echo "PREBUILT_OUTPUT_READY"
+
+      - name: Deploy this commit to Khasroy production
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npx --yes vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "VERCEL_DEPLOY_RETRY_$attempt"
+              sleep $((attempt * 20))
+            fi
+          done
+          echo "VERCEL_DEPLOY_FAILED_AFTER_RETRIES"
+          exit 1
+
+      - name: Confirm this Khasroy release is live
+        env:
+          RELEASE: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, time, urllib.error, urllib.request
+          release = os.environ['RELEASE'][:12]
+          endpoint = 'https://khasroy.vercel.app/api/site-agent/selftest'
+          for _ in range(24):
+              req = urllib.request.Request(
+                  endpoint,
+                  data=json.dumps({'action':'ensure','runnerRelease':release}).encode(),
+                  headers={'Content-Type':'application/json','User-Agent':'Khasroy-WebStudio-ReleaseGate/2.0'},
+                  method='POST',
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=45) as r:
+                      data = json.load(r)
+                  if data.get('release') == release:
+                      print('Production release confirmed:', release)
+                      raise SystemExit(0)
+              except urllib.error.HTTPError as exc:
+                  if exc.code not in (409,429,502,503,504):
+                      raise
+              time.sleep(5)
+          raise SystemExit('PRODUCTION_RELEASE_NOT_READY')
+          PY
 
       - name: Create, deploy and verify real site + Supabase lead
         shell: bash
@@ -93,6 +139,7 @@ jobs:
           set -a
           . .vercel/.env.production.local
           set +a
+          export VERCEL_TOKEN="$VERCEL_TOKEN"
           npx --yes tsx scripts/web-studio-turnkey-e2e.ts
 
       - name: Upload sanitized E2E result
