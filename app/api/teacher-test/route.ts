@@ -7,9 +7,40 @@ import {
   type ExternalTeacherKeys,
 } from "@/lib/brain/providers/external-teachers";
 import { resolveAISecrets } from "@/lib/server-integrations";
+import { testPersistentGateway } from "@/lib/ai/persistent-provider-gate";
+import {
+  persistProviderFailure,
+  persistProviderSuccess,
+} from "@/lib/survival/persistent-provider-health";
+import type { SurvivalProvider } from "@/lib/survival/provider-health";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function safeError(status: number, raw: unknown) {
+  const text = typeof raw === "string" ? raw.toLowerCase() : "";
+  if (status === 401 || status === 403) return "auth_failed";
+  if (status === 429 && /(credit|billing|balance|insufficient|suspend|recharge)/iu.test(text)) return "billing_blocked";
+  if (status === 429 && /(quota|resource_exhausted|resource exhausted|daily|tokens per day|limit reached|rate limit)/iu.test(text)) return "quota_exhausted";
+  if (status === 429) return "rate_limited";
+  if (/timeout|abort/iu.test(text)) return "timeout";
+  return status >= 500 ? "upstream_unavailable" : "request_failed";
+}
+
+async function persistResult(
+  provider: SurvivalProvider,
+  result: { ok: boolean; status: number; latencyMs: number; rawError?: unknown },
+) {
+  if (result.ok) {
+    await persistProviderSuccess(provider, result.status, result.latencyMs);
+    return;
+  }
+  await persistProviderFailure(provider, {
+    status: result.status,
+    error: result.rawError,
+    latencyMs: result.latencyMs,
+  });
+}
 
 async function testGroq(key: string) {
   const model = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b";
@@ -38,29 +69,37 @@ async function testGroq(key: string) {
       signal: AbortSignal.timeout(10_000),
     });
     const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-    const choices = Array.isArray(payload?.choices) ? payload?.choices : [];
-    const first = choices?.[0] as Record<string, unknown> | undefined;
+    const choices = Array.isArray(payload?.choices) ? payload.choices : [];
+    const first = choices[0] as Record<string, unknown> | undefined;
     const message = first?.message as Record<string, unknown> | undefined;
     const text = typeof message?.content === "string" ? message.content.trim() : "";
+    const upstreamError = payload?.error && typeof payload.error === "object"
+      ? (payload.error as Record<string, unknown>).message
+      : null;
+    const latencyMs = Date.now() - started;
+    const ok = response.ok && Boolean(text);
+    await persistResult("groq", { ok, status: response.status, latencyMs, rawError: upstreamError });
     return {
       provider: "groq",
       configured: true,
-      ok: response.ok && Boolean(text),
+      ok,
       status: response.status,
       model: typeof payload?.model === "string" ? payload.model : model,
-      latencyMs: Date.now() - started,
+      latencyMs,
       reply: text || null,
-      error: response.ok ? null : "request_failed",
+      error: ok ? null : safeError(response.status, upstreamError),
     };
   } catch (error) {
+    const latencyMs = Date.now() - started;
+    await persistResult("groq", { ok: false, status: 503, latencyMs, rawError: error });
     return {
       provider: "groq",
       configured: true,
       ok: false,
       status: 503,
       model,
-      latencyMs: Date.now() - started,
-      error: error instanceof Error ? error.message : "request_failed",
+      latencyMs,
+      error: safeError(503, error instanceof Error ? error.message : "request_failed"),
     };
   }
 }
@@ -73,15 +112,37 @@ async function testExternal(provider: "openai" | "gemini" | "kimi") {
     timeoutMs: 10_000,
   });
   const text = run.data?.choices?.[0]?.message?.content?.trim() || "";
+  const rawError = run.data?.error?.message || null;
+  const ok = run.response.ok && Boolean(text);
+  await persistResult(provider, {
+    ok,
+    status: run.response.status,
+    latencyMs: run.latencyMs,
+    rawError,
+  });
   return {
     provider,
     configured: run.response.status !== 503 || run.data?.error?.code !== "missing_key",
-    ok: run.response.ok && Boolean(text),
+    ok,
     status: run.response.status,
     model: run.model,
     latencyMs: run.latencyMs,
     reply: text || null,
-    error: run.data?.error?.message || null,
+    error: ok ? null : safeError(run.response.status, rawError),
+  };
+}
+
+async function testGateway() {
+  const run = await testPersistentGateway();
+  return {
+    provider: "vercel-gateway",
+    configured: run.configured,
+    ok: run.ok,
+    status: run.status,
+    model: run.model,
+    latencyMs: run.latencyMs,
+    reply: run.ok ? "OK" : null,
+    error: run.ok ? null : safeError(run.status, "gateway_request_failed"),
   };
 }
 
@@ -108,11 +169,13 @@ export async function GET() {
       testExternal("openai"),
       testExternal("gemini"),
       testExternal("kimi"),
+      testGateway(),
     ]),
   );
 
   return NextResponse.json({
-    ok: tests.every((test) => test.ok),
+    ok: tests.some((test) => test.ok),
+    allHealthy: tests.every((test) => test.ok),
     testedAt: new Date().toISOString(),
     credentialSource: "environment-or-encrypted-vault",
     tests,

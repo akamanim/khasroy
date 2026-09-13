@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveSecret } from "@/lib/server-integrations";
+import { testPersistentGateway } from "@/lib/ai/persistent-provider-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,81 +71,92 @@ export async function GET(request: Request) {
     result.imageError = category(error);
   }
 
-  if (!key) {
-    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
-  }
-
-  try {
-    const model = String(result.model);
-    const parts: Array<Record<string, unknown>> = [
-      {
-        text: 'Inspect the screenshot if supplied. Return JSON exactly like {"ok":true,"visible":true}. Do not copy this schema blindly; visible=false only if no usable screenshot is supplied.',
-      },
-    ];
-    if (imageBytes && result.imageUsable === true) {
-      parts.push({
-        inlineData: {
-          mimeType: imageMime === "image/jpg" ? "image/jpeg" : imageMime,
-          data: Buffer.from(imageBytes).toString("base64"),
+  if (key) {
+    try {
+      const model = String(result.model);
+      const parts: Array<Record<string, unknown>> = [
+        {
+          text: 'Inspect the screenshot if supplied. Return JSON exactly like {"ok":true,"visible":true}. Do not copy this schema blindly; visible=false only if no usable screenshot is supplied.',
         },
-      });
-    }
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: "POST",
-        cache: "no-store",
-        signal: AbortSignal.timeout(24_000),
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": key,
-        },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: "You are a minimal Khasroy runtime probe. Return strict JSON only." }],
+      ];
+      if (imageBytes && result.imageUsable === true) {
+        parts.push({
+          inlineData: {
+            mimeType: imageMime === "image/jpg" ? "image/jpeg" : imageMime,
+            data: Buffer.from(imageBytes).toString("base64"),
           },
-          contents: [{ role: "user", parts }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            maxOutputTokens: 80,
-            temperature: 0,
-          },
-        }),
-      },
-    );
-
-    const payload = (await response.json().catch(() => null)) as
-      | {
-          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-          error?: { code?: number; status?: string };
-        }
-      | null;
-    const text = payload?.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text || "")
-      .join("")
-      .trim();
-
-    result.geminiStatus = response.status;
-    result.geminiOk = response.ok;
-    result.geminiTextPresent = Boolean(text);
-    result.geminiJsonValid = false;
-    if (text) {
-      try {
-        JSON.parse(text.replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, ""));
-        result.geminiJsonValid = true;
-      } catch {
-        result.geminiJsonValid = false;
+        });
       }
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+        {
+          method: "POST",
+          cache: "no-store",
+          signal: AbortSignal.timeout(24_000),
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": key,
+          },
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: "You are a minimal Khasroy runtime probe. Return strict JSON only." }],
+            },
+            contents: [{ role: "user", parts }],
+            generationConfig: {
+              responseMimeType: "application/json",
+              maxOutputTokens: 80,
+              temperature: 0,
+            },
+          }),
+        },
+      );
+
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+            error?: { code?: number; status?: string };
+          }
+        | null;
+      const text = payload?.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text || "")
+        .join("")
+        .trim();
+
+      result.geminiStatus = response.status;
+      result.geminiOk = response.ok;
+      result.geminiTextPresent = Boolean(text);
+      result.geminiJsonValid = false;
+      if (text) {
+        try {
+          JSON.parse(text.replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, ""));
+          result.geminiJsonValid = true;
+        } catch {
+          result.geminiJsonValid = false;
+        }
+      }
+      if (!response.ok) {
+        result.geminiErrorCode = payload?.error?.code || response.status;
+        result.geminiErrorStatus = payload?.error?.status || "http_error";
+      }
+    } catch (error) {
+      result.geminiOk = false;
+      result.geminiError = category(error);
     }
-    if (!response.ok) {
-      result.geminiErrorCode = payload?.error?.code || response.status;
-      result.geminiErrorStatus = payload?.error?.status || "http_error";
-    }
-  } catch (error) {
-    result.geminiOk = false;
-    result.geminiError = category(error);
   }
+
+  const gateway = await testPersistentGateway().catch(() => ({
+    configured: false,
+    ok: false,
+    status: 503,
+    model: null,
+    latencyMs: 0,
+  }));
+  result.gatewayConfigured = gateway.configured;
+  result.gatewayOk = gateway.ok;
+  result.gatewayStatus = gateway.status;
+  result.gatewayModel = gateway.model;
+  result.gatewayLatencyMs = gateway.latencyMs;
 
   return NextResponse.json(result, {
     headers: { "Cache-Control": "no-store, max-age=0" },
