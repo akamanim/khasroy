@@ -14,29 +14,77 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN || secrets.VERSEL_TOKEN }}
-      GITHUB_TOKEN: ${{ secrets.KHASROY_GITHUB_TOKEN || secrets.GITHUB_PAT || github.token }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.13.0
-          cache: npm
-
-      - name: Validate deployment credential
+      - name: Validate VPS credentials
         shell: bash
         run: |
-          test -n "$VERCEL_TOKEN" || { echo "VERCEL_TOKEN_MISSING"; exit 1; }
+          test -n "$VPS_HOST" || { echo "VPS_HOST_MISSING"; exit 1; }
+          test -n "$VPS_USER" || { echo "VPS_USER_MISSING"; exit 1; }
+          test -n "$VPS_SSH_KEY" || { echo "VPS_SSH_KEY_MISSING"; exit 1; }
 
-      - name: Install dependencies
-        run: npm install --ignore-scripts
-
-      - name: Create, deploy and verify real site + Supabase lead
+      - name: Configure SSH
         shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/khasroy_vps
+          chmod 600 ~/.ssh/khasroy_vps
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Run real factory E2E inside trusted production environment
+        shell: bash
+        env:
+          RELEASE: ${{ github.sha }}
         run: |
           set -euo pipefail
-          npx --yes tsx scripts/run-web-studio-e2e-from-vercel.ts
+          ssh -i ~/.ssh/khasroy_vps -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          APP_DIR="$HOME/khasroy"
+          test -d "$APP_DIR/.git" || { echo "KHASROY_REPO_MISSING_ON_VPS"; exit 1; }
+          cd "$APP_DIR"
+          git fetch origin main
+          CURRENT_MAIN="$(git rev-parse origin/main)"
+          if [ "$CURRENT_MAIN" != "$RELEASE" ]; then
+            echo "A newer main commit superseded this E2E run; exiting cleanly."
+            exit 0
+          fi
+          git reset --hard "$RELEASE"
+          test -f deploy/vps/.env || { echo "VPS_PRODUCTION_ENV_MISSING"; exit 1; }
+
+          IMAGE="khasroy-e2e:${RELEASE:0:12}"
+          docker build --target builder -t "$IMAGE" .
+          rm -rf e2e-output
+          mkdir -p e2e-output
+
+          docker run --rm \
+            --env-file deploy/vps/.env \
+            -e GITHUB_SHA="$RELEASE" \
+            -e GITHUB_TOKEN= \
+            -e VERCEL_TOKEN= \
+            -e KHASROY_GITHUB_TOKEN= \
+            -e KHASROY_VERCEL_TOKEN= \
+            -e GROQ_API_KEY= \
+            -e OPENAI_API_KEY= \
+            -e GEMINI_API_KEY= \
+            -e MOONSHOT_API_KEY= \
+            -e KIMI_API_KEY= \
+            -v "$APP_DIR/e2e-output:/out" \
+            "$IMAGE" \
+            sh -lc 'test -n "${KHASROY_OWNER_KEY:-}" || { echo KHASROY_OWNER_KEY_MISSING_ON_VPS; exit 1; }; npx --yes tsx scripts/web-studio-turnkey-e2e.ts; cp web-studio-e2e-result.json /out/web-studio-e2e-result.json'
+
+          test -f e2e-output/web-studio-e2e-result.json || { echo "E2E_RESULT_MISSING"; exit 1; }
+          cat e2e-output/web-studio-e2e-result.json
+          REMOTE
+
+      - name: Download sanitized E2E result
+        if: always()
+        shell: bash
+        run: |
+          scp -i ~/.ssh/khasroy_vps -P "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST:~/khasroy/e2e-output/web-studio-e2e-result.json" web-studio-e2e-result.json 2>/dev/null || true
 
       - name: Upload sanitized E2E result
         if: always()
