@@ -13,6 +13,12 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function failureMessage(result: PromiseSettledResult<unknown>) {
+  if (result.status === "fulfilled") return null;
+  const reason = result.reason;
+  return reason instanceof Error ? reason.message.slice(0, 240) : String(reason || "unknown_error").slice(0, 240);
+}
+
 export async function GET() {
   const ownerKey = process.env.KHASROY_OWNER_KEY;
   if (!ownerKey) {
@@ -26,11 +32,22 @@ export async function GET() {
   }
 
   try {
-    const [skills, brain, pendingTasks] = await Promise.all([
+    const [skillsResult, brainResult, pendingTasksResult] = await Promise.allSettled([
       getSkills(ownerKey),
       selfHostedHealth(),
       getPendingTasks(ownerKey, 100),
     ]);
+
+    const skills = skillsResult.status === "fulfilled" && Array.isArray(skillsResult.value)
+      ? skillsResult.value
+      : [];
+    const brain = brainResult.status === "fulfilled"
+      ? brainResult.value
+      : { configured: false, online: false, model: null as string | null };
+    const pendingTasks = pendingTasksResult.status === "fulfilled" && Array.isArray(pendingTasksResult.value)
+      ? pendingTasksResult.value
+      : [];
+
     const verified = skills.filter((skill) => skill.status === "verified");
     const has = (slug: string) => verified.some((skill) => skill.slug === slug);
 
@@ -77,8 +94,25 @@ export async function GET() {
     };
     const resources = resourceRegistry(overrides);
     const preferredText = preferredResource("text", { overrides });
+    const diagnostics = {
+      skills: {
+        ok: skillsResult.status === "fulfilled",
+        error: failureMessage(skillsResult),
+      },
+      selfHosted: {
+        ok: brainResult.status === "fulfilled",
+        error: failureMessage(brainResult),
+      },
+      pendingTasks: {
+        ok: pendingTasksResult.status === "fulfilled",
+        error: failureMessage(pendingTasksResult),
+      },
+    };
+    const degraded = Object.values(diagnostics).some((item) => !item.ok);
 
     return NextResponse.json({
+      status: degraded ? "degraded" : "ok",
+      diagnostics,
       level: Math.max(1, verified.length),
       skills: verified.length,
       testsPassed: verified.reduce(
@@ -140,6 +174,12 @@ export async function GET() {
     });
   } catch (error) {
     console.error("Khasroy status read failed", error);
-    return NextResponse.json({ error: "status_unavailable" }, { status: 502 });
+    return NextResponse.json(
+      {
+        error: "status_unavailable",
+        detail: error instanceof Error ? error.message.slice(0, 240) : "unknown_error",
+      },
+      { status: 502 },
+    );
   }
 }
