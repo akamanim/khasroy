@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { installProviderFailover } from "@/lib/ai/provider-failover";
+import { installVisionFailover } from "@/lib/ai/vision-failover";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import { resolveAISecrets } from "@/lib/server-integrations";
 import { recallKnowledge, rememberKnowledge } from "@/lib/server-memory";
@@ -14,6 +15,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 installProviderFailover();
+installVisionFailover();
 
 const SELFTEST_KEY = "site_agent_selftest_latest";
 const SELFTEST_CATEGORY = "site_agent_selftest";
