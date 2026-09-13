@@ -36,46 +36,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          HTTP_CODE=$(curl --silent --show-error \
-            --output /tmp/vercel-project.json \
-            --write-out "%{http_code}" \
-            "https://api.vercel.com/v9/projects/khasroy" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            -H "Content-Type: application/json")
-          test "$HTTP_CODE" = "200" || { echo "VERCEL_PROJECT_LOOKUP_FAILED_HTTP_$HTTP_CODE"; exit 1; }
-          node <<'NODE'
-          const fs = require('fs');
-          const project = JSON.parse(fs.readFileSync('/tmp/vercel-project.json', 'utf8'));
-          if (!project.id || !project.accountId) {
-            console.error('VERCEL_PROJECT_RESPONSE_INCOMPLETE');
-            process.exit(1);
-          }
-          let analyticsId;
-          if (project.analytics?.id && (!project.analytics.disabledAt || (project.analytics.enabledAt && project.analytics.enabledAt > project.analytics.disabledAt))) {
-            analyticsId = project.analytics.id;
-          }
-          const projectJson = {
-            projectId: project.id,
-            orgId: project.accountId,
-            projectName: project.name || 'khasroy',
-            settings: {
-              createdAt: project.createdAt ?? null,
-              framework: project.framework ?? null,
-              devCommand: project.devCommand ?? null,
-              installCommand: project.installCommand ?? null,
-              buildCommand: project.buildCommand ?? null,
-              outputDirectory: project.outputDirectory ?? null,
-              rootDirectory: project.rootDirectory ?? null,
-              directoryListing: project.directoryListing ?? false,
-              nodeVersion: project.nodeVersion ?? '22.x',
-              ...(analyticsId ? { analyticsId } : {})
-            }
-          };
-          fs.mkdirSync('.vercel', { recursive: true });
-          fs.writeFileSync('.vercel/project.json', JSON.stringify(projectJson, null, 2));
-          console.log(`Resolved project: ${projectJson.projectName}`);
-          NODE
+          rm -rf .vercel
+          npx --yes vercel@latest link --yes --project=khasroy --token="$VERCEL_TOKEN"
           npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN" >/dev/null
+          test -f .vercel/project.json || { echo "VERCEL_PROJECT_LINK_MISSING"; exit 1; }
           test -f .vercel/.env.production.local || { echo "VERCEL_PRODUCTION_ENV_FILE_MISSING"; exit 1; }
           echo "PRODUCTION_ENV_READY"
 
