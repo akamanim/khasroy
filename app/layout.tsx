@@ -18,7 +18,32 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {children}
+        <a
+          href="/settings"
+          aria-label="Интеграции Хасроя"
+          style={{
+            position: "fixed",
+            right: 18,
+            bottom: 18,
+            zIndex: 900,
+            border: "1px solid rgba(126, 216, 231, .25)",
+            borderRadius: 999,
+            background: "rgba(7, 20, 27, .9)",
+            color: "#9bdbe5",
+            padding: "10px 14px",
+            textDecoration: "none",
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: ".04em",
+            backdropFilter: "blur(12px)",
+            boxShadow: "0 8px 30px rgba(0,0,0,.25)",
+          }}
+        >
+          ⚙ Интеграции
+        </a>
+      </body>
     </html>
   );
 }
