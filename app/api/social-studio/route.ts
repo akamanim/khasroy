@@ -1,7 +1,12 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
-import { createSocialDraft, instagramRuntimeStatus, publishInstagram } from "@/lib/social-studio";
+import {
+  createSocialDraft,
+  getInstagramRuntimeStatus,
+  instagramRuntimeStatus,
+  publishInstagram,
+} from "@/lib/social-studio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +20,8 @@ export async function GET() {
   if (!session || !safeEqual(session, ownerSessionToken(ownerKey))) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  return NextResponse.json({ ok: true, service: "khasroy-social-studio", instagram: instagramRuntimeStatus() });
+  const instagram = await getInstagramRuntimeStatus(ownerKey).catch(() => instagramRuntimeStatus());
+  return NextResponse.json({ ok: true, service: "khasroy-social-studio", instagram });
 }
 
 export async function POST(request: Request) {
@@ -44,17 +50,18 @@ export async function POST(request: Request) {
       const contentType = ["reel", "post", "story", "carousel"].includes(String(body?.contentType))
         ? String(body?.contentType) as "reel" | "post" | "story" | "carousel"
         : "post";
-      const result = await publishInstagram({ mediaUrl, caption, contentType });
-      return NextResponse.json({ ok: true, published: result });
+      const result = await publishInstagram({ ownerKey, mediaUrl, caption, contentType });
+      return NextResponse.json({ ok: true, published: result, instagram: await getInstagramRuntimeStatus(ownerKey) });
     }
 
     const requestText = typeof body?.request === "string" ? body.request.trim().slice(0, 8000) : "";
     if (!requestText) return NextResponse.json({ error: "request_required" }, { status: 400 });
     const result = await createSocialDraft({ ownerKey, apiKey, request: requestText });
-    return NextResponse.json({ ok: true, ...result, instagram: instagramRuntimeStatus() });
+    return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error("Khasroy Social Studio failed", error);
     const detail = error instanceof Error ? error.message : "social_studio_failed";
-    return NextResponse.json({ ok: false, error: "SMM-задача не завершена.", detail: detail.slice(0, 500), instagram: instagramRuntimeStatus() }, { status: 502 });
+    const instagram = await getInstagramRuntimeStatus(ownerKey).catch(() => instagramRuntimeStatus());
+    return NextResponse.json({ ok: false, error: "SMM-задача не завершена.", detail: detail.slice(0, 500), instagram }, { status: 502 });
   }
 }
