@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { installProviderFailover } from "@/lib/ai/provider-failover";
+import { installVisionFailover } from "@/lib/ai/vision-failover";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import { resolveAISecrets } from "@/lib/server-integrations";
 import { recallKnowledge, rememberKnowledge } from "@/lib/server-memory";
@@ -13,6 +14,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// Vision-specific translation sits closest to the native fetch so a Groq image
+// quota failure can jump directly to Gemini before the generic provider router
+// spends time on additional Groq models/gateway attempts.
+installVisionFailover();
 installProviderFailover();
 
 const SELFTEST_KEY = "site_agent_selftest_latest";
