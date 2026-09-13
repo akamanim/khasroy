@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { installImageFetchHardening } from "@/lib/ai/image-fetch-hardening";
 import { installProviderFailover } from "@/lib/ai/provider-failover";
 import { installVisionFailover } from "@/lib/ai/vision-failover";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
@@ -14,9 +15,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Vision-specific translation sits closest to the native fetch so a Groq image
-// quota failure can jump directly to Gemini before the generic provider router
-// spends time on additional Groq models/gateway attempts.
+// WordPress mshots can briefly return throttled/placeholder responses. Install
+// screenshot fetch hardening first so the direct Gemini fallback captures and
+// reuses the browser-like retrying fetcher for every screenshot it inlines.
+installImageFetchHardening();
+// Vision/plain JSON translation sits closer to native fetch than the generic
+// provider router, allowing exhausted Groq requests to jump directly to Gemini.
 installVisionFailover();
 installProviderFailover();
 
