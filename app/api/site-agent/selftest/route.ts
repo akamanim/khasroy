@@ -14,8 +14,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-installProviderFailover();
+// Vision-specific translation sits closest to the native fetch so a Groq image
+// quota failure can jump directly to Gemini before the generic provider router
+// spends time on additional Groq models/gateway attempts.
 installVisionFailover();
+installProviderFailover();
 
 const SELFTEST_KEY = "site_agent_selftest_latest";
 const SELFTEST_CATEGORY = "site_agent_selftest";
