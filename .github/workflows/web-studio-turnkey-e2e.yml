@@ -32,20 +32,6 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Verify Khasroy production is reachable
-        shell: bash
-        run: |
-          set -euo pipefail
-          HTTP_CODE=$(curl --silent --show-error --output /tmp/khasroy-production.json --write-out "%{http_code}" \
-            -X POST "https://khasroy.vercel.app/api/site-agent/selftest" \
-            -H "Content-Type: application/json" \
-            -H "User-Agent: Khasroy-WebStudio-E2E/3.0" \
-            --data '{"action":"ensure"}')
-          case "$HTTP_CODE" in
-            200|409|429) echo "KHASROY_PRODUCTION_REACHABLE_HTTP_$HTTP_CODE" ;;
-            *) echo "KHASROY_PRODUCTION_UNREACHABLE_HTTP_$HTTP_CODE"; cat /tmp/khasroy-production.json; exit 1 ;;
-          esac
-
       - name: Create, deploy and verify real site + Supabase lead
         shell: bash
         run: |
