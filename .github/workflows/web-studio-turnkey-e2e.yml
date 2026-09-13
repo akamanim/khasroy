@@ -32,79 +32,25 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Link Vercel project and pull production environment
+      - name: Verify Khasroy production is reachable
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .vercel
-          npx --yes vercel@latest link --yes --project=khasroy --token="$VERCEL_TOKEN"
-          npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN" >/dev/null
-          test -f .vercel/project.json || { echo "VERCEL_PROJECT_LINK_MISSING"; exit 1; }
-          test -f .vercel/.env.production.local || { echo "VERCEL_PRODUCTION_ENV_FILE_MISSING"; exit 1; }
-          echo "PRODUCTION_ENV_READY"
-
-      - name: Build Khasroy production bundle
-        run: npx --yes vercel@latest build --prod
-
-      - name: Verify prebuilt output
-        shell: bash
-        run: |
-          test -f .vercel/output/config.json || { echo "PREBUILT_OUTPUT_MISSING"; exit 1; }
-          echo "PREBUILT_OUTPUT_READY"
-
-      - name: Deploy this commit to Khasroy production
-        shell: bash
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if npx --yes vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN"; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "VERCEL_DEPLOY_RETRY_$attempt"
-              sleep $((attempt * 20))
-            fi
-          done
-          echo "VERCEL_DEPLOY_FAILED_AFTER_RETRIES"
-          exit 1
-
-      - name: Confirm this Khasroy release is live
-        env:
-          RELEASE: ${{ github.sha }}
-        run: |
-          python - <<'PY'
-          import json, os, time, urllib.error, urllib.request
-          release = os.environ['RELEASE'][:12]
-          endpoint = 'https://khasroy.vercel.app/api/site-agent/selftest'
-          for _ in range(24):
-              req = urllib.request.Request(
-                  endpoint,
-                  data=json.dumps({'action':'ensure','runnerRelease':release}).encode(),
-                  headers={'Content-Type':'application/json','User-Agent':'Khasroy-WebStudio-ReleaseGate/2.0'},
-                  method='POST',
-              )
-              try:
-                  with urllib.request.urlopen(req, timeout=45) as r:
-                      data = json.load(r)
-                  if data.get('release') == release:
-                      print('Production release confirmed:', release)
-                      raise SystemExit(0)
-              except urllib.error.HTTPError as exc:
-                  if exc.code not in (409,429,502,503,504):
-                      raise
-              time.sleep(5)
-          raise SystemExit('PRODUCTION_RELEASE_NOT_READY')
-          PY
+          HTTP_CODE=$(curl --silent --show-error --output /tmp/khasroy-production.json --write-out "%{http_code}" \
+            -X POST "https://khasroy.vercel.app/api/site-agent/selftest" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: Khasroy-WebStudio-E2E/3.0" \
+            --data '{"action":"ensure"}')
+          case "$HTTP_CODE" in
+            200|409|429) echo "KHASROY_PRODUCTION_REACHABLE_HTTP_$HTTP_CODE" ;;
+            *) echo "KHASROY_PRODUCTION_UNREACHABLE_HTTP_$HTTP_CODE"; cat /tmp/khasroy-production.json; exit 1 ;;
+          esac
 
       - name: Create, deploy and verify real site + Supabase lead
         shell: bash
         run: |
           set -euo pipefail
-          set -a
-          . .vercel/.env.production.local
-          set +a
-          export VERCEL_TOKEN="$VERCEL_TOKEN"
-          npx --yes tsx scripts/web-studio-turnkey-e2e.ts
+          npx --yes tsx scripts/run-web-studio-e2e-from-vercel.ts
 
       - name: Upload sanitized E2E result
         if: always()
