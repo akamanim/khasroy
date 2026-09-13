@@ -149,6 +149,21 @@ function strictJson(value: string) {
   return "";
 }
 
+function anchoredScoreRequest(prompt: string) {
+  return /"hierarchy"\s*:\s*0/iu.test(prompt) && /"typography"\s*:\s*0/iu.test(prompt) && /"technical"\s*:\s*0/iu.test(prompt);
+}
+
+function anchoredScoresAllZero(content: string) {
+  try {
+    const parsed = JSON.parse(content) as JsonRecord;
+    const names = ["hierarchy", "typography", "trust", "conversion", "mobile", "technical"];
+    const values = names.map((name) => Number(parsed[name]));
+    return values.every((value) => Number.isFinite(value) && value === 0);
+  } catch {
+    return false;
+  }
+}
+
 async function repairJson(fetcher: typeof fetch, key: string, model: string, malformed: string) {
   const response = await fetcher(`https://${GEMINI_HOST}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
@@ -166,11 +181,48 @@ async function repairJson(fetcher: typeof fetch, key: string, model: string, mal
   return strictJson(geminiText(payload));
 }
 
+async function retryAnchoredScoring(
+  fetcher: typeof fetch,
+  key: string,
+  model: string,
+  systemText: string,
+  userText: string,
+  imageParts: Array<Record<string, unknown>>,
+) {
+  const response = await fetcher(`https://${GEMINI_HOST}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: "POST",
+    cache: "no-store",
+    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{
+          text: `${systemText || "You are a calibrated commercial website visual judge."}\nThe previous answer was rejected because it copied the schema template as all-zero scores. Inspect the supplied screenshots and produce real evidence-based scores. All-zero scores are invalid unless both screenshots are completely blank or unusable.`,
+        }],
+      },
+      contents: [{
+        role: "user",
+        parts: [{
+          text: `${userText}\nIMPORTANT: Do not echo the example zeros. Score what is actually visible. Return exactly hierarchy, typography, trust, conversion, mobile, technical, evidence.`,
+        }, ...imageParts],
+      }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        maxOutputTokens: 900,
+        temperature: 0.03,
+      },
+    }),
+  });
+  if (!response.ok) return "";
+  const payload = (await response.json().catch(() => null)) as JsonRecord | null;
+  return strictJson(geminiText(payload));
+}
+
 async function callGeminiFallback(fetcher: typeof fetch, body: JsonRecord) {
   const key = await resolveGeminiKey();
   if (!key) return null;
   const prompt = collectPrompt(body);
-  const imageParts = [];
+  const imageParts: Array<Record<string, unknown>> = [];
   for (const image of prompt.images) imageParts.push(await imagePart(fetcher, image));
 
   const model = prompt.images.length
@@ -207,6 +259,22 @@ async function callGeminiFallback(fetcher: typeof fetch, body: JsonRecord) {
       console.error("Khasroy Gemini JSON compatibility repair failed");
       return null;
     }
+
+    if (prompt.images.length && anchoredScoreRequest(prompt.userText) && anchoredScoresAllZero(content)) {
+      const rescored = await retryAnchoredScoring(
+        fetcher,
+        key,
+        model,
+        prompt.systemText,
+        prompt.userText,
+        imageParts,
+      );
+      if (!rescored || anchoredScoresAllZero(rescored)) {
+        console.error("Khasroy Gemini anchored visual scoring returned invalid template zeros");
+        return null;
+      }
+      content = rescored;
+    }
   }
 
   return new Response(JSON.stringify({ model, choices: [{ message: { content } }] }), {
@@ -228,6 +296,7 @@ export function visionFailoverInfo() {
     handlesPlainChat: true,
     handlesVision: true,
     repairsJson: true,
+    rejectsTemplateZeroScores: true,
     defaultGeminiModel: process.env.KHASROY_GEMINI_MODEL?.trim() || "gemini-3.5-flash",
   };
 }
