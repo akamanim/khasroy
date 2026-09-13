@@ -40,15 +40,6 @@ type PublishResult = {
   deploymentId?: string;
 };
 
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9а-яё]+/giu, "-")
-    .replace(/^-+|-+$/gu, "")
-    .replace(/-+/gu, "-")
-    .slice(0, 58) || `site-${Date.now().toString(36)}`;
-}
-
 function asciiSlug(value: string) {
   const ascii = value
     .toLowerCase()
@@ -190,7 +181,7 @@ function renderProject(spec: WebStudioSpec) {
     "package.json": JSON.stringify({ scripts: { dev: "next dev", build: "next build", start: "next start" }, dependencies: { next: "15.5.7", react: "19.1.0", "react-dom": "19.1.0" }, devDependencies: { "@types/node": "^22", "@types/react": "^19", typescript: "^5" } }, null, 2),
     "tsconfig.json": JSON.stringify({ compilerOptions: { target: "ES2017", lib: ["dom", "dom.iterable", "esnext"], allowJs: false, skipLibCheck: true, strict: true, noEmit: true, esModuleInterop: true, module: "esnext", moduleResolution: "bundler", resolveJsonModule: true, isolatedModules: true, jsx: "preserve", incremental: true, plugins: [{ name: "next" }] }, include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"], exclude: ["node_modules"] }, null, 2),
     "next.config.mjs": "const nextConfig = {};\nexport default nextConfig;\n",
-    "app/layout.tsx": `import \"./globals.css\";\nexport const metadata = { title: ${JSON.stringify(spec.brandName)}, description: ${JSON.stringify(spec.description)} };\nexport default function RootLayout({children}:{children:React.ReactNode}){return <html lang=\"ru\"><body>{children}</body></html>}\n`,
+    "app/layout.tsx": `import type { ReactNode } from \"react\";\nimport \"./globals.css\";\nexport const metadata = { title: ${JSON.stringify(spec.brandName)}, description: ${JSON.stringify(spec.description)} };\nexport default function RootLayout({children}:{children:ReactNode}){return <html lang=\"ru\"><body>{children}</body></html>}\n`,
     "app/page.tsx": page,
     "app/globals.css": css,
     "app/api/lead/route.ts": leadRoute,
@@ -223,9 +214,10 @@ async function gh(path: string, token: string, init: RequestInit = {}) {
     },
     signal: AbortSignal.timeout(18_000),
   });
-  const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(`github_${response.status}:${data?.message || "request_failed"}`);
-  return data as Record<string, any>;
+  const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  const message = typeof data?.message === "string" ? data.message : "request_failed";
+  if (!response.ok) throw new Error(`github_${response.status}:${message}`);
+  return (data || {}) as Record<string, any>;
 }
 
 async function publishGithub(spec: WebStudioSpec, files: Record<string, string>, token: string) {
