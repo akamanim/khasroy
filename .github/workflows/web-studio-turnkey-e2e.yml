@@ -12,17 +12,24 @@ jobs:
   turnkey-e2e:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[webstudio-e2e]')
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN || secrets.VERSEL_TOKEN }}
-      KHASROY_BASE_URL: https://khasroy.vercel.app
+      GITHUB_TOKEN: ${{ secrets.KHASROY_GITHUB_TOKEN || secrets.GITHUB_PAT || github.token }}
     steps:
-      - name: Validate Vercel token
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Validate deployment credential
         shell: bash
         run: |
           test -n "$VERCEL_TOKEN" || { echo "VERCEL_TOKEN_MISSING"; exit 1; }
 
-      - name: Wait for this production release
+      - name: Wait for this Khasroy production release
         env:
           RELEASE: ${{ github.sha }}
         run: |
@@ -50,112 +57,43 @@ jobs:
           raise SystemExit('PRODUCTION_RELEASE_NOT_READY')
           PY
 
-      - name: Create, deploy and verify a real generated site
-        env:
-          RELEASE: ${{ github.sha }}
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Link Vercel project and pull production environment
+        shell: bash
         run: |
-          python - <<'PY'
-          import hashlib, hmac, http.cookiejar, json, os, time, urllib.error, urllib.parse, urllib.request
+          set -euo pipefail
+          HTTP_CODE=$(curl --silent --show-error \
+            --output /tmp/vercel-project.json \
+            --write-out "%{http_code}" \
+            "https://api.vercel.com/v9/projects/khasroy" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json")
+          test "$HTTP_CODE" = "200" || { echo "VERCEL_PROJECT_LOOKUP_FAILED_HTTP_$HTTP_CODE"; exit 1; }
+          node <<'NODE'
+          const fs = require('fs');
+          const project = JSON.parse(fs.readFileSync('/tmp/vercel-project.json', 'utf8'));
+          if (!project.id || !project.accountId) process.exit(1);
+          fs.mkdirSync('.vercel', { recursive: true });
+          fs.writeFileSync('.vercel/project.json', JSON.stringify({
+            projectId: project.id,
+            orgId: project.accountId,
+            projectName: project.name || 'khasroy'
+          }, null, 2));
+          NODE
+          npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN" >/dev/null
+          test -f .vercel/.env.production.local
+          echo "PRODUCTION_ENV_READY"
 
-          base = os.environ['KHASROY_BASE_URL'].rstrip('/')
-          release = os.environ['RELEASE'][:12]
-          token = os.environ['VERCEL_TOKEN']
-          signature = hmac.new(token.encode(), f'web-studio-e2e:{release}'.encode(), hashlib.sha256).hexdigest()
-
-          req = urllib.request.Request(
-              base + '/api/web-studio/selftest',
-              data=json.dumps({'runnerRelease':release}).encode(),
-              headers={
-                  'Content-Type':'application/json',
-                  'User-Agent':'Khasroy-WebStudio-E2E/2.0',
-                  'X-Khasroy-E2E-Signature':signature,
-              },
-              method='POST',
-          )
-          with urllib.request.urlopen(req, timeout=180) as response:
-              built = json.load(response)
-          if not built.get('ok'):
-              raise SystemExit('WEB_STUDIO_BUILD_FAILED:' + str(built.get('error'))[:300])
-
-          published = built.get('published') or {}
-          required = ['repoFullName','repoUrl','deployUrl']
-          missing = [k for k in required if not published.get(k)]
-          if missing:
-              raise SystemExit('PUBLISH_RESULT_MISSING:' + ','.join(missing))
-          if not published.get('deploymentReady') or not published.get('httpVerified') or not published.get('databaseLeads'):
-              raise SystemExit('PUBLISH_VERIFICATION_INCOMPLETE')
-
-          slug = (built.get('spec') or {}).get('slug')
-          deploy_url = str(published['deployUrl']).rstrip('/')
-          marker_phone = '+996700' + release[-6:]
-          form = urllib.parse.urlencode({
-              'name':'Khasroy E2E',
-              'phone':marker_phone,
-              'message':'Automated turnkey Web Studio lead verification',
-              'website':'',
-          }).encode()
-          lead_req = urllib.request.Request(
-              deploy_url + '/api/lead',
-              data=form,
-              headers={
-                  'Content-Type':'application/x-www-form-urlencoded',
-                  'User-Agent':'Khasroy-WebStudio-E2E/2.0',
-              },
-              method='POST',
-          )
-          with urllib.request.urlopen(lead_req, timeout=45) as lead_response:
-              lead_http = lead_response.status
-              lead_final_url = lead_response.geturl()
-
-          safe = {
-              'ok': True,
-              'release': release,
-              'projectSlug': slug,
-              'repoFullName': published.get('repoFullName'),
-              'repoUrl': published.get('repoUrl'),
-              'vercelProjectId': published.get('vercelProjectId'),
-              'deployUrl': published.get('deployUrl'),
-              'deploymentId': published.get('deploymentId'),
-              'deploymentReady': bool(published.get('deploymentReady')),
-              'httpVerified': bool(published.get('httpVerified')),
-              'databaseLeads': bool(published.get('databaseLeads')),
-              'leadSubmitHttp': lead_http,
-              'leadFinalUrl': lead_final_url,
-          }
-          with open('web-studio-e2e-result.json','w',encoding='utf-8') as f:
-              json.dump(safe,f,ensure_ascii=False,indent=2)
-          print(json.dumps(safe,ensure_ascii=False))
-          PY
-
-      - name: Verify project and lead persisted in Supabase through Khasroy
-        env:
-          RELEASE: ${{ github.sha }}
+      - name: Create, deploy and verify real site + Supabase lead
+        shell: bash
         run: |
-          python - <<'PY'
-          import hashlib, hmac, json, os, urllib.request
-          release = os.environ['RELEASE'][:12]
-          token = os.environ['VERCEL_TOKEN']
-          with open('web-studio-e2e-result.json', encoding='utf-8') as f:
-              result = json.load(f)
-          signature = hmac.new(token.encode(), f'web-studio-e2e:{release}'.encode(), hashlib.sha256).hexdigest()
-          url = os.environ['KHASROY_BASE_URL'].rstrip('/') + '/api/web-studio/selftest'
-          req = urllib.request.Request(
-              url,
-              data=json.dumps({
-                  'runnerRelease':release,
-                  'verifyProjectSlug':result['projectSlug'],
-              }).encode(),
-              headers={
-                  'Content-Type':'application/json',
-                  'User-Agent':'Khasroy-WebStudio-E2E/2.0',
-                  'X-Khasroy-E2E-Signature':signature,
-              },
-              method='POST',
-          )
-          # The signed endpoint currently exercises creation; durable persistence is
-          # additionally asserted after the run from Supabase by the continuation agent.
-          print('Creation and lead submission completed; persistence query follows outside this runner.')
-          PY
+          set -euo pipefail
+          set -a
+          . .vercel/.env.production.local
+          set +a
+          npx --yes tsx scripts/web-studio-turnkey-e2e.ts
 
       - name: Upload sanitized E2E result
         if: always()
