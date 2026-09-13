@@ -8,13 +8,16 @@ on:
       - "lib/chat.ts"
       - "lib/image-intent.ts"
       - "lib/web-studio.ts"
+      - "lib/web-studio-editor.ts"
       - "lib/web-studio-intent.ts"
       - "lib/social-studio.ts"
+      - "lib/server-integrations.ts"
       - "app/api/chat/**"
       - "app/api/status/**"
       - "app/api/image-*/**"
       - "app/api/web-studio/**"
       - "app/api/social-studio/**"
+      - "app/api/integrations/**"
       - ".github/workflows/brain-router-build.yml"
   push:
     branches: [main]
@@ -24,13 +27,16 @@ on:
       - "lib/chat.ts"
       - "lib/image-intent.ts"
       - "lib/web-studio.ts"
+      - "lib/web-studio-editor.ts"
       - "lib/web-studio-intent.ts"
       - "lib/social-studio.ts"
+      - "lib/server-integrations.ts"
       - "app/api/chat/**"
       - "app/api/status/**"
       - "app/api/image-*/**"
       - "app/api/web-studio/**"
       - "app/api/social-studio/**"
+      - "app/api/integrations/**"
       - ".github/workflows/brain-router-build.yml"
 
 concurrency:

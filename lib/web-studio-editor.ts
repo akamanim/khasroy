@@ -1,5 +1,6 @@
 import { planWebsite, type WebStudioSpec } from "@/lib/web-studio";
 import { upsertSkill } from "@/lib/server-memory";
+import { resolveSecret } from "@/lib/server-integrations";
 
 const STORE_ENDPOINT = process.env.KHASROY_WEB_STUDIO_ENDPOINT || "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-studio";
 const STORE_KEY = process.env.KHASROY_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_cQzfru6dR7_T4myYO1c_fA_r-iFXOtn";
@@ -174,7 +175,7 @@ async function waitForDeployment(token: string, deploymentId: string, teamId?: s
 async function verifyHttp(url: string) {
   try {
     const response = await fetch(url, { redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(10_000) });
-    return response.status >= 200 && response.status < 500;
+    return response.status >= 200 && response.status < 400;
   } catch { return false; }
 }
 
@@ -216,8 +217,10 @@ export async function editWebsite(args: { ownerKey: string; apiKey: string; proj
   const revised = await planWebsite({ apiKey: args.apiKey, brief: revisionBrief });
   revised.slug = project.project_slug;
   const files = renderProject(revised);
-  const githubToken = process.env.KHASROY_GITHUB_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim() || "";
-  const vercelToken = process.env.KHASROY_VERCEL_TOKEN?.trim() || process.env.VERCEL_TOKEN?.trim() || "";
+  const [githubToken, vercelToken] = await Promise.all([
+    resolveSecret(args.ownerKey, "github", [process.env.KHASROY_GITHUB_TOKEN, process.env.GITHUB_TOKEN]),
+    resolveSecret(args.ownerKey, "vercel", [process.env.KHASROY_VERCEL_TOKEN, process.env.VERCEL_TOKEN]),
+  ]);
   if (!githubToken || !vercelToken) throw new Error("web_studio_publish_credentials_missing");
 
   await store(args.ownerKey, { action: "upsert_project", projectSlug: project.project_slug, status: "building", brief: project.brief, spec: revised, repoFullName: project.repo_full_name, repoUrl: project.repo_url, vercelProjectId: project.vercel_project_id, deployUrl: project.deploy_url });
@@ -233,7 +236,7 @@ export async function editWebsite(args: { ownerKey: string; apiKey: string; proj
       status: "verified",
       level: 2,
       testsPassed: 1,
-      metadata: { projectSlug: project.project_slug, repo: project.repo_full_name, commitSha, deployUrl: deployUrl || null, httpVerified: deployment.httpVerified },
+      metadata: { projectSlug: project.project_slug, repo: project.repo_full_name, commitSha, deployUrl: deployUrl || null, httpVerified: deployment.httpVerified, credentialSource: "env_or_encrypted_vault" },
     }).catch(() => undefined);
     return { ok: true, mode: "web_studio_edit_v2", projectSlug: project.project_slug, spec: revised, repoFullName: project.repo_full_name, repoUrl: project.repo_url, commitSha, ...deployment, deployUrl };
   } catch (error) {

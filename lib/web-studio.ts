@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { runBrain } from "@/lib/brain/router";
 import { upsertSkill } from "@/lib/server-memory";
+import { resolveSecret } from "@/lib/server-integrations";
 
 const STORE_ENDPOINT = process.env.KHASROY_WEB_STUDIO_ENDPOINT || "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-studio";
 const STORE_KEY = process.env.KHASROY_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_cQzfru6dR7_T4myYO1c_fA_r-iFXOtn";
@@ -247,7 +248,7 @@ async function waitForDeployment(token: string, deploymentId: string, teamId?: s
 async function verifyHttp(url: string) {
   try {
     const response = await fetch(url, { redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(8_000) });
-    return response.status >= 200 && response.status < 500;
+    return response.status >= 200 && response.status < 400;
   } catch { return false; }
 }
 
@@ -277,8 +278,10 @@ export async function buildWebsite(args: { ownerKey: string; apiKey: string; bri
   await store(args.ownerKey, { action: "upsert_project", projectSlug: spec.slug, status: "building", brief: args.brief, spec }).catch(() => undefined);
   await store(args.ownerKey, { action: "set_site_token", projectSlug: spec.slug, siteToken }).catch(() => undefined);
 
-  const githubToken = process.env.KHASROY_GITHUB_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim() || "";
-  const vercelToken = process.env.KHASROY_VERCEL_TOKEN?.trim() || process.env.VERCEL_TOKEN?.trim() || "";
+  const [githubToken, vercelToken] = await Promise.all([
+    resolveSecret(args.ownerKey, "github", [process.env.KHASROY_GITHUB_TOKEN, process.env.GITHUB_TOKEN]),
+    resolveSecret(args.ownerKey, "vercel", [process.env.KHASROY_VERCEL_TOKEN, process.env.VERCEL_TOKEN]),
+  ]);
   const publishingConfigured = Boolean(githubToken && vercelToken);
   let published: PublishResult | null = null;
 
@@ -288,7 +291,7 @@ export async function buildWebsite(args: { ownerKey: string; apiKey: string; bri
       const deployment = await publishVercel({ token: vercelToken, repoFullName: repo.repoFullName, repoName: repo.repoName, login: repo.login, projectName: spec.slug, projectSlug: spec.slug, siteToken });
       published = { repoFullName: repo.repoFullName, repoUrl: repo.repoUrl, ...deployment };
       await store(args.ownerKey, { action: "upsert_project", projectSlug: spec.slug, status: "published", brief: args.brief, spec, repoFullName: published.repoFullName, repoUrl: published.repoUrl, vercelProjectId: published.vercelProjectId, deployUrl: published.deployUrl });
-      await upsertSkill(args.ownerKey, { slug: "turnkey_website_delivery", name: "Сайты под ключ", description: "Хасрой превращает бриф в Next.js-проект, создаёт GitHub-репозиторий, подключает серверную БД заявок, запускает Vercel deployment и проверяет production URL.", status: "verified", level: 2, testsPassed: 1, metadata: { engine: "web_studio_v1", lastRepo: published.repoFullName, lastDeployUrl: published.deployUrl || null, deploymentReady: published.deploymentReady, httpVerified: published.httpVerified, databaseLeads: true } });
+      await upsertSkill(args.ownerKey, { slug: "turnkey_website_delivery", name: "Сайты под ключ", description: "Хасрой превращает бриф в Next.js-проект, создаёт GitHub-репозиторий, подключает серверную БД заявок, запускает Vercel deployment и проверяет production URL.", status: "verified", level: 2, testsPassed: 1, metadata: { engine: "web_studio_v1", lastRepo: published.repoFullName, lastDeployUrl: published.deployUrl || null, deploymentReady: published.deploymentReady, httpVerified: published.httpVerified, databaseLeads: true, credentialSource: "env_or_encrypted_vault" } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error || "publish_failed");
       await store(args.ownerKey, { action: "upsert_project", projectSlug: spec.slug, status: "failed", brief: args.brief, spec, lastError: message }).catch(() => undefined);
@@ -297,7 +300,7 @@ export async function buildWebsite(args: { ownerKey: string; apiKey: string; bri
   } else {
     await upsertSkill(args.ownerKey, { slug: "website_project_compiler", name: "Компилятор сайтов", description: "Хасрой превращает короткий бизнес-бриф в production-ready структуру и исходники Next.js сайта.", status: "verified", level: 1, testsPassed: 1, metadata: { engine: "web_studio_v1", publishReady: publishingConfigured } }).catch(() => undefined);
   }
-  return { ok: true, mode: "web_studio_v1", spec, files: Object.keys(files), published, publishingConfigured, databaseLeadsReady: true };
+  return { ok: true, mode: "web_studio_v1", spec, files: Object.keys(files), published, publishingConfigured, databaseLeadsReady: true, integrationVaultReady: true };
 }
 
 export function webStudioRuntimeStatus() {
@@ -306,6 +309,7 @@ export function webStudioRuntimeStatus() {
     vercelConfigured: Boolean(process.env.KHASROY_VERCEL_TOKEN?.trim() || process.env.VERCEL_TOKEN?.trim()),
     instagramConfigured: Boolean(process.env.INSTAGRAM_ACCESS_TOKEN?.trim() && process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID?.trim()),
     databaseLeads: true,
-    fingerprint: createHash("sha256").update("khasroy-web-studio-v1").digest("hex").slice(0, 12),
+    integrationVault: true,
+    fingerprint: createHash("sha256").update("khasroy-web-studio-v1-vault").digest("hex").slice(0, 12),
   };
 }
