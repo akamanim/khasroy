@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { installImageFetchHardening } from "@/lib/ai/image-fetch-hardening";
@@ -7,7 +6,7 @@ import { installProviderFailover } from "@/lib/ai/provider-failover";
 import { installVisionFailover } from "@/lib/ai/vision-failover";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import { resolveAISecrets } from "@/lib/server-integrations";
-import { buildWebsite, webStudioRuntimeStatus } from "@/lib/web-studio";
+import { buildWebsite, planWebsite, webStudioRuntimeStatus } from "@/lib/web-studio";
 import {
   editWebsite,
   getWebProject,
@@ -44,35 +43,76 @@ async function ownerContext() {
 }
 
 async function issueDraft(ownerKey: string, projectSlug: string) {
-  // Draft links deliberately use their own freshly rotated site token. A later
-  // production promotion generates another token inside buildWebsite(), which
-  // invalidates the old draft link and gives Vercel the new production token.
-  const siteToken = randomBytes(30).toString("base64url");
-  const tokenResponse = await fetch(STORE_ENDPOINT, {
+  // Draft auth is separate from the production site's lead token. This means
+  // repeated draft/repair cycles cannot silently invalidate a live site's form.
+  const response = await fetch(DRAFT_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "issue", ownerKey, projectSlug }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(12_000),
+  });
+  const data = await response.json().catch(() => null) as {
+    draftUrl?: unknown;
+    provider?: unknown;
+    httpVerified?: unknown;
+    databaseLeads?: unknown;
+    isolatedDraftToken?: unknown;
+    error?: unknown;
+  } | null;
+  const draftUrl = typeof data?.draftUrl === "string" ? data.draftUrl : "";
+  if (!response.ok || !draftUrl) {
+    const detail = typeof data?.error === "string" ? data.error : `http_${response.status}`;
+    throw new Error(`draft_issue_${detail}`);
+  }
+  return {
+    provider: typeof data?.provider === "string" ? data.provider : "supabase_edge",
+    deployUrl: draftUrl,
+    httpVerified: data?.httpVerified === true,
+    databaseLeads: data?.databaseLeads !== false,
+    isolatedDraftToken: data?.isolatedDraftToken === true,
+  };
+}
+
+async function stageDraftRevision(args: { ownerKey: string; apiKey: string; projectSlug: string; instruction: string }) {
+  const project = await getWebProject(args.ownerKey, args.projectSlug);
+  if (!project) throw new Error("web_project_not_found");
+  if (!project.spec || typeof project.spec !== "object") throw new Error("web_project_spec_invalid");
+
+  const revisionBrief = `Это ДОРАБОТКА черновика существующего сайта. Сохрани бренд, факты и всё, что владелец явно не просит менять. Не публикуй сайт.\nТекущая спецификация: ${JSON.stringify(project.spec).slice(0, 7000)}\nТекущий исходный бриф: ${project.brief.slice(0, 5000)}\nИзменение владельца: ${args.instruction.slice(0, 5000)}`;
+  const revised = await planWebsite({ apiKey: args.apiKey, brief: revisionBrief });
+  revised.slug = project.project_slug;
+
+  const storeResponse = await fetch(STORE_ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/json", apikey: STORE_KEY },
-    body: JSON.stringify({ action: "set_site_token", ownerKey, projectSlug, siteToken }),
+    body: JSON.stringify({
+      action: "upsert_project",
+      ownerKey: args.ownerKey,
+      projectSlug: project.project_slug,
+      status: "building",
+      brief: project.brief,
+      spec: revised,
+      repoFullName: project.repo_full_name,
+      repoUrl: project.repo_url,
+      vercelProjectId: project.vercel_project_id,
+      deployUrl: project.deploy_url,
+    }),
     cache: "no-store",
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(12_000),
   });
-  if (!tokenResponse.ok) throw new Error(`draft_token_${tokenResponse.status}`);
+  if (!storeResponse.ok) throw new Error(`draft_revision_store_${storeResponse.status}`);
 
-  const url = new URL(DRAFT_ENDPOINT);
-  url.searchParams.set("project", projectSlug);
-  url.searchParams.set("token", siteToken);
-  const draftUrl = url.toString();
-  const verification = await fetch(draftUrl, {
-    redirect: "follow",
-    cache: "no-store",
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!verification.ok) throw new Error(`draft_http_${verification.status}`);
-
+  const draft = await issueDraft(args.ownerKey, project.project_slug);
   return {
-    provider: "supabase_edge",
-    deployUrl: draftUrl,
-    httpVerified: true,
-    databaseLeads: true,
+    ok: true,
+    mode: "web_studio_draft_repair_v1",
+    projectSlug: project.project_slug,
+    spec: revised,
+    target: "draft",
+    draft,
+    productionUntouched: true,
+    productionDeployUrl: project.deploy_url,
   };
 }
 
@@ -82,7 +122,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     service: "khasroy-web-studio",
-    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, finalTarget: "vercel" },
+    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, finalTarget: "vercel" },
     projects: await listWebProjects(auth.ownerKey, 20).catch(() => []),
   });
 }
@@ -142,6 +182,12 @@ export async function POST(request: Request) {
       const projectSlug = typeof body?.projectSlug === "string" ? body.projectSlug.trim() : "";
       const instruction = typeof body?.instruction === "string" ? body.instruction.trim().slice(0, 10000) : "";
       if (!projectSlug || !instruction) return NextResponse.json({ error: "project_slug_and_instruction_required" }, { status: 400 });
+
+      // Repairs stay in staging by default. The existing production editor is
+      // still available only when the caller explicitly opts into publish:true.
+      if (body?.publish !== true) {
+        return NextResponse.json(await stageDraftRevision({ ownerKey: auth.ownerKey, apiKey, projectSlug, instruction }));
+      }
       return NextResponse.json(await editWebsite({ ownerKey: auth.ownerKey, apiKey, projectSlug, instruction }));
     }
 
@@ -170,7 +216,7 @@ export async function POST(request: Request) {
         ok: false,
         error: "Web Studio не завершил операцию.",
         detail: message.slice(0, 600),
-        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, finalTarget: "vercel" },
+        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, finalTarget: "vercel" },
       },
       { status: 502 },
     );
