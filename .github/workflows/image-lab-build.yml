@@ -6,8 +6,10 @@ on:
     paths:
       - "package.json"
       - "scripts/ensure-local-owner-key.mjs"
+      - "scripts/validate-generated-image.mjs"
       - "tests/local-owner-key.mjs"
       - "tests/image-intent.mjs"
+      - "tests/generated-image-integrity.mjs"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
       - "lib/server-image-lab.ts"
@@ -23,8 +25,10 @@ on:
     paths:
       - "package.json"
       - "scripts/ensure-local-owner-key.mjs"
+      - "scripts/validate-generated-image.mjs"
       - "tests/local-owner-key.mjs"
       - "tests/image-intent.mjs"
+      - "tests/generated-image-integrity.mjs"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
       - "lib/server-image-lab.ts"
@@ -57,6 +61,8 @@ jobs:
         run: npm run test:local-owner-key
       - name: Image intent regression test
         run: npm run test:image-intent
+      - name: Generated image integrity test
+        run: npm run test:image-integrity
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Next production build
