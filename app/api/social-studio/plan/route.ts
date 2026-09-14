@@ -32,7 +32,7 @@ function isWebStudioSpec(value: unknown): value is WebStudioSpec {
   );
 }
 
-async function queueInstagramPlanItem(ownerKey: string, apiKey: string, item: SmmContentItem) {
+async function queuePlanItem(ownerKey: string, apiKey: string, item: SmmContentItem) {
   const response = await fetch(STORE_ENDPOINT, {
     method: "POST",
     headers: {
@@ -42,6 +42,7 @@ async function queueInstagramPlanItem(ownerKey: string, apiKey: string, item: Sm
     body: JSON.stringify({
       ownerKey,
       action: "queue_social",
+      channel: item.channel,
       contentType: item.format,
       title: item.hook,
       caption: `${item.hook}\n\n${item.angle}\n\n${item.cta}`,
@@ -93,6 +94,7 @@ export async function POST(request: Request) {
     saved: number;
     skipped: number;
     ids: string[];
+    channels: Record<string, number>;
     error?: string;
   } = {
     requested: persist,
@@ -100,12 +102,11 @@ export async function POST(request: Request) {
     saved: 0,
     skipped: 0,
     ids: [],
+    channels: {},
   };
 
   if (persist) {
     const apiKey = process.env.KHASROY_SUPABASE_PUBLISHABLE_KEY?.trim();
-    const instagramItems = plan.items.filter((item) => item.channel === "instagram");
-    const skipped = plan.items.length - instagramItems.length;
 
     if (!apiKey) {
       persistence = {
@@ -114,24 +115,31 @@ export async function POST(request: Request) {
         saved: 0,
         skipped: plan.items.length,
         ids: [],
+        channels: {},
         error: "social_store_not_configured",
       };
     } else {
       const results = await Promise.allSettled(
-        instagramItems.map((item) => queueInstagramPlanItem(ownerKey, apiKey, item)),
+        plan.items.map(async (item) => ({ item, id: await queuePlanItem(ownerKey, apiKey, item) })),
       );
-      const ids = results
-        .filter((result): result is PromiseFulfilledResult<string | null> => result.status === "fulfilled")
-        .map((result) => result.value)
-        .filter((id): id is string => Boolean(id));
+      const fulfilled = results.filter(
+        (result): result is PromiseFulfilledResult<{ item: SmmContentItem; id: string | null }> =>
+          result.status === "fulfilled",
+      );
+      const ids = fulfilled.map((result) => result.value.id).filter((id): id is string => Boolean(id));
       const failures = results.filter((result) => result.status === "rejected").length;
+      const channels = fulfilled.reduce<Record<string, number>>((acc, result) => {
+        if (result.value.id) acc[result.value.item.channel] = (acc[result.value.item.channel] || 0) + 1;
+        return acc;
+      }, {});
 
       persistence = {
         requested: true,
         ok: failures === 0,
         saved: ids.length,
-        skipped: skipped + failures,
+        skipped: failures,
         ids,
+        channels,
         ...(failures ? { error: "partial_social_store_failure" } : {}),
       };
     }
