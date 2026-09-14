@@ -30,7 +30,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error "$STORE_ENDPOINT" \
+          CURL_RETRY=(--fail --silent --show-error --retry 4 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 35)
+          curl "${CURL_RETRY[@]}" "$STORE_ENDPOINT" \
             -H "content-type: application/json" \
             -H "apikey: $STORE_KEY" \
             --data-binary @- > /tmp/project.json <<JSON
@@ -38,7 +39,7 @@ jobs:
           JSON
           grep -q '"ok":true' /tmp/project.json
 
-          curl --fail --silent --show-error "$STORE_ENDPOINT" \
+          curl "${CURL_RETRY[@]}" "$STORE_ENDPOINT" \
             -H "content-type: application/json" \
             -H "apikey: $STORE_KEY" \
             --data-binary "{\"action\":\"set_site_token\",\"ownerKey\":\"$OWNER_KEY\",\"projectSlug\":\"$PROJECT_SLUG\",\"siteToken\":\"$SITE_TOKEN\"}" \
@@ -49,7 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error \
+          curl --fail --silent --show-error --retry 4 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 35 \
             "$DRAFT_ENDPOINT?project=$PROJECT_SLUG&token=$SITE_TOKEN" \
             > /tmp/draft.html
           grep -q 'KHASROY DRAFT' /tmp/draft.html
@@ -60,14 +61,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          CURL_RETRY=(--fail --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 35)
           export PHONE="+996700${GITHUB_RUN_ID: -6}"
-          curl --fail --silent --show-error "$DRAFT_ENDPOINT" \
+          curl "${CURL_RETRY[@]}" "$DRAFT_ENDPOINT" \
             -H "content-type: application/json" \
             --data-binary "{\"action\":\"submit_lead\",\"projectSlug\":\"$PROJECT_SLUG\",\"siteToken\":\"$SITE_TOKEN\",\"name\":\"Khasroy Draft CI\",\"phone\":\"$PHONE\",\"message\":\"Automated draft E2E\",\"website\":\"\"}" \
             > /tmp/submit.json
           grep -q '"accepted":true' /tmp/submit.json
 
-          curl --fail --silent --show-error "$STORE_ENDPOINT" \
+          curl "${CURL_RETRY[@]}" "$STORE_ENDPOINT" \
             -H "content-type: application/json" \
             -H "apikey: $STORE_KEY" \
             --data-binary "{\"action\":\"list_leads\",\"ownerKey\":\"$OWNER_KEY\",\"projectSlug\":\"$PROJECT_SLUG\",\"limit\":20}" \
