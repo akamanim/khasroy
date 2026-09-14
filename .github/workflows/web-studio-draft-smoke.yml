@@ -1,0 +1,85 @@
+name: Web Studio Draft E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: web-studio-draft-e2e
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  draft-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STORE_ENDPOINT: https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-studio
+      DRAFT_ENDPOINT: https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-draft
+      STORE_KEY: sb_publishable_cQzfru6dR7_T4myYO1c_fA_r-iFXOtn
+      OWNER_KEY: khasroy-draft-ci-owner-v1
+      PROJECT_SLUG: khasroy-draft-ci
+      SITE_TOKEN: khasroy-draft-ci-site-token-20260914-v1
+    steps:
+      - name: Seed draft project through Web Studio store
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURL_RETRY=(--fail --silent --show-error --retry 4 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 35)
+          curl "${CURL_RETRY[@]}" "$STORE_ENDPOINT" \
+            -H "content-type: application/json" \
+            -H "apikey: $STORE_KEY" \
+            --data-binary @- > /tmp/project.json <<JSON
+          {"action":"upsert_project","ownerKey":"$OWNER_KEY","projectSlug":"$PROJECT_SLUG","status":"building","brief":"Khasroy draft CI smoke test","spec":{"brandName":"Khasroy Draft CI","tagline":"Черновик работает без Vercel","description":"Автоматический smoke test отдельного draft-контура.","audience":"Khasroy CI","primaryCta":"Проверить заявку","contactText":"Проверка Supabase lead pipeline","services":["Draft preview","Lead pipeline","Pre-Vercel verification"],"advantages":["Без Vercel quota","Быстрая проверка","Отдельный чистовик"]}}
+          JSON
+          grep -q '"ok":true' /tmp/project.json
+
+          curl "${CURL_RETRY[@]}" "$STORE_ENDPOINT" \
+            -H "content-type: application/json" \
+            -H "apikey: $STORE_KEY" \
+            --data-binary "{\"action\":\"set_site_token\",\"ownerKey\":\"$OWNER_KEY\",\"projectSlug\":\"$PROJECT_SLUG\",\"siteToken\":\"$SITE_TOKEN\"}" \
+            > /tmp/token.json
+          grep -q '"ok":true' /tmp/token.json
+
+      - name: Verify live draft preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 4 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 35 \
+            "$DRAFT_ENDPOINT?project=$PROJECT_SLUG&token=$SITE_TOKEN" \
+            > /tmp/draft.html
+          grep -q 'KHASROY DRAFT' /tmp/draft.html
+          grep -q 'Черновик работает без Vercel' /tmp/draft.html
+          echo "DRAFT_PREVIEW_OK"
+
+      - name: Submit and verify Supabase lead
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURL_RETRY=(--fail --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 35)
+          export PHONE="+996700${GITHUB_RUN_ID: -6}"
+          curl "${CURL_RETRY[@]}" "$DRAFT_ENDPOINT" \
+            -H "content-type: application/json" \
+            --data-binary "{\"action\":\"submit_lead\",\"projectSlug\":\"$PROJECT_SLUG\",\"siteToken\":\"$SITE_TOKEN\",\"name\":\"Khasroy Draft CI\",\"phone\":\"$PHONE\",\"message\":\"Automated draft E2E\",\"website\":\"\"}" \
+            > /tmp/submit.json
+          grep -q '"accepted":true' /tmp/submit.json
+
+          curl "${CURL_RETRY[@]}" "$STORE_ENDPOINT" \
+            -H "content-type: application/json" \
+            -H "apikey: $STORE_KEY" \
+            --data-binary "{\"action\":\"list_leads\",\"ownerKey\":\"$OWNER_KEY\",\"projectSlug\":\"$PROJECT_SLUG\",\"limit\":20}" \
+            > /tmp/leads.json
+
+          python - <<'PY'
+          import json, os
+          rows = json.load(open('/tmp/leads.json', encoding='utf-8'))
+          phone = os.environ['PHONE']
+          if not isinstance(rows, list) or not any(str(row.get('phone') or '') == phone for row in rows):
+              raise SystemExit('SUPABASE_LEAD_NOT_OBSERVED')
+          print('DRAFT_LEAD_E2E_OK')
+          PY

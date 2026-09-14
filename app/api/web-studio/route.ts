@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { installImageFetchHardening } from "@/lib/ai/image-fetch-hardening";
@@ -19,6 +20,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const STORE_ENDPOINT = process.env.KHASROY_WEB_STUDIO_ENDPOINT || "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-studio";
+const STORE_KEY = process.env.KHASROY_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_cQzfru6dR7_T4myYO1c_fA_r-iFXOtn";
+const DRAFT_ENDPOINT = process.env.KHASROY_WEB_DRAFT_ENDPOINT || "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-draft";
+
 // Web Studio must use the same survival stack as Site Agent. This keeps planning
 // and edit requests alive when Groq is quota blocked: persistent health can try
 // Gateway, and a failed Gateway can fall through to the direct Gemini layer.
@@ -38,13 +43,46 @@ async function ownerContext() {
   return { ownerKey } as const;
 }
 
+async function issueDraft(ownerKey: string, projectSlug: string) {
+  // Draft links deliberately use their own freshly rotated site token. A later
+  // production promotion generates another token inside buildWebsite(), which
+  // invalidates the old draft link and gives Vercel the new production token.
+  const siteToken = randomBytes(30).toString("base64url");
+  const tokenResponse = await fetch(STORE_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/json", apikey: STORE_KEY },
+    body: JSON.stringify({ action: "set_site_token", ownerKey, projectSlug, siteToken }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!tokenResponse.ok) throw new Error(`draft_token_${tokenResponse.status}`);
+
+  const url = new URL(DRAFT_ENDPOINT);
+  url.searchParams.set("project", projectSlug);
+  url.searchParams.set("token", siteToken);
+  const draftUrl = url.toString();
+  const verification = await fetch(draftUrl, {
+    redirect: "follow",
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!verification.ok) throw new Error(`draft_http_${verification.status}`);
+
+  return {
+    provider: "supabase_edge",
+    deployUrl: draftUrl,
+    httpVerified: true,
+    databaseLeads: true,
+  };
+}
+
 export async function GET() {
   const auth = await ownerContext();
   if ("error" in auth) return auth.error;
   return NextResponse.json({
     ok: true,
     service: "khasroy-web-studio",
-    runtime: webStudioRuntimeStatus(),
+    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, finalTarget: "vercel" },
     projects: await listWebProjects(auth.ownerKey, 20).catch(() => []),
   });
 }
@@ -110,8 +148,20 @@ export async function POST(request: Request) {
     if (!apiKey) return NextResponse.json({ error: "brain_not_configured" }, { status: 503 });
     const brief = typeof body?.brief === "string" ? body.brief.trim().slice(0, 10000) : "";
     if (!brief) return NextResponse.json({ error: "brief_required" }, { status: 400 });
-    const result = await buildWebsite({ ownerKey: auth.ownerKey, apiKey, brief, publish: body?.publish !== false });
-    return NextResponse.json(result);
+
+    // Normal Web Studio work now goes to the unlimited draft lane. Vercel is an
+    // explicit promotion target only: callers must send publish:true when the
+    // draft has passed the repair/verification loop and is ready for the clean
+    // production release.
+    const promoteToProduction = body?.publish === true;
+    const result = await buildWebsite({ ownerKey: auth.ownerKey, apiKey, brief, publish: promoteToProduction });
+
+    if (!promoteToProduction) {
+      const draft = await issueDraft(auth.ownerKey, result.spec.slug);
+      return NextResponse.json({ ...result, target: "draft", draft });
+    }
+
+    return NextResponse.json({ ...result, target: "vercel", draft: null });
   } catch (error) {
     console.error("Khasroy Web Studio failed", error);
     const message = error instanceof Error ? error.message : "web_studio_failed";
@@ -120,7 +170,7 @@ export async function POST(request: Request) {
         ok: false,
         error: "Web Studio не завершил операцию.",
         detail: message.slice(0, 600),
-        runtime: webStudioRuntimeStatus(),
+        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, finalTarget: "vercel" },
       },
       { status: 502 },
     );

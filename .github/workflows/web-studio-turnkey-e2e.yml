@@ -1,8 +1,6 @@
 name: Web Studio Turnkey E2E
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -10,7 +8,6 @@ permissions:
 
 jobs:
   turnkey-e2e:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[webstudio-e2e]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -48,7 +45,7 @@ jobs:
                   data=payload,
                   headers={
                       "Content-Type": "application/json",
-                      "User-Agent": "Khasroy-WebStudio-Production-E2E/5.0",
+                      "User-Agent": "Khasroy-WebStudio-Production-E2E/6.0",
                   },
                   method="POST",
               )
