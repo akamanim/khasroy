@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "node scripts/ensure-local-owner-key.mjs && next dev",
-    "build": "next build",
+    "build": "npm run test:web-studio-quality && next build",
     "typecheck": "tsc --noEmit",
     "start": "next start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
