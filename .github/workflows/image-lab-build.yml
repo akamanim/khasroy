@@ -18,6 +18,23 @@ on:
       - "app/api/vision-school/practical/**"
       - "app/api/status/**"
       - ".github/workflows/image-lab-build.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "package.json"
+      - "scripts/ensure-local-owner-key.mjs"
+      - "tests/local-owner-key.mjs"
+      - "tests/image-intent.mjs"
+      - "lib/chat.ts"
+      - "lib/image-intent.ts"
+      - "lib/server-image-lab.ts"
+      - "components/khasroy/markdown-message.tsx"
+      - "app/api/image-lab/**"
+      - "app/api/image-intent/**"
+      - "app/api/image-executor/**"
+      - "app/api/vision-school/practical/**"
+      - "app/api/status/**"
+      - ".github/workflows/image-lab-build.yml"
   workflow_dispatch:
 
 concurrency:
