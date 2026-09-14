@@ -7,6 +7,7 @@ import { installVisionFailover } from "@/lib/ai/vision-failover";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import { resolveAISecrets } from "@/lib/server-integrations";
 import { buildWebsite, planWebsite, webStudioRuntimeStatus } from "@/lib/web-studio";
+import { auditDraftSpec, qualityRepairInstruction } from "@/lib/web-studio-quality";
 import {
   editWebsite,
   getWebProject,
@@ -23,9 +24,6 @@ const STORE_ENDPOINT = process.env.KHASROY_WEB_STUDIO_ENDPOINT || "https://kebzl
 const STORE_KEY = process.env.KHASROY_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_cQzfru6dR7_T4myYO1c_fA_r-iFXOtn";
 const DRAFT_ENDPOINT = process.env.KHASROY_WEB_DRAFT_ENDPOINT || "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-draft";
 
-// Web Studio must use the same survival stack as Site Agent. This keeps planning
-// and edit requests alive when Groq is quota blocked: persistent health can try
-// Gateway, and a failed Gateway can fall through to the direct Gemini layer.
 installImageFetchHardening();
 installVisionFailover();
 installProviderFailover();
@@ -43,8 +41,6 @@ async function ownerContext() {
 }
 
 async function issueDraft(ownerKey: string, projectSlug: string) {
-  // Draft auth is separate from the production site's lead token. This means
-  // repeated draft/repair cycles cannot silently invalidate a live site's form.
   const response = await fetch(DRAFT_ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -107,31 +103,40 @@ async function stageDraftRevision(args: { ownerKey: string; apiKey: string; proj
 
   await saveDraftSpec();
   let draft = await issueDraft(args.ownerKey, project.project_slug);
+  let quality = auditDraftSpec(revised);
   let repairAttempts = 1;
 
-  // First autonomous repair loop: if the freshly issued draft cannot pass its
-  // own HTTP verification, ask the planner to repair the generated spec and
-  // re-issue exactly once. Production, GitHub and Vercel remain untouched.
-  if (!draft.httpVerified) {
-    const repairBrief = `Это АВТОМАТИЧЕСКИЙ РЕМОНТ черновика сайта. Предыдущая версия не прошла HTTP-проверку. Сохрани бренд, смысл, факты и требования владельца, но сделай спецификацию максимально надёжной и простой для рендера. Не публикуй сайт.\nНеудачная спецификация: ${JSON.stringify(revised).slice(0, 7000)}\nИсходный бриф: ${project.brief.slice(0, 5000)}\nТребование владельца: ${args.instruction.slice(0, 5000)}`;
+  // Repair on either transport failure or deterministic quality/mobile defects.
+  // This is intentionally bounded to one retry so a bad planner/provider cannot
+  // burn quotas in a loop. Production GitHub/Vercel remain untouched.
+  if (!draft.httpVerified || !quality.ok) {
+    const defectReason = !draft.httpVerified
+      ? "Предыдущая версия не прошла HTTP-проверку."
+      : `Черновик прошёл HTTP, но не прошёл quality gate: ${quality.issues.join(", ")}.`;
+    const repairBrief = `Это АВТОМАТИЧЕСКИЙ РЕМОНТ черновика сайта. ${defectReason} ${qualityRepairInstruction(quality)} Сохрани бренд, смысл, факты и требования владельца. Не публикуй сайт.\nНеудачная спецификация: ${JSON.stringify(revised).slice(0, 7000)}\nИсходный бриф: ${project.brief.slice(0, 5000)}\nТребование владельца: ${args.instruction.slice(0, 5000)}`;
     revised = await planWebsite({ apiKey: args.apiKey, brief: repairBrief });
     revised.slug = project.project_slug;
     await saveDraftSpec();
     draft = await issueDraft(args.ownerKey, project.project_slug);
+    quality = auditDraftSpec(revised);
     repairAttempts = 2;
   }
 
+  const verified = draft.httpVerified && quality.ok;
   return {
-    ok: draft.httpVerified,
-    mode: "web_studio_draft_repair_v2",
+    ok: verified,
+    mode: "web_studio_draft_repair_v3",
     projectSlug: project.project_slug,
     spec: revised,
     target: "draft",
     draft,
+    qualityGate: quality,
     repairLoop: {
       attempts: repairAttempts,
-      recovered: repairAttempts > 1 && draft.httpVerified,
-      verified: draft.httpVerified,
+      recovered: repairAttempts > 1 && verified,
+      verified,
+      httpVerified: draft.httpVerified,
+      qualityVerified: quality.ok,
     },
     productionUntouched: true,
     productionDeployUrl: project.deploy_url,
@@ -144,7 +149,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     service: "khasroy-web-studio",
-    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, finalTarget: "vercel" },
+    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, draftQualityGate: true, finalTarget: "vercel" },
     projects: await listWebProjects(auth.ownerKey, 20).catch(() => []),
   });
 }
@@ -193,9 +198,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    // Resolve the brain credential from either Vercel env or the encrypted
-    // Integration Vault. The old route only accepted GROQ_API_KEY from env,
-    // making key rotation and the Vault ineffective for the actual Web Studio.
     const secrets = await resolveAISecrets(auth.ownerKey);
     const apiKey = secrets.groq;
 
@@ -205,8 +207,6 @@ export async function POST(request: Request) {
       const instruction = typeof body?.instruction === "string" ? body.instruction.trim().slice(0, 10000) : "";
       if (!projectSlug || !instruction) return NextResponse.json({ error: "project_slug_and_instruction_required" }, { status: 400 });
 
-      // Repairs stay in staging by default. The existing production editor is
-      // still available only when the caller explicitly opts into publish:true.
       if (body?.publish !== true) {
         return NextResponse.json(await stageDraftRevision({ ownerKey: auth.ownerKey, apiKey, projectSlug, instruction }));
       }
@@ -217,16 +217,12 @@ export async function POST(request: Request) {
     const brief = typeof body?.brief === "string" ? body.brief.trim().slice(0, 10000) : "";
     if (!brief) return NextResponse.json({ error: "brief_required" }, { status: 400 });
 
-    // Normal Web Studio work now goes to the unlimited draft lane. Vercel is an
-    // explicit promotion target only: callers must send publish:true when the
-    // draft has passed the repair/verification loop and is ready for the clean
-    // production release.
     const promoteToProduction = body?.publish === true;
     const result = await buildWebsite({ ownerKey: auth.ownerKey, apiKey, brief, publish: promoteToProduction });
 
     if (!promoteToProduction) {
       const draft = await issueDraft(auth.ownerKey, result.spec.slug);
-      return NextResponse.json({ ...result, target: "draft", draft });
+      return NextResponse.json({ ...result, target: "draft", draft, qualityGate: auditDraftSpec(result.spec) });
     }
 
     return NextResponse.json({ ...result, target: "vercel", draft: null });
@@ -238,7 +234,7 @@ export async function POST(request: Request) {
         ok: false,
         error: "Web Studio не завершил операцию.",
         detail: message.slice(0, 600),
-        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, finalTarget: "vercel" },
+        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, draftQualityGate: true, finalTarget: "vercel" },
       },
       { status: 502 },
     );
