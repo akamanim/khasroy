@@ -103,37 +103,38 @@ function shouldRetryTransport(status: number, raw: string) {
   return status === 408 || status === 502 || status === 503 || status === 504 || /FUNCTION_INVOCATION_TIMEOUT|timed?\s*out|timeout/iu.test(raw);
 }
 
-function splitReadableChunks(content: string) {
-  const paragraphs = content.split(/(\n\n+)/u).filter(Boolean);
-  const chunks: string[] = [];
-  for (const paragraph of paragraphs) {
-    if (/^\n+$/u.test(paragraph) || paragraph.length <= 420) {
-      chunks.push(paragraph);
-      continue;
-    }
-    const words = paragraph.split(/(\s+)/u);
-    let current = "";
-    for (const word of words) {
-      if (current.length + word.length > 300 && current.trim()) {
-        chunks.push(current);
-        current = word;
-      } else {
-        current += word;
-      }
-    }
-    if (current) chunks.push(current);
-  }
-  return chunks;
+function typewriterPlan(remaining: number) {
+  if (remaining > 1600) return { size: 5, delay: 8 + Math.random() * 4 };
+  if (remaining > 700) return { size: 3, delay: 10 + Math.random() * 6 };
+  if (remaining > 220) return { size: 2, delay: 14 + Math.random() * 8 };
+  return { size: 1, delay: 24 + Math.random() * 14 };
+}
+
+function typewriterPause(delta: string) {
+  const last = Array.from(delta).at(-1) || "";
+  if (/[.!?…]/u.test(last)) return 90;
+  if (/[,;:]/u.test(last)) return 42;
+  if (last === "\n") return 58;
+  return 0;
 }
 
 async function revealContent(content: string, callbacks?: ChatCallbacks) {
   if (!callbacks?.onChunk) return;
+
+  const characters = Array.from(content);
+  let cursor = 0;
   let full = "";
-  const chunks = splitReadableChunks(content);
-  for (const chunk of chunks) {
-    full += chunk;
-    callbacks.onChunk(chunk, full);
-    await wait(chunk.trim() ? 45 : 18);
+
+  while (cursor < characters.length) {
+    const remaining = characters.length - cursor;
+    const plan = typewriterPlan(remaining);
+    const delta = characters.slice(cursor, cursor + plan.size).join("");
+
+    cursor += plan.size;
+    full += delta;
+    callbacks.onChunk(delta, full);
+
+    await wait(plan.delay + typewriterPause(delta));
   }
 }
 
