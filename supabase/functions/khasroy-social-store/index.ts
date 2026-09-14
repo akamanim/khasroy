@@ -5,6 +5,7 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CHANNELS = ["instagram", "tiktok", "telegram"] as const;
 const CONTENT_TYPES = ["reel", "post", "story", "carousel"] as const;
 const MAX_PUBLISH_ATTEMPTS = 5;
+const DEFAULT_STALE_MINUTES = 15;
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -41,11 +42,11 @@ Deno.serve(async (request) => {
     return json({
       ok: true,
       service: "khasroy-social-store",
-      version: 3,
+      version: 4,
       socialChannels: [...CHANNELS],
       contentTypes: [...CONTENT_TYPES],
-      capabilities: ["queue_social", "list_social", "save_composed", "claim_ready", "mark_published", "mark_failed"],
-      publishing: { maxAttempts: MAX_PUBLISH_ATTEMPTS, claimIsCompareAndSet: true },
+      capabilities: ["queue_social", "list_social", "save_composed", "claim_ready", "list_stale_publishing", "mark_published", "mark_failed"],
+      publishing: { maxAttempts: MAX_PUBLISH_ATTEMPTS, claimIsCompareAndSet: true, staleReconciliationMinutes: DEFAULT_STALE_MINUTES },
     });
   }
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -124,7 +125,7 @@ Deno.serve(async (request) => {
       const now = new Date().toISOString();
       const channel = CHANNELS.includes(body?.channel) ? body.channel : null;
       const channelFilter = channel ? `&channel=eq.${channel}` : "";
-      const lookup = await db(`khasroy_social_queue?owner_hash=eq.${ownerHash}&status=eq.ready${channelFilter}&or=(scheduled_at.is.null,scheduled_at.lte.${encodeURIComponent(now)})&select=id,channel,content_type,status,title,caption,script,media_url,metadata,scheduled_at&order=scheduled_at.asc.nullsfirst,created_at.asc&limit=1`);
+      const lookup = await db(`khasroy_social_queue?owner_hash=eq.${ownerHash}&status=eq.ready${channelFilter}&or=(scheduled_at.is.null,scheduled_at.lte.${encodeURIComponent(now)})&select=id,channel,content_type,status,title,caption,script,media_url,metadata,scheduled_at,updated_at&order=scheduled_at.asc.nullsfirst,created_at.asc&limit=1`);
       const rows = await lookup.json();
       const candidate = Array.isArray(rows) ? rows[0] : null;
       if (!candidate?.id) return json({ ok: true, item: null });
@@ -143,6 +144,20 @@ Deno.serve(async (request) => {
       });
       const claimed = await response.json();
       return json({ ok: true, item: Array.isArray(claimed) ? claimed[0] || null : null, attempt });
+    }
+
+    if (action === "list_stale_publishing") {
+      const staleMinutesRaw = Number(body?.staleMinutes);
+      const staleMinutes = Number.isFinite(staleMinutesRaw)
+        ? Math.min(1440, Math.max(5, Math.trunc(staleMinutesRaw)))
+        : DEFAULT_STALE_MINUTES;
+      const limitRaw = Number(body?.limit);
+      const limit = Number.isFinite(limitRaw) ? Math.min(20, Math.max(1, Math.trunc(limitRaw))) : 5;
+      const channel = CHANNELS.includes(body?.channel) ? body.channel : null;
+      const channelFilter = channel ? `&channel=eq.${channel}` : "";
+      const cutoff = new Date(Date.now() - staleMinutes * 60_000).toISOString();
+      const response = await db(`khasroy_social_queue?owner_hash=eq.${ownerHash}&status=eq.publishing${channelFilter}&updated_at=lte.${encodeURIComponent(cutoff)}&select=id,channel,content_type,status,title,caption,script,media_url,metadata,scheduled_at,updated_at&order=updated_at.asc&limit=${limit}`);
+      return json({ ok: true, staleMinutes, items: await response.json() });
     }
 
     if (action === "mark_published") {

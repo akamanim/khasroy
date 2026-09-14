@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  DEFAULT_RECONCILE_STALE_MINUTES,
   MAX_PUBLISH_ATTEMPTS,
   SOCIAL_CHANNELS,
   adapterEnvName,
@@ -7,6 +8,7 @@ import {
   isSocialChannel,
   nextPublishState,
   normalizeAdapterResult,
+  normalizeAdapterStatusResult,
   retryDelaySeconds,
 } from "../lib/smm-publisher.ts";
 
@@ -14,6 +16,7 @@ assert.equal(retryDelaySeconds(1), 30);
 assert.equal(retryDelaySeconds(2), 60);
 assert.equal(retryDelaySeconds(20), 3600);
 assert.equal(adapterEnvName("telegram"), "KHASROY_SOCIAL_TELEGRAM_WEBHOOK");
+assert.equal(DEFAULT_RECONCILE_STALE_MINUTES, 15);
 assert.deepEqual(SOCIAL_CHANNELS, ["instagram", "tiktok", "telegram"]);
 assert.equal(isSocialChannel("instagram"), true);
 assert.equal(isSocialChannel("youtube"), false);
@@ -49,5 +52,26 @@ assert.equal(permanent.retryAfterSeconds, null);
 assert.deepEqual(normalizeAdapterResult({ ok: true, publishedId: " abc " }), { ok: true, publishedId: "abc" });
 assert.deepEqual(normalizeAdapterResult({ error: "temporary" }), { ok: false, error: "temporary", retryable: true });
 assert.deepEqual(normalizeAdapterResult({ error: "bad auth", retryable: false }), { ok: false, error: "bad auth", retryable: false });
+
+assert.deepEqual(normalizeAdapterStatusResult({ state: "published", publishedId: " remote-42 " }), {
+  state: "published",
+  publishedId: "remote-42",
+});
+assert.deepEqual(normalizeAdapterStatusResult({ state: "not_found" }), { state: "not_found" });
+assert.deepEqual(normalizeAdapterStatusResult({ state: "processing" }), {
+  state: "unknown",
+  error: "adapter_status_unknown",
+  retryable: true,
+});
+assert.deepEqual(normalizeAdapterStatusResult({ state: "published" }), {
+  state: "unknown",
+  error: "adapter_status_missing_published_id",
+  retryable: true,
+});
+assert.deepEqual(normalizeAdapterStatusResult({ error: "auth_failed", retryable: false }), {
+  state: "unknown",
+  error: "auth_failed",
+  retryable: false,
+});
 
 console.log("smm-publisher tests passed");
