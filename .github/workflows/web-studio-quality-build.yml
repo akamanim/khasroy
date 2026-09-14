@@ -24,6 +24,6 @@ jobs:
         with:
           node-version: 22.19.0
           cache: npm
-      - run: npm ci --ignore-scripts
+      - run: npm install --ignore-scripts --package-lock=false
       - run: npm run typecheck
       - run: npm run build
