@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import {
   MAX_PUBLISH_ATTEMPTS,
+  SOCIAL_CHANNELS,
   adapterEnvName,
+  isRetryableAdapterHttpStatus,
+  isSocialChannel,
   nextPublishState,
   normalizeAdapterResult,
   retryDelaySeconds,
@@ -11,6 +14,15 @@ assert.equal(retryDelaySeconds(1), 30);
 assert.equal(retryDelaySeconds(2), 60);
 assert.equal(retryDelaySeconds(20), 3600);
 assert.equal(adapterEnvName("telegram"), "KHASROY_SOCIAL_TELEGRAM_WEBHOOK");
+assert.deepEqual(SOCIAL_CHANNELS, ["instagram", "tiktok", "telegram"]);
+assert.equal(isSocialChannel("instagram"), true);
+assert.equal(isSocialChannel("youtube"), false);
+assert.equal(isRetryableAdapterHttpStatus(408), true);
+assert.equal(isRetryableAdapterHttpStatus(425), true);
+assert.equal(isRetryableAdapterHttpStatus(429), true);
+assert.equal(isRetryableAdapterHttpStatus(503), true);
+assert.equal(isRetryableAdapterHttpStatus(400), false);
+assert.equal(isRetryableAdapterHttpStatus(401), false);
 
 const success = nextPublishState(1, { ok: true, publishedId: "post-123" });
 assert.deepEqual(success, {
