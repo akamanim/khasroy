@@ -13,6 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test:local-owner-key": "node tests/local-owner-key.mjs",
     "test:image-intent": "node --experimental-strip-types tests/image-intent.mjs",
+    "test:image-integrity": "node tests/generated-image-integrity.mjs",
     "test:web-studio-quality": "node --experimental-strip-types tests/web-studio-quality.mjs",
     "test:smm-pipeline": "node --experimental-strip-types tests/smm-pipeline.mjs",
     "test:smm-compose": "node --experimental-strip-types tests/smm-compose.mjs",
