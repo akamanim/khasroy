@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "app/studio/**"
       - "app/api/web-studio/**"
       - "lib/web-studio*.ts"
       - "tests/web-studio-quality.mjs"
