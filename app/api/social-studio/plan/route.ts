@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { buildSmmPlan } from "@/lib/smm-pipeline";
-import type { SmmContentItem } from "@/lib/smm-pipeline";
+import type { SmmChannel, SmmContentItem } from "@/lib/smm-pipeline";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import type { WebStudioSpec } from "@/lib/web-studio";
 
@@ -11,6 +11,8 @@ export const dynamic = "force-dynamic";
 const STORE_ENDPOINT =
   process.env.KHASROY_WEB_STUDIO_ENDPOINT ||
   "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-studio";
+
+const DEFAULT_STORE_CHANNELS: SmmChannel[] = ["instagram"];
 
 type PlanRequest = {
   spec?: unknown;
@@ -32,7 +34,28 @@ function isWebStudioSpec(value: unknown): value is WebStudioSpec {
   );
 }
 
-async function queueInstagramPlanItem(ownerKey: string, apiKey: string, item: SmmContentItem) {
+function isSmmChannel(value: unknown): value is SmmChannel {
+  return value === "instagram" || value === "tiktok" || value === "telegram";
+}
+
+async function getStoreChannels(apiKey: string): Promise<SmmChannel[]> {
+  try {
+    const response = await fetch(STORE_ENDPOINT, {
+      method: "GET",
+      headers: { apikey: apiKey },
+      cache: "no-store",
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) return DEFAULT_STORE_CHANNELS;
+    const data = (await response.json().catch(() => null)) as { socialChannels?: unknown } | null;
+    const channels = Array.isArray(data?.socialChannels) ? data.socialChannels.filter(isSmmChannel) : [];
+    return channels.length ? channels : DEFAULT_STORE_CHANNELS;
+  } catch {
+    return DEFAULT_STORE_CHANNELS;
+  }
+}
+
+async function queuePlanItem(ownerKey: string, apiKey: string, item: SmmContentItem) {
   const response = await fetch(STORE_ENDPOINT, {
     method: "POST",
     headers: {
@@ -42,6 +65,7 @@ async function queueInstagramPlanItem(ownerKey: string, apiKey: string, item: Sm
     body: JSON.stringify({
       ownerKey,
       action: "queue_social",
+      channel: item.channel,
       contentType: item.format,
       title: item.hook,
       caption: `${item.hook}\n\n${item.angle}\n\n${item.cta}`,
@@ -93,6 +117,8 @@ export async function POST(request: Request) {
     saved: number;
     skipped: number;
     ids: string[];
+    channels: Record<string, number>;
+    storeChannels: SmmChannel[];
     error?: string;
   } = {
     requested: persist,
@@ -100,12 +126,12 @@ export async function POST(request: Request) {
     saved: 0,
     skipped: 0,
     ids: [],
+    channels: {},
+    storeChannels: [],
   };
 
   if (persist) {
     const apiKey = process.env.KHASROY_SUPABASE_PUBLISHABLE_KEY?.trim();
-    const instagramItems = plan.items.filter((item) => item.channel === "instagram");
-    const skipped = plan.items.length - instagramItems.length;
 
     if (!apiKey) {
       persistence = {
@@ -114,25 +140,41 @@ export async function POST(request: Request) {
         saved: 0,
         skipped: plan.items.length,
         ids: [],
+        channels: {},
+        storeChannels: [],
         error: "social_store_not_configured",
       };
     } else {
+      const storeChannels = await getStoreChannels(apiKey);
+      const persistableItems = plan.items.filter((item) => storeChannels.includes(item.channel));
+      const unsupported = plan.items.length - persistableItems.length;
       const results = await Promise.allSettled(
-        instagramItems.map((item) => queueInstagramPlanItem(ownerKey, apiKey, item)),
+        persistableItems.map(async (item) => ({ item, id: await queuePlanItem(ownerKey, apiKey, item) })),
       );
-      const ids = results
-        .filter((result): result is PromiseFulfilledResult<string | null> => result.status === "fulfilled")
-        .map((result) => result.value)
-        .filter((id): id is string => Boolean(id));
+      const fulfilled = results.filter(
+        (result): result is PromiseFulfilledResult<{ item: SmmContentItem; id: string | null }> =>
+          result.status === "fulfilled",
+      );
+      const ids = fulfilled.map((result) => result.value.id).filter((id): id is string => Boolean(id));
       const failures = results.filter((result) => result.status === "rejected").length;
+      const channels = fulfilled.reduce<Record<string, number>>((acc, result) => {
+        if (result.value.id) acc[result.value.item.channel] = (acc[result.value.item.channel] || 0) + 1;
+        return acc;
+      }, {});
 
       persistence = {
         requested: true,
         ok: failures === 0,
         saved: ids.length,
-        skipped: skipped + failures,
+        skipped: unsupported + failures,
         ids,
-        ...(failures ? { error: "partial_social_store_failure" } : {}),
+        channels,
+        storeChannels,
+        ...(failures
+          ? { error: "partial_social_store_failure" }
+          : unsupported
+            ? { error: "social_store_channel_limited" }
+            : {}),
       };
     }
   }
