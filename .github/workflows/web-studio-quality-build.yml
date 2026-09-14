@@ -1,0 +1,29 @@
+name: Web Studio Quality Build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/api/web-studio/**"
+      - "lib/web-studio*.ts"
+      - "tests/web-studio-quality.mjs"
+      - "package.json"
+      - ".github/workflows/web-studio-quality-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm install --ignore-scripts --package-lock=false
+      - run: npm run typecheck
+      - run: npm run build
