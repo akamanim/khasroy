@@ -1,0 +1,82 @@
+.proBar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transform: translateX(-50%);
+  padding: 8px 10px;
+  border: 1px solid rgba(157, 223, 242, 0.2);
+  border-radius: 16px;
+  background: rgba(7, 15, 21, 0.88);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 14px 45px rgba(0, 0, 0, 0.32);
+}
+
+.badge {
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: rgba(157, 223, 242, 0.12);
+  color: #9ddff2;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.proBar button,
+.proBar select {
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d9e8ee;
+}
+
+.proBar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  padding: 0 9px;
+  cursor: pointer;
+}
+
+.proBar button:hover:not(:disabled),
+.proBar .active {
+  border-color: rgba(157, 223, 242, 0.42);
+  background: rgba(157, 223, 242, 0.13);
+  color: #b9efff;
+}
+
+.proBar button:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.proBar select {
+  padding: 0 8px;
+  outline: none;
+}
+
+.divider {
+  width: 1px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.snap {
+  width: auto !important;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .proBar {
+    bottom: 10px;
+    max-width: calc(100vw - 20px);
+    overflow-x: auto;
+  }
+}
