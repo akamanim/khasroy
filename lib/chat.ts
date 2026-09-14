@@ -389,7 +389,7 @@ export async function chat(messages: Message[], callbacks?: ChatCallbacks): Prom
   const siteAgent = latestUser ? looksLikeSiteAgentRequest(latestUser.content) : false;
   if (siteAgent && latestUser) return runSiteAgent(latestUser.content, callbacks);
 
-  callbacks?.onProgress?.({ stage: "BRAIN", message: "Маршрутизирую запрос и подключаю нужный модуль мозга…" });
+  callbacks?.onProgress?.({ stage: "BRAIN", message: "думаю..." });
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
