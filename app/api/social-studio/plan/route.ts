@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { buildSmmPlan } from "@/lib/smm-pipeline";
-import type { SmmContentItem } from "@/lib/smm-pipeline";
+import type { SmmChannel, SmmContentItem } from "@/lib/smm-pipeline";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import type { WebStudioSpec } from "@/lib/web-studio";
 
@@ -11,6 +11,8 @@ export const dynamic = "force-dynamic";
 const STORE_ENDPOINT =
   process.env.KHASROY_WEB_STUDIO_ENDPOINT ||
   "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-studio";
+
+const DEFAULT_STORE_CHANNELS: SmmChannel[] = ["instagram"];
 
 type PlanRequest = {
   spec?: unknown;
@@ -30,6 +32,27 @@ function isWebStudioSpec(value: unknown): value is WebStudioSpec {
     Array.isArray(spec.services) && spec.services.every((item) => typeof item === "string") &&
     Array.isArray(spec.advantages) && spec.advantages.every((item) => typeof item === "string")
   );
+}
+
+function isSmmChannel(value: unknown): value is SmmChannel {
+  return value === "instagram" || value === "tiktok" || value === "telegram";
+}
+
+async function getStoreChannels(apiKey: string): Promise<SmmChannel[]> {
+  try {
+    const response = await fetch(STORE_ENDPOINT, {
+      method: "GET",
+      headers: { apikey: apiKey },
+      cache: "no-store",
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) return DEFAULT_STORE_CHANNELS;
+    const data = (await response.json().catch(() => null)) as { socialChannels?: unknown } | null;
+    const channels = Array.isArray(data?.socialChannels) ? data.socialChannels.filter(isSmmChannel) : [];
+    return channels.length ? channels : DEFAULT_STORE_CHANNELS;
+  } catch {
+    return DEFAULT_STORE_CHANNELS;
+  }
 }
 
 async function queuePlanItem(ownerKey: string, apiKey: string, item: SmmContentItem) {
@@ -95,6 +118,7 @@ export async function POST(request: Request) {
     skipped: number;
     ids: string[];
     channels: Record<string, number>;
+    storeChannels: SmmChannel[];
     error?: string;
   } = {
     requested: persist,
@@ -103,6 +127,7 @@ export async function POST(request: Request) {
     skipped: 0,
     ids: [],
     channels: {},
+    storeChannels: [],
   };
 
   if (persist) {
@@ -116,11 +141,15 @@ export async function POST(request: Request) {
         skipped: plan.items.length,
         ids: [],
         channels: {},
+        storeChannels: [],
         error: "social_store_not_configured",
       };
     } else {
+      const storeChannels = await getStoreChannels(apiKey);
+      const persistableItems = plan.items.filter((item) => storeChannels.includes(item.channel));
+      const unsupported = plan.items.length - persistableItems.length;
       const results = await Promise.allSettled(
-        plan.items.map(async (item) => ({ item, id: await queuePlanItem(ownerKey, apiKey, item) })),
+        persistableItems.map(async (item) => ({ item, id: await queuePlanItem(ownerKey, apiKey, item) })),
       );
       const fulfilled = results.filter(
         (result): result is PromiseFulfilledResult<{ item: SmmContentItem; id: string | null }> =>
@@ -137,10 +166,15 @@ export async function POST(request: Request) {
         requested: true,
         ok: failures === 0,
         saved: ids.length,
-        skipped: failures,
+        skipped: unsupported + failures,
         ids,
         channels,
-        ...(failures ? { error: "partial_social_store_failure" } : {}),
+        storeChannels,
+        ...(failures
+          ? { error: "partial_social_store_failure" }
+          : unsupported
+            ? { error: "social_store_channel_limited" }
+            : {}),
       };
     }
   }
