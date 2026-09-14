@@ -9,8 +9,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const STORE_ENDPOINT =
-  process.env.KHASROY_WEB_STUDIO_ENDPOINT ||
-  "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-studio";
+  process.env.KHASROY_SOCIAL_STORE_ENDPOINT ||
+  "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-social-store";
 
 const DEFAULT_STORE_CHANNELS: SmmChannel[] = ["instagram"];
 
