@@ -1,5 +1,10 @@
-import { Fragment, type ReactNode } from "react";
+"use client";
+
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import styles from "./markdown-message.module.css";
+
+const CARET_TOKEN = "\uE000";
+const CARET_LINGER_MS = 1400;
 
 function safeHref(value: string) {
   const href = value.trim();
@@ -14,9 +19,17 @@ function safeImageSrc(value: string) {
   return null;
 }
 
+function caretNode(key: string) {
+  return (
+    <span key={key} className={styles.caret} aria-hidden="true">
+      ▍
+    </span>
+  );
+}
+
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const tokens: ReactNode[] = [];
-  const pattern = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^\)\n]+\)|\*[^*\n]+\*)/g;
+  const pattern = /(\uE000|\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^\)\n]+\)|\*[^*\n]+\*)/g;
   let cursor = 0;
   let match: RegExpExecArray | null;
   let index = 0;
@@ -29,7 +42,9 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     const value = match[0];
     const key = `${keyPrefix}-${index++}`;
 
-    if (value.startsWith("**")) {
+    if (value === CARET_TOKEN) {
+      tokens.push(caretNode(key));
+    } else if (value.startsWith("**")) {
       tokens.push(<strong key={key}>{value.slice(2, -2)}</strong>);
     } else if (value.startsWith("`")) {
       tokens.push(<code key={key}>{value.slice(1, -1)}</code>);
@@ -56,6 +71,18 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
 
   if (cursor < text.length) tokens.push(text.slice(cursor));
   return tokens;
+}
+
+function renderCode(text: string, keyPrefix: string) {
+  const caretIndex = text.indexOf(CARET_TOKEN);
+  if (caretIndex < 0) return text;
+  return (
+    <>
+      {text.slice(0, caretIndex)}
+      {caretNode(`${keyPrefix}-caret`)}
+      {text.slice(caretIndex + CARET_TOKEN.length)}
+    </>
+  );
 }
 
 function splitTableRow(line: string) {
@@ -97,8 +124,114 @@ function isBlockStart(lines: string[], index: number) {
   );
 }
 
+function shouldRenderInstantly(content: string) {
+  return (
+    content.startsWith("Все системы готовы. Я Хасрой") ||
+    /data:image\/(?:png|jpeg|jpg|webp);base64,/i.test(content) ||
+    content.length > 120_000
+  );
+}
+
+function typingPlan(remaining: number) {
+  if (remaining > 1500) return { size: 12, delay: 7 + Math.random() * 5 };
+  if (remaining > 700) return { size: 6, delay: 8 + Math.random() * 6 };
+  if (remaining > 280) return { size: 3, delay: 12 + Math.random() * 8 };
+  if (remaining > 100) return { size: 2, delay: 17 + Math.random() * 10 };
+  return { size: 1, delay: 31 + (Math.random() * 18 - 9) };
+}
+
+function punctuationPause(typed: string) {
+  if (typed.length !== 1) return 0;
+  if (/[.!?…]/u.test(typed)) return 72;
+  if (/[,;:]/u.test(typed)) return 34;
+  if (typed === "\n") return 48;
+  return 0;
+}
+
 export function MarkdownMessage({ content }: { content: string }) {
-  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  const instantOnMount = shouldRenderInstantly(content);
+  const [displayedContent, setDisplayedContent] = useState(instantOnMount ? content : "");
+  const [showCaret, setShowCaret] = useState(false);
+  const indexRef = useRef(instantOnMount ? content.length : 0);
+  const displayedRef = useRef(instantOnMount ? content : "");
+  const hideCaretRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const reduceMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const renderInstantly = reduceMotion || shouldRenderInstantly(content);
+
+    if (hideCaretRef.current) {
+      clearTimeout(hideCaretRef.current);
+      hideCaretRef.current = null;
+    }
+
+    if (renderInstantly) {
+      indexRef.current = content.length;
+      displayedRef.current = content;
+      setDisplayedContent(content);
+      setShowCaret(false);
+      return;
+    }
+
+    if (
+      indexRef.current > content.length ||
+      !content.startsWith(displayedRef.current)
+    ) {
+      indexRef.current = 0;
+      displayedRef.current = "";
+      setDisplayedContent("");
+    }
+
+    if (!content) {
+      setShowCaret(false);
+      return;
+    }
+
+    setShowCaret(true);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = () => {
+      if (cancelled) return;
+
+      const remaining = content.length - indexRef.current;
+      if (remaining <= 0) {
+        hideCaretRef.current = setTimeout(() => {
+          setShowCaret(false);
+          hideCaretRef.current = null;
+        }, CARET_LINGER_MS);
+        return;
+      }
+
+      const plan = typingPlan(remaining);
+      const start = indexRef.current;
+      const end = Math.min(content.length, start + plan.size);
+      const typed = content.slice(start, end);
+      const next = content.slice(0, end);
+
+      indexRef.current = end;
+      displayedRef.current = next;
+      setDisplayedContent(next);
+
+      timer = setTimeout(tick, Math.max(4, plan.delay + punctuationPause(typed)));
+    };
+
+    tick();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      if (hideCaretRef.current) {
+        clearTimeout(hideCaretRef.current);
+        hideCaretRef.current = null;
+      }
+    };
+  }, [content]);
+
+  const source = showCaret ? `${displayedContent}${CARET_TOKEN}` : displayedContent;
+  const lines = source.replace(/\r\n?/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let index = 0;
   let block = 0;
@@ -124,7 +257,7 @@ export function MarkdownMessage({ content }: { content: string }) {
       blocks.push(
         <pre key={`code-${block++}`}>
           {language && <span className={styles.codeLanguage}>{language}</span>}
-          <code>{code.join("\n")}</code>
+          <code>{renderCode(code.join("\n"), `code-inline-${block}`)}</code>
         </pre>,
       );
       continue;
