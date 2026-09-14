@@ -80,37 +80,59 @@ async function stageDraftRevision(args: { ownerKey: string; apiKey: string; proj
   if (!project.spec || typeof project.spec !== "object") throw new Error("web_project_spec_invalid");
 
   const revisionBrief = `Это ДОРАБОТКА черновика существующего сайта. Сохрани бренд, факты и всё, что владелец явно не просит менять. Не публикуй сайт.\nТекущая спецификация: ${JSON.stringify(project.spec).slice(0, 7000)}\nТекущий исходный бриф: ${project.brief.slice(0, 5000)}\nИзменение владельца: ${args.instruction.slice(0, 5000)}`;
-  const revised = await planWebsite({ apiKey: args.apiKey, brief: revisionBrief });
+  let revised = await planWebsite({ apiKey: args.apiKey, brief: revisionBrief });
   revised.slug = project.project_slug;
 
-  const storeResponse = await fetch(STORE_ENDPOINT, {
-    method: "POST",
-    headers: { "content-type": "application/json", apikey: STORE_KEY },
-    body: JSON.stringify({
-      action: "upsert_project",
-      ownerKey: args.ownerKey,
-      projectSlug: project.project_slug,
-      status: "building",
-      brief: project.brief,
-      spec: revised,
-      repoFullName: project.repo_full_name,
-      repoUrl: project.repo_url,
-      vercelProjectId: project.vercel_project_id,
-      deployUrl: project.deploy_url,
-    }),
-    cache: "no-store",
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!storeResponse.ok) throw new Error(`draft_revision_store_${storeResponse.status}`);
+  const saveDraftSpec = async () => {
+    const storeResponse = await fetch(STORE_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json", apikey: STORE_KEY },
+      body: JSON.stringify({
+        action: "upsert_project",
+        ownerKey: args.ownerKey,
+        projectSlug: project.project_slug,
+        status: "building",
+        brief: project.brief,
+        spec: revised,
+        repoFullName: project.repo_full_name,
+        repoUrl: project.repo_url,
+        vercelProjectId: project.vercel_project_id,
+        deployUrl: project.deploy_url,
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!storeResponse.ok) throw new Error(`draft_revision_store_${storeResponse.status}`);
+  };
 
-  const draft = await issueDraft(args.ownerKey, project.project_slug);
+  await saveDraftSpec();
+  let draft = await issueDraft(args.ownerKey, project.project_slug);
+  let repairAttempts = 1;
+
+  // First autonomous repair loop: if the freshly issued draft cannot pass its
+  // own HTTP verification, ask the planner to repair the generated spec and
+  // re-issue exactly once. Production, GitHub and Vercel remain untouched.
+  if (!draft.httpVerified) {
+    const repairBrief = `Это АВТОМАТИЧЕСКИЙ РЕМОНТ черновика сайта. Предыдущая версия не прошла HTTP-проверку. Сохрани бренд, смысл, факты и требования владельца, но сделай спецификацию максимально надёжной и простой для рендера. Не публикуй сайт.\nНеудачная спецификация: ${JSON.stringify(revised).slice(0, 7000)}\nИсходный бриф: ${project.brief.slice(0, 5000)}\nТребование владельца: ${args.instruction.slice(0, 5000)}`;
+    revised = await planWebsite({ apiKey: args.apiKey, brief: repairBrief });
+    revised.slug = project.project_slug;
+    await saveDraftSpec();
+    draft = await issueDraft(args.ownerKey, project.project_slug);
+    repairAttempts = 2;
+  }
+
   return {
-    ok: true,
-    mode: "web_studio_draft_repair_v1",
+    ok: draft.httpVerified,
+    mode: "web_studio_draft_repair_v2",
     projectSlug: project.project_slug,
     spec: revised,
     target: "draft",
     draft,
+    repairLoop: {
+      attempts: repairAttempts,
+      recovered: repairAttempts > 1 && draft.httpVerified,
+      verified: draft.httpVerified,
+    },
     productionUntouched: true,
     productionDeployUrl: project.deploy_url,
   };
@@ -122,7 +144,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     service: "khasroy-web-studio",
-    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, finalTarget: "vercel" },
+    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, finalTarget: "vercel" },
     projects: await listWebProjects(auth.ownerKey, 20).catch(() => []),
   });
 }
@@ -216,7 +238,7 @@ export async function POST(request: Request) {
         ok: false,
         error: "Web Studio не завершил операцию.",
         detail: message.slice(0, 600),
-        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, finalTarget: "vercel" },
+        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, finalTarget: "vercel" },
       },
       { status: 502 },
     );
