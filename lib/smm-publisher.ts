@@ -1,9 +1,13 @@
 export type SocialChannel = "instagram" | "tiktok" | "telegram";
 
+export const SOCIAL_CHANNELS: SocialChannel[] = ["instagram", "tiktok", "telegram"];
+
 export type PublishQueueItem = {
   id: string;
   channel: SocialChannel;
+  content_type?: "reel" | "post" | "story" | "carousel" | null;
   status: "ready" | "publishing" | "published" | "failed";
+  title?: string | null;
   caption?: string | null;
   script?: string | null;
   media_url?: string | null;
@@ -45,6 +49,14 @@ export function nextPublishState(attempt: number, result: PublishAttemptResult) 
 
 export function adapterEnvName(channel: SocialChannel) {
   return `KHASROY_SOCIAL_${channel.toUpperCase()}_WEBHOOK`;
+}
+
+export function isSocialChannel(value: unknown): value is SocialChannel {
+  return typeof value === "string" && SOCIAL_CHANNELS.includes(value as SocialChannel);
+}
+
+export function isRetryableAdapterHttpStatus(status: number) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 export function normalizeAdapterResult(value: unknown): PublishAttemptResult {
