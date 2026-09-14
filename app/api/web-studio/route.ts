@@ -9,7 +9,6 @@ import { resolveAISecrets } from "@/lib/server-integrations";
 import { buildWebsite, planWebsite, webStudioRuntimeStatus } from "@/lib/web-studio";
 import { auditDraftSpec, qualityRepairInstruction } from "@/lib/web-studio-quality";
 import {
-  editWebsite,
   getWebProject,
   listSiteLeads,
   listWebProjects,
@@ -106,9 +105,6 @@ async function stageDraftRevision(args: { ownerKey: string; apiKey: string; proj
   let quality = auditDraftSpec(revised);
   let repairAttempts = 1;
 
-  // Repair on either transport failure or deterministic quality/mobile defects.
-  // This is intentionally bounded to one retry so a bad planner/provider cannot
-  // burn quotas in a loop. Production GitHub/Vercel remain untouched.
   if (!draft.httpVerified || !quality.ok) {
     const defectReason = !draft.httpVerified
       ? "Предыдущая версия не прошла HTTP-проверку."
@@ -143,13 +139,24 @@ async function stageDraftRevision(args: { ownerKey: string; apiKey: string; proj
   };
 }
 
+function promotionBlocked() {
+  return NextResponse.json({
+    ok: false,
+    error: "production_promotion_requires_verified_draft",
+    detail: "Прямой publish заблокирован: production можно обновлять только из уже сохранённого черновика, который прошёл свежие HTTP и quality/mobile проверки.",
+    target: "draft",
+    productionUntouched: true,
+    promotionGate: { required: true, verifiedDraftRequired: true, directPublishAllowed: false },
+  }, { status: 409 });
+}
+
 export async function GET() {
   const auth = await ownerContext();
   if ("error" in auth) return auth.error;
   return NextResponse.json({
     ok: true,
     service: "khasroy-web-studio",
-    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, initialAutoRepair: true, draftQualityGate: true, finalTarget: "vercel" },
+    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, initialAutoRepair: true, draftQualityGate: true, promotionGate: true, directProductionPublish: false, finalTarget: "vercel" },
     projects: await listWebProjects(auth.ownerKey, 20).catch(() => []),
   });
 }
@@ -207,50 +214,44 @@ export async function POST(request: Request) {
       const instruction = typeof body?.instruction === "string" ? body.instruction.trim().slice(0, 10000) : "";
       if (!projectSlug || !instruction) return NextResponse.json({ error: "project_slug_and_instruction_required" }, { status: 400 });
 
-      if (body?.publish !== true) {
-        return NextResponse.json(await stageDraftRevision({ ownerKey: auth.ownerKey, apiKey, projectSlug, instruction }));
-      }
-      return NextResponse.json(await editWebsite({ ownerKey: auth.ownerKey, apiKey, projectSlug, instruction }));
+      if (body?.publish === true) return promotionBlocked();
+      return NextResponse.json(await stageDraftRevision({ ownerKey: auth.ownerKey, apiKey, projectSlug, instruction }));
     }
 
     if (!apiKey) return NextResponse.json({ error: "brain_not_configured" }, { status: 503 });
     const brief = typeof body?.brief === "string" ? body.brief.trim().slice(0, 10000) : "";
     if (!brief) return NextResponse.json({ error: "brief_required" }, { status: 400 });
 
-    const promoteToProduction = body?.publish === true;
-    const result = await buildWebsite({ ownerKey: auth.ownerKey, apiKey, brief, publish: promoteToProduction });
-
-    if (!promoteToProduction) {
-      const draft = await issueDraft(auth.ownerKey, result.spec.slug);
-      const quality = auditDraftSpec(result.spec);
-      if (!draft.httpVerified || !quality.ok) {
-        const defectReason = !draft.httpVerified
-          ? "Первичный черновик не прошёл HTTP-проверку."
-          : `Первичный черновик не прошёл quality gate: ${quality.issues.join(", ")}.`;
-        return NextResponse.json(await stageDraftRevision({
-          ownerKey: auth.ownerKey,
-          apiKey,
-          projectSlug: result.spec.slug,
-          instruction: `${defectReason} ${qualityRepairInstruction(quality)} Это автоматическое исправление первичной генерации; сохрани исходный бизнес-бриф и не публикуй сайт.`,
-        }));
-      }
-      return NextResponse.json({
-        ...result,
-        target: "draft",
-        draft,
-        qualityGate: quality,
-        repairLoop: {
-          attempts: 1,
-          recovered: false,
-          verified: true,
-          httpVerified: true,
-          qualityVerified: true,
-        },
-        productionUntouched: true,
-      });
+    if (body?.publish === true) return promotionBlocked();
+    const result = await buildWebsite({ ownerKey: auth.ownerKey, apiKey, brief, publish: false });
+    const draft = await issueDraft(auth.ownerKey, result.spec.slug);
+    const quality = auditDraftSpec(result.spec);
+    if (!draft.httpVerified || !quality.ok) {
+      const defectReason = !draft.httpVerified
+        ? "Первичный черновик не прошёл HTTP-проверку."
+        : `Первичный черновик не прошёл quality gate: ${quality.issues.join(", ")}.`;
+      return NextResponse.json(await stageDraftRevision({
+        ownerKey: auth.ownerKey,
+        apiKey,
+        projectSlug: result.spec.slug,
+        instruction: `${defectReason} ${qualityRepairInstruction(quality)} Это автоматическое исправление первичной генерации; сохрани исходный бизнес-бриф и не публикуй сайт.`,
+      }));
     }
-
-    return NextResponse.json({ ...result, target: "vercel", draft: null });
+    return NextResponse.json({
+      ...result,
+      target: "draft",
+      draft,
+      qualityGate: quality,
+      repairLoop: {
+        attempts: 1,
+        recovered: false,
+        verified: true,
+        httpVerified: true,
+        qualityVerified: true,
+      },
+      promotionGate: { required: true, verifiedDraftRequired: true, directPublishAllowed: false },
+      productionUntouched: true,
+    });
   } catch (error) {
     console.error("Khasroy Web Studio failed", error);
     const message = error instanceof Error ? error.message : "web_studio_failed";
@@ -259,7 +260,7 @@ export async function POST(request: Request) {
         ok: false,
         error: "Web Studio не завершил операцию.",
         detail: message.slice(0, 600),
-        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, initialAutoRepair: true, draftQualityGate: true, finalTarget: "vercel" },
+        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, initialAutoRepair: true, draftQualityGate: true, promotionGate: true, directProductionPublish: false, finalTarget: "vercel" },
       },
       { status: 502 },
     );
