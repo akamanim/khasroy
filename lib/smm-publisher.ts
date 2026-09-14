@@ -13,13 +13,20 @@ export type PublishQueueItem = {
   media_url?: string | null;
   metadata?: Record<string, unknown> | null;
   scheduled_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type PublishAttemptResult =
   | { ok: true; publishedId: string }
   | { ok: false; error: string; retryable: boolean };
 
+export type PublishReconcileResult =
+  | { state: "published"; publishedId: string }
+  | { state: "not_found" }
+  | { state: "unknown"; error: string; retryable: boolean };
+
 export const MAX_PUBLISH_ATTEMPTS = 5;
+export const DEFAULT_RECONCILE_STALE_MINUTES = 15;
 
 export function retryDelaySeconds(attempt: number) {
   const n = Math.max(1, Math.trunc(attempt));
@@ -71,4 +78,24 @@ export function normalizeAdapterResult(value: unknown): PublishAttemptResult {
     ? data.error.trim().slice(0, 1000)
     : "adapter_publish_failed";
   return { ok: false, error, retryable: data.retryable !== false };
+}
+
+export function normalizeAdapterStatusResult(value: unknown): PublishReconcileResult {
+  if (!value || typeof value !== "object") {
+    return { state: "unknown", error: "invalid_adapter_status_response", retryable: true };
+  }
+
+  const data = value as Record<string, unknown>;
+  const state = typeof data.state === "string" ? data.state.trim().toLowerCase() : "";
+  if (state === "published" && typeof data.publishedId === "string" && data.publishedId.trim()) {
+    return { state: "published", publishedId: data.publishedId.trim().slice(0, 500) };
+  }
+  if (state === "not_found") return { state: "not_found" };
+
+  const error = typeof data.error === "string" && data.error.trim()
+    ? data.error.trim().slice(0, 1000)
+    : state === "published"
+      ? "adapter_status_missing_published_id"
+      : "adapter_status_unknown";
+  return { state: "unknown", error, retryable: data.retryable !== false };
 }
