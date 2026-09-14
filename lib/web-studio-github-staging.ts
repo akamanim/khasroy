@@ -20,6 +20,13 @@ export function normalizeGitHubRepoName(value: string) {
   return normalized || `khasroy-site-${Date.now().toString(36)}`;
 }
 
+export function stagingSourceFingerprint(spec: WebStudioSpec, projectSlug: string) {
+  return createHash("sha256")
+    .update(JSON.stringify({ projectSlug, spec }))
+    .digest("hex")
+    .slice(0, 16);
+}
+
 export function renderGitHubStagingProject(spec: WebStudioSpec, projectSlug: string) {
   const services = JSON.stringify(spec.services);
   const advantages = JSON.stringify(spec.advantages);
@@ -96,6 +103,24 @@ async function commitFiles(repoFullName: string, token: string, files: Record<st
   return String(commit.sha || "");
 }
 
+async function readRepoJson(repoFullName: string, path: string, token: string) {
+  try {
+    const file = await github(`/repos/${repoFullName}/contents/${path}?ref=main`, token);
+    const encoded = typeof file.content === "string" ? file.content.replace(/\s+/g, "") : "";
+    if (!encoded) return null;
+    const parsed = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+  } catch (error) {
+    if (/github_404/iu.test(String(error))) return null;
+    throw error;
+  }
+}
+
+async function currentMainSha(repoFullName: string, token: string) {
+  const ref = await github(`/repos/${repoFullName}/git/ref/heads/main`, token);
+  return String(ref.object?.sha || "");
+}
+
 export async function createGitHubStagingRepo(args: { token: string; spec: WebStudioSpec; projectSlug: string }) {
   const user = await github("/user", args.token);
   const login = String(user.login || "");
@@ -146,5 +171,66 @@ export async function createGitHubStagingRepo(args: { token: string; spec: WebSt
     private: repo.private !== false,
     target: "github-staging" as const,
     productionUntouched: true,
+  };
+}
+
+export async function syncGitHubStagingRepo(args: {
+  token: string;
+  spec: WebStudioSpec;
+  projectSlug: string;
+  repoFullName?: string;
+}) {
+  const fingerprint = stagingSourceFingerprint(args.spec, args.projectSlug);
+  const sourceMarker = JSON.stringify({
+    generatedBy: "khasroy-web-studio",
+    target: "github-staging",
+    projectSlug: args.projectSlug,
+    sourceFingerprint: fingerprint,
+  }, null, 2);
+
+  if (!args.repoFullName) {
+    const created = await createGitHubStagingRepo(args);
+    const files = renderGitHubStagingProject(args.spec, args.projectSlug);
+    files[".khasroy/source.json"] = sourceMarker;
+    const commitSha = await commitFiles(created.repoFullName, args.token, files);
+    return { ...created, commitSha, fingerprint, reused: false, synced: true };
+  }
+
+  const repo = await github(`/repos/${args.repoFullName}`, args.token);
+  const provenance = await readRepoJson(args.repoFullName, ".khasroy/staging.json", args.token);
+  if (provenance?.target !== "github-staging" || provenance?.projectSlug !== args.projectSlug) {
+    throw new Error("github_existing_repo_not_khasroy_staging");
+  }
+
+  const previousSource = await readRepoJson(args.repoFullName, ".khasroy/source.json", args.token);
+  if (previousSource?.sourceFingerprint === fingerprint) {
+    return {
+      repoFullName: args.repoFullName,
+      repoName: String(repo.name || args.repoFullName.split("/").pop() || ""),
+      repoUrl: String(repo.html_url || `https://github.com/${args.repoFullName}`),
+      commitSha: await currentMainSha(args.repoFullName, args.token),
+      fingerprint,
+      private: repo.private !== false,
+      target: "github-staging" as const,
+      productionUntouched: true,
+      reused: true,
+      synced: false,
+    };
+  }
+
+  const files = renderGitHubStagingProject(args.spec, args.projectSlug);
+  files[".khasroy/source.json"] = sourceMarker;
+  const commitSha = await commitFiles(args.repoFullName, args.token, files);
+  return {
+    repoFullName: args.repoFullName,
+    repoName: String(repo.name || args.repoFullName.split("/").pop() || ""),
+    repoUrl: String(repo.html_url || `https://github.com/${args.repoFullName}`),
+    commitSha,
+    fingerprint,
+    private: repo.private !== false,
+    target: "github-staging" as const,
+    productionUntouched: true,
+    reused: true,
+    synced: true,
   };
 }

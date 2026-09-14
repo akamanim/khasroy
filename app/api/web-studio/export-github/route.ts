@@ -4,7 +4,7 @@ import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import { resolveSecret } from "@/lib/server-integrations";
 import { getWebProject } from "@/lib/web-studio-editor";
 import { auditDraftSpec } from "@/lib/web-studio-quality";
-import { createGitHubStagingRepo } from "@/lib/web-studio-github-staging";
+import { syncGitHubStagingRepo } from "@/lib/web-studio-github-staging";
 import type { WebStudioSpec } from "@/lib/web-studio";
 
 export const runtime = "nodejs";
@@ -76,17 +76,6 @@ export async function POST(request: Request) {
   try {
     const project = await getWebProject(auth.ownerKey, projectSlug);
     if (!project) return NextResponse.json({ error: "project_not_found" }, { status: 404 });
-    if (project.repo_full_name && project.repo_url) {
-      return NextResponse.json({
-        ok: true,
-        reused: true,
-        projectSlug,
-        repoFullName: project.repo_full_name,
-        repoUrl: project.repo_url,
-        target: "github-staging",
-        productionUntouched: true,
-      });
-    }
 
     const spec = project.spec as WebStudioSpec;
     const quality = auditDraftSpec(spec);
@@ -105,12 +94,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "github_not_configured", productionUntouched: true }, { status: 503 });
     }
 
-    const repo = await createGitHubStagingRepo({ token: githubToken, spec, projectSlug });
+    const repo = await syncGitHubStagingRepo({
+      token: githubToken,
+      spec,
+      projectSlug,
+      repoFullName: project.repo_full_name || undefined,
+    });
     await saveRepo(auth.ownerKey, project, repo);
 
     return NextResponse.json({
       ok: true,
-      reused: false,
       projectSlug,
       draftUrl,
       qualityGate: quality,
@@ -121,14 +114,15 @@ export async function POST(request: Request) {
   } catch (error) {
     const detail = error instanceof Error ? error.message : "github_staging_export_failed";
     console.error("Khasroy GitHub staging export failed", error);
+    const conflict = detail.includes("github_existing_repo_not_khasroy_staging");
     const retryable = /(timeout|429|5\d\d|draft_not_verified)/iu.test(detail);
     return NextResponse.json({
       ok: false,
-      error: "github_staging_export_failed",
+      error: conflict ? "existing_repo_not_staging" : "github_staging_export_failed",
       detail: detail.slice(0, 500),
-      retryable,
+      retryable: conflict ? false : retryable,
       productionUntouched: true,
       vercelTriggered: false,
-    }, { status: retryable ? 503 : 502 });
+    }, { status: conflict ? 409 : retryable ? 503 : 502 });
   }
 }
