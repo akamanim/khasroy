@@ -4,6 +4,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CHANNELS = ["instagram", "tiktok", "telegram"] as const;
 const CONTENT_TYPES = ["reel", "post", "story", "carousel"] as const;
+const MAX_PUBLISH_ATTEMPTS = 5;
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -31,15 +32,20 @@ async function db(path: string, init: RequestInit = {}) {
   return response;
 }
 
+function retryDelaySeconds(attempt: number) {
+  return Math.min(3600, 30 * 2 ** Math.max(0, attempt - 1));
+}
+
 Deno.serve(async (request) => {
   if (request.method === "GET") {
     return json({
       ok: true,
       service: "khasroy-social-store",
-      version: 2,
+      version: 3,
       socialChannels: [...CHANNELS],
       contentTypes: [...CONTENT_TYPES],
-      capabilities: ["queue_social", "list_social", "save_composed"],
+      capabilities: ["queue_social", "list_social", "save_composed", "claim_ready", "mark_published", "mark_failed"],
+      publishing: { maxAttempts: MAX_PUBLISH_ATTEMPTS, claimIsCompareAndSet: true },
     });
   }
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -101,6 +107,7 @@ Deno.serve(async (request) => {
             stage: "ready",
             composer: "deterministic_smm_compose_v1",
             composeQuality: quality,
+            publishAttempts: Number(metadata.publishAttempts) || 0,
             hook: typeof artifact.hook === "string" ? artifact.hook.slice(0, 300) : null,
             cta: typeof artifact.cta === "string" ? artifact.cta.slice(0, 300) : null,
             shotList: Array.isArray(artifact.shotList) ? artifact.shotList.slice(0, 20) : [],
@@ -111,6 +118,78 @@ Deno.serve(async (request) => {
       });
       const updated = await response.json();
       return json({ ok: true, item: Array.isArray(updated) ? updated[0] || null : null });
+    }
+
+    if (action === "claim_ready") {
+      const now = new Date().toISOString();
+      const channel = CHANNELS.includes(body?.channel) ? body.channel : null;
+      const channelFilter = channel ? `&channel=eq.${channel}` : "";
+      const lookup = await db(`khasroy_social_queue?owner_hash=eq.${ownerHash}&status=eq.ready${channelFilter}&or=(scheduled_at.is.null,scheduled_at.lte.${encodeURIComponent(now)})&select=id,channel,content_type,status,title,caption,script,media_url,metadata,scheduled_at&order=scheduled_at.asc.nullsfirst,created_at.asc&limit=1`);
+      const rows = await lookup.json();
+      const candidate = Array.isArray(rows) ? rows[0] : null;
+      if (!candidate?.id) return json({ ok: true, item: null });
+
+      const metadata = candidate.metadata && typeof candidate.metadata === "object" ? candidate.metadata : {};
+      const attempt = Math.max(0, Number(metadata.publishAttempts) || 0) + 1;
+      const response = await db(`khasroy_social_queue?id=eq.${encodeURIComponent(candidate.id)}&owner_hash=eq.${ownerHash}&status=eq.ready`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          status: "publishing",
+          last_error: null,
+          metadata: { ...metadata, stage: "publishing", publishAttempts: attempt, claimedAt: now },
+          updated_at: now,
+        }),
+      });
+      const claimed = await response.json();
+      return json({ ok: true, item: Array.isArray(claimed) ? claimed[0] || null : null, attempt });
+    }
+
+    if (action === "mark_published") {
+      const id = typeof body?.id === "string" ? body.id.trim() : "";
+      const publishedId = typeof body?.publishedId === "string" ? body.publishedId.trim().slice(0, 500) : "";
+      if (!id || !publishedId) return json({ error: "id_and_published_id_required" }, 400);
+      const now = new Date().toISOString();
+      const response = await db(`khasroy_social_queue?id=eq.${encodeURIComponent(id)}&owner_hash=eq.${ownerHash}&status=eq.publishing`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ status: "published", published_id: publishedId, published_at: now, last_error: null, updated_at: now }),
+      });
+      const rows = await response.json();
+      const item = Array.isArray(rows) ? rows[0] || null : null;
+      if (!item) return json({ error: "publish_state_conflict" }, 409);
+      return json({ ok: true, item });
+    }
+
+    if (action === "mark_failed") {
+      const id = typeof body?.id === "string" ? body.id.trim() : "";
+      const errorText = typeof body?.error === "string" ? body.error.trim().slice(0, 1000) : "publish_failed";
+      const retryable = body?.retryable !== false;
+      if (!id) return json({ error: "id_required" }, 400);
+
+      const lookup = await db(`khasroy_social_queue?id=eq.${encodeURIComponent(id)}&owner_hash=eq.${ownerHash}&status=eq.publishing&select=id,metadata&limit=1`);
+      const rows = await lookup.json();
+      const existing = Array.isArray(rows) ? rows[0] : null;
+      if (!existing?.id) return json({ error: "publish_state_conflict" }, 409);
+      const metadata = existing.metadata && typeof existing.metadata === "object" ? existing.metadata : {};
+      const attempt = Math.max(1, Number(metadata.publishAttempts) || 1);
+      const terminal = !retryable || attempt >= MAX_PUBLISH_ATTEMPTS;
+      const delaySeconds = terminal ? 0 : retryDelaySeconds(attempt);
+      const now = new Date();
+      const scheduledAt = terminal ? null : new Date(now.getTime() + delaySeconds * 1000).toISOString();
+      const response = await db(`khasroy_social_queue?id=eq.${encodeURIComponent(id)}&owner_hash=eq.${ownerHash}&status=eq.publishing`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          status: terminal ? "failed" : "ready",
+          last_error: errorText,
+          scheduled_at: scheduledAt,
+          metadata: { ...metadata, stage: terminal ? "failed" : "retry_wait", lastPublishError: errorText, retryAt: scheduledAt },
+          updated_at: now.toISOString(),
+        }),
+      });
+      const updated = await response.json();
+      return json({ ok: true, terminal, retryAfterSeconds: terminal ? null : delaySeconds, item: Array.isArray(updated) ? updated[0] || null : null });
     }
 
     if (action === "list_social") {
