@@ -15,6 +15,7 @@ const CREATE_INTENT = /(создай|сделай|сделать|хочу|пок
 const VISUAL_SCENE = /(на фоне|рядом с|за рул[её]м|сидит|стоит|летит|едет|держит|в горах|у моря|на море|у океана|на берегу|на пляже|на парковке|на трассе|на дороге|в городе|в лесу|в студии|реалистич|фотореалист|кинематограф|cinematic|background|next to|behind the wheel|mountains?|ocean|beach|parking|road|city|forest|studio|photoreal)/iu;
 const VISUAL_WISH = /(хочу\s+(?:фото|фотк|картин|изображ)|покажи\s+как\s+(?:это\s+)?(?:будет|будет\s+выглядеть|выглядит)|как\s+бы\s+(?:это\s+)?выглядел)/iu;
 const META_OUTPUT = /(парол|\bpassword\b|код|\bcode\b|json|xml|sql|таблиц|список|текст|письм|сообщен|промпт|\bprompt\b|инструкц|описан|назван|иде[яи]|скрипт|\bscript\b|регуляр|\bregex\b)/iu;
+const CAPABILITY_QUESTION = /^(?:(?:а\s+)?ты\s+)?(?:умеешь|умеешь\s+ли|способен(?:\s+ли)?|можешь\s+ли\s+ты)\b.*(?:генерир|нарис|рендер|изображ|фото)|^do\s+you\s+(?:know\s+how\s+to\s+)?(?:generate|draw|render)\b/iu;
 
 function metaOutputComesBeforeImage(prompt: string) {
   const meta = META_OUTPUT.exec(prompt);
@@ -26,6 +27,11 @@ function metaOutputComesBeforeImage(prompt: string) {
 export function detectImageGenerationIntent(text: string): ImageGenerationIntent | null {
   const prompt = text.replace(/\s+/gu, " ").trim().slice(0, 4000);
   if (!prompt) return null;
+
+  // Capability questions should stay in the conversational brain rather than
+  // spending image quota. Concrete requests such as "можешь сгенерировать кота"
+  // still pass through because they do not match this ability-question pattern.
+  if (CAPABILITY_QUESTION.test(prompt)) return null;
 
   // "Сгенерируй промпт для фото" asks for text, while
   // "Сгенерируй изображение по этому промпту" asks for an image.
