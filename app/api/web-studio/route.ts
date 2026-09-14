@@ -149,7 +149,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     service: "khasroy-web-studio",
-    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, draftQualityGate: true, finalTarget: "vercel" },
+    runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, initialAutoRepair: true, draftQualityGate: true, finalTarget: "vercel" },
     projects: await listWebProjects(auth.ownerKey, 20).catch(() => []),
   });
 }
@@ -222,7 +222,32 @@ export async function POST(request: Request) {
 
     if (!promoteToProduction) {
       const draft = await issueDraft(auth.ownerKey, result.spec.slug);
-      return NextResponse.json({ ...result, target: "draft", draft, qualityGate: auditDraftSpec(result.spec) });
+      const quality = auditDraftSpec(result.spec);
+      if (!draft.httpVerified || !quality.ok) {
+        const defectReason = !draft.httpVerified
+          ? "Первичный черновик не прошёл HTTP-проверку."
+          : `Первичный черновик не прошёл quality gate: ${quality.issues.join(", ")}.`;
+        return NextResponse.json(await stageDraftRevision({
+          ownerKey: auth.ownerKey,
+          apiKey,
+          projectSlug: result.spec.slug,
+          instruction: `${defectReason} ${qualityRepairInstruction(quality)} Это автоматическое исправление первичной генерации; сохрани исходный бизнес-бриф и не публикуй сайт.`,
+        }));
+      }
+      return NextResponse.json({
+        ...result,
+        target: "draft",
+        draft,
+        qualityGate: quality,
+        repairLoop: {
+          attempts: 1,
+          recovered: false,
+          verified: true,
+          httpVerified: true,
+          qualityVerified: true,
+        },
+        productionUntouched: true,
+      });
     }
 
     return NextResponse.json({ ...result, target: "vercel", draft: null });
@@ -234,7 +259,7 @@ export async function POST(request: Request) {
         ok: false,
         error: "Web Studio не завершил операцию.",
         detail: message.slice(0, 600),
-        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, draftQualityGate: true, finalTarget: "vercel" },
+        runtime: { ...webStudioRuntimeStatus(), draftStaging: true, draftRepairs: true, isolatedDraftToken: true, autoRepairLoop: true, initialAutoRepair: true, draftQualityGate: true, finalTarget: "vercel" },
       },
       { status: 502 },
     );
