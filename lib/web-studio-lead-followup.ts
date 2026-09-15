@@ -53,9 +53,9 @@ export function planLeadFollowup(lead: TriagedLead): LeadFollowupPlan {
 
 export function planLeadFollowups(leads: TriagedLead[], limit = 25) {
   const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit) || 25));
-  const plans = leads.map(planLeadFollowup);
+  const plans = leads.slice(0, boundedLimit).map(planLeadFollowup);
   return {
-    plans: plans.slice(0, boundedLimit),
+    plans,
     eligible: plans.filter((plan) => plan.eligible).length,
     held: plans.filter((plan) => !plan.eligible).length,
     autonomousMutationsAllowed: false,
