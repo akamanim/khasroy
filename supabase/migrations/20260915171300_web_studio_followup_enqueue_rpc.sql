@@ -1,5 +1,25 @@
+create table if not exists public.web_studio_followup_queue (
+  operation_key text primary key,
+  owner_hash text,
+  lead_id text not null,
+  project_slug text not null,
+  action text not null check (action in ('prepare_contact', 'prepare_followup')),
+  channel text not null default 'phone' check (channel = 'phone'),
+  target_status text,
+  state text not null default 'awaiting_approval' check (state in ('awaiting_approval', 'approved', 'claimed', 'completed', 'failed')),
+  attempts integer not null default 0 check (attempts >= 0),
+  last_error text,
+  claimed_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.web_studio_followup_queue add column if not exists owner_hash text;
 create index if not exists web_studio_followup_queue_owner_hash_idx on public.web_studio_followup_queue(owner_hash);
+create index if not exists web_studio_followup_queue_project_state_idx on public.web_studio_followup_queue(project_slug, state, created_at);
+
+alter table public.web_studio_followup_queue enable row level security;
 
 create or replace function public.enqueue_web_studio_followups(p_owner_key text, p_items jsonb)
 returns table(operation_key text, inserted boolean)
