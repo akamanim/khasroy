@@ -5,7 +5,7 @@ const claim = await readFile(new URL("../supabase/migrations/20260915191500_web_
 const repair = await readFile(new URL("../supabase/migrations/20260915232000_web_studio_followup_finish_repair_rpc.sql", import.meta.url), "utf8");
 const approval = await readFile(new URL("../supabase/migrations/20260916012000_web_studio_followup_approval_rpc.sql", import.meta.url), "utf8");
 
-assert.match(approval, /state\s*=\s*'approved'/i, "approval must explicitly enter approved state");
+assert.match(approval, /state\s*=\s*case\s+when\s+p_approve\s+then\s+'approved'\s+else\s+'awaiting_approval'\s+end/i, "approval must explicitly enter approved state and support revoke");
 assert.match(claim, /q\.state\s*=\s*'approved'/i, "claim must only consume approved work");
 assert.match(claim, /for update skip locked/i, "claim must be concurrency-safe");
 assert.match(claim, /attempts\s*=\s*q\.attempts\s*\+\s*1/i, "claim must increment attempts");
