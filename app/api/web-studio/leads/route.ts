@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import { listSiteLeads } from "@/lib/web-studio-editor";
 import { triageLeads } from "@/lib/web-studio-lead-triage";
+import { planLeadFollowups } from "@/lib/web-studio-lead-followup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,11 +30,13 @@ export async function GET(request: Request) {
   try {
     const leads = await listSiteLeads(auth.ownerKey, projectSlug, limit);
     const triage = triageLeads(leads);
+    const followup = planLeadFollowups(triage.leads, limit);
     return NextResponse.json({
       ok: true,
-      mode: "deterministic_lead_triage_v1",
+      mode: "deterministic_lead_triage_v2",
       projectSlug: projectSlug || null,
       ...triage,
+      followup,
       autonomousSafe: true,
       mutationsPerformed: false,
     });
