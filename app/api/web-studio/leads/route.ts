@@ -25,7 +25,9 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const projectSlug = url.searchParams.get("projectSlug")?.trim() || undefined;
   const requestedLimit = Number(url.searchParams.get("limit") || 100);
-  const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(250, Math.floor(requestedLimit))) : 100;
+  // Keep retrieval, triage and follow-up planning on the same bounded window.
+  // planLeadFollowups intentionally caps autonomous work at 100 leads.
+  const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, Math.floor(requestedLimit))) : 100;
 
   try {
     const leads = await listSiteLeads(auth.ownerKey, projectSlug, limit);
