@@ -39,8 +39,14 @@ assert.equal(noPhone.eligible, false);
 const low = planLeadFollowup({ ...base, id: "lead-low", priority: "low", score: 0 });
 assert.equal(low.eligible, false);
 
-const batch = planLeadFollowups(Array.from({ length: 120 }, (_, index) => ({ ...base, id: `lead-${index}` })), 500);
+const batch = planLeadFollowups(Array.from({ length: 120 }, (_, index) => ({
+  ...base,
+  id: `lead-${index}`,
+  priority: index < 100 ? "hot" : "low",
+})), 500);
 assert.equal(batch.plans.length, 100);
+assert.equal(batch.eligible, 100);
+assert.equal(batch.held, 0);
 assert.equal(batch.autonomousMutationsAllowed, false);
 
 console.log("web-studio lead follow-up planner: ok");
