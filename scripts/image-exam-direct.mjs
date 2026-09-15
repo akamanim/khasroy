@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { imageExamExitCode } from './image-exam-verdict.mjs';
 
 const IMAGE_ENDPOINT = 'https://ai-gateway.vercel.sh/v1/images/generations';
 const CHAT_ENDPOINT = 'https://ai-gateway.vercel.sh/v1/chat/completions';
@@ -173,6 +174,7 @@ async function main() {
   };
   fs.writeFileSync('exam-output/result.json', JSON.stringify(result, null, 2));
   console.log(`EXAM_RESULT ${JSON.stringify({ passed: result.passed, final: result.final })}`);
+  process.exitCode = imageExamExitCode(result);
 }
 
 main().catch((error) => {
