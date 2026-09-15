@@ -5,7 +5,7 @@
   "engines": { "node": ">=22.13.0" },
   "scripts": {
     "dev": "node scripts/ensure-local-owner-key.mjs && next dev",
-    "build": "npm run test:web-studio-github-staging && npm run test:web-studio-quality && npm run test:web-studio-lead-followup && npm run test:smm-pipeline && npm run test:smm-compose && npm run test:smm-publisher && next build",
+    "build": "npm run test:web-studio-github-staging && npm run test:web-studio-quality && npm run test:web-studio-lead-followup && npm run test:web-studio-followup-worker && npm run test:smm-pipeline && npm run test:smm-compose && npm run test:smm-publisher && next build",
     "typecheck": "tsc --noEmit",
     "start": "next start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
@@ -15,6 +15,7 @@
     "test:web-studio-github-staging": "node --experimental-strip-types tests/web-studio-github-staging.mjs",
     "test:web-studio-quality": "node --experimental-strip-types tests/web-studio-quality.mjs",
     "test:web-studio-lead-followup": "node --experimental-strip-types tests/web-studio-lead-followup.mjs",
+    "test:web-studio-followup-worker": "node tests/web-studio-followup-worker-contract.mjs",
     "test:smm-pipeline": "node --experimental-strip-types tests/smm-pipeline.mjs",
     "test:smm-compose": "node --experimental-strip-types tests/smm-compose.mjs",
     "test:smm-publisher": "node --experimental-strip-types tests/smm-publisher.mjs",
