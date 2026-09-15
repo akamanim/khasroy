@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { TriagedLead } from "@/lib/web-studio-lead-triage";
 
 export type LeadFollowupPlan = {
@@ -8,8 +9,15 @@ export type LeadFollowupPlan = {
   channel: "phone" | "none";
   targetStatus: "contacted" | null;
   requiresHumanApproval: true;
+  operationKey: string | null;
   reasons: string[];
 };
+
+function followupOperationKey(lead: TriagedLead, action: "prepare_contact" | "prepare_followup") {
+  return createHash("sha256")
+    .update(["web-studio-followup-v1", lead.project_slug, lead.id, lead.status, action].join(":"))
+    .digest("hex");
+}
 
 export function planLeadFollowup(lead: TriagedLead): LeadFollowupPlan {
   const reasons: string[] = [];
@@ -31,6 +39,7 @@ export function planLeadFollowup(lead: TriagedLead): LeadFollowupPlan {
       channel: "none",
       targetStatus: null,
       requiresHumanApproval: true,
+      operationKey: null,
       reasons,
     };
   }
@@ -47,6 +56,7 @@ export function planLeadFollowup(lead: TriagedLead): LeadFollowupPlan {
     channel: "phone",
     targetStatus: lead.status === "new" ? "contacted" : null,
     requiresHumanApproval: true,
+    operationKey: followupOperationKey(lead, action),
     reasons,
   };
 }
