@@ -22,9 +22,9 @@ jobs:
       STORE_ENDPOINT: https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-studio
       DRAFT_ENDPOINT: https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-web-draft
       STORE_KEY: sb_publishable_cQzfru6dR7_T4myYO1c_fA_r-iFXOtn
-      OWNER_KEY: khasroy-draft-ci-owner-v1
-      PROJECT_SLUG: khasroy-draft-ci
-      SITE_TOKEN: khasroy-draft-ci-site-token-20260914-v1
+      OWNER_KEY: khasroy-draft-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      PROJECT_SLUG: khasroy-draft-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      SITE_TOKEN: khasroy-draft-site-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Seed draft project through Web Studio store
         shell: bash
