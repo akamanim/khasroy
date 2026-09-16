@@ -97,3 +97,17 @@ jobs:
             > /tmp/cleanup.json
           grep -q '"ok":true' /tmp/cleanup.json
           echo "DRAFT_CLEANUP_OK"
+
+      - name: Verify deleted draft is no longer reachable
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          http_code="$(curl --silent --show-error --output /tmp/deleted-draft.html --write-out '%{http_code}' \
+            --connect-timeout 10 --max-time 35 \
+            "$DRAFT_ENDPOINT?project=$PROJECT_SLUG&token=$SITE_TOKEN")"
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "Deleted draft is still publicly reachable (HTTP $http_code)" >&2
+            exit 1
+          fi
+          echo "DRAFT_DELETE_EFFECT_VERIFIED_HTTP_$http_code"
