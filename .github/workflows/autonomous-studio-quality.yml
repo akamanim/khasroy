@@ -1,0 +1,55 @@
+name: Autonomous Studio Quality
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/api/site-agent/**"
+      - "app/api/web-studio/**"
+      - "app/studio/**"
+      - "lib/site-agent*.ts"
+      - "lib/web-studio*.ts"
+      - "lib/**provider*.ts"
+      - "lib/**smm*.ts"
+      - "tests/web-studio-*.mjs"
+      - "tests/smm-*.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/autonomous-studio-quality.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autonomous-studio-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - name: Install dependencies
+        run: npm install --ignore-scripts --package-lock=false
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Web Studio GitHub staging contract
+        run: npm run test:web-studio-github-staging
+      - name: Web Studio quality and repair contracts
+        run: |
+          npm run test:web-studio-quality
+          npm run test:web-studio-lead-followup
+          npm run test:web-studio-followup-worker
+      - name: SMM pipeline contracts
+        run: |
+          npm run test:smm-pipeline
+          npm run test:smm-compose
+          npm run test:smm-publisher
+      - name: Production build
+        run: npm run build
