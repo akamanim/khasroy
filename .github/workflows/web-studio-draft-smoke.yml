@@ -83,3 +83,26 @@ jobs:
               raise SystemExit('SUPABASE_LEAD_NOT_OBSERVED')
           print('DRAFT_LEAD_E2E_OK')
           PY
+
+      - name: Clean up ephemeral draft project
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          curl --fail --silent --show-error --retry 2 --retry-delay 1 --connect-timeout 10 --max-time 25 \
+            "$STORE_ENDPOINT" \
+            -H "content-type: application/json" \
+            -H "apikey: $STORE_KEY" \
+            --data-binary "{\"action\":\"delete_project\",\"ownerKey\":\"$OWNER_KEY\",\"projectSlug\":\"$PROJECT_SLUG\"}" \
+            > /tmp/cleanup.json
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "DRAFT_CLEANUP_TRANSPORT_WARNING"
+            exit 0
+          fi
+          if grep -q '"ok":true' /tmp/cleanup.json; then
+            echo "DRAFT_CLEANUP_OK"
+          else
+            echo "DRAFT_CLEANUP_UNSUPPORTED_OR_FAILED"
+            cat /tmp/cleanup.json
+          fi
