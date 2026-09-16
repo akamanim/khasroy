@@ -84,30 +84,36 @@ jobs:
           print('DRAFT_LEAD_E2E_OK')
           PY
 
-      - name: Clean up ephemeral draft project
+      - name: Clean up and verify ephemeral draft project
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 35 \
+          cleanup_ok=0
+          verify_ok=0
+
+          if curl --fail --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 35 \
             "$STORE_ENDPOINT" \
             -H "content-type: application/json" \
             -H "apikey: $STORE_KEY" \
             --data-binary "{\"action\":\"delete_project\",\"ownerKey\":\"$OWNER_KEY\",\"projectSlug\":\"$PROJECT_SLUG\"}" \
-            > /tmp/cleanup.json
-          grep -q '"ok":true' /tmp/cleanup.json
-          echo "DRAFT_CLEANUP_OK"
+            > /tmp/cleanup.json && grep -q '"ok":true' /tmp/cleanup.json; then
+            cleanup_ok=1
+            echo "DRAFT_CLEANUP_OK"
+          else
+            echo "Draft cleanup request failed" >&2
+          fi
 
-      - name: Verify deleted draft is no longer reachable
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
           http_code="$(curl --silent --show-error --output /tmp/deleted-draft.html --write-out '%{http_code}' \
             --connect-timeout 10 --max-time 35 \
-            "$DRAFT_ENDPOINT?project=$PROJECT_SLUG&token=$SITE_TOKEN")"
-          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-            echo "Deleted draft is still publicly reachable (HTTP $http_code)" >&2
+            "$DRAFT_ENDPOINT?project=$PROJECT_SLUG&token=$SITE_TOKEN" || true)"
+          if [[ "$http_code" =~ ^[0-9]{3}$ ]] && { [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; }; then
+            verify_ok=1
+            echo "DRAFT_DELETE_EFFECT_VERIFIED_HTTP_$http_code"
+          else
+            echo "Deleted draft is still reachable or deletion could not be verified (HTTP ${http_code:-transport-error})" >&2
+          fi
+
+          if [ "$cleanup_ok" -ne 1 ] || [ "$verify_ok" -ne 1 ]; then
             exit 1
           fi
-          echo "DRAFT_DELETE_EFFECT_VERIFIED_HTTP_$http_code"
