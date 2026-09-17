@@ -1,4 +1,4 @@
-import type { WebStudioAutonomousStage, WebStudioRunArtifacts } from "./web-studio-orchestrator";
+import type { WebStudioAutonomousStage, WebStudioRunArtifacts } from "./web-studio-orchestrator.ts";
 
 /**
  * Drops derived artifacts whenever an autonomous stage is rerun or a repair
