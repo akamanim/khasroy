@@ -61,18 +61,26 @@ corrupt.run.currentStage = "verify_draft";
 assert.throws(() => resumeAutonomousWebStudioRun(corrupt), /running_state_invalid/);
 
 let failed = createAutonomousWebStudioRun(plan);
-failed = recordAutonomousWebStudioArtifacts(failed, { draftProjectId: "keep-me" });
+failed = recordAutonomousWebStudioArtifacts(failed, { draftProjectId: "stale-draft", draftUrl: "https://draft.example/stale" });
 failed = advanceAutonomousWebStudioRun(failed, { stage: "build_draft", ok: false, error: "provider unavailable" });
 assert.equal(failed.blocked, true);
 assert.throws(() => advanceAutonomousWebStudioRun(failed, { stage: "build_draft", ok: true }), /not_advanceable/);
 failed = retryBlockedAutonomousWebStudioRun(failed);
 assert.equal(failed.blocked, false);
 assert.equal(failed.currentStage, "build_draft");
-assert.equal(failed.artifacts.draftProjectId, "keep-me");
+assert.deepEqual(failed.artifacts, {});
 assert.equal(failed.steps.find((step) => step.stage === "build_draft")?.state, "running");
 failed = advanceAutonomousWebStudioRun(failed, { stage: "build_draft", ok: true });
 assert.equal(failed.currentStage, "verify_draft");
 assert.throws(() => retryBlockedAutonomousWebStudioRun(failed), /not_retryable/);
+
+let stale = createAutonomousWebStudioRun(plan);
+stale = recordAutonomousWebStudioArtifacts(stale, { draftProjectId: "draft-old", draftUrl: "https://draft.example/old" });
+stale = advanceAutonomousWebStudioRun(stale, { stage: "build_draft", ok: true });
+stale = recordAutonomousWebStudioArtifacts(stale, { verifiedFingerprint: "fp-old" });
+stale = advanceAutonomousWebStudioRun(stale, { stage: "verify_draft", ok: true, needsRepair: true });
+assert.equal(stale.artifacts.draftProjectId, "draft-old");
+assert.equal(stale.artifacts.verifiedFingerprint, undefined);
 
 let bounded = createAutonomousWebStudioRun(noSmm);
 bounded = advanceAutonomousWebStudioRun(bounded, { stage: "build_draft", ok: true });
