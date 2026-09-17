@@ -41,6 +41,12 @@ export type WebStudioAutonomousRun = {
   steps: Array<WebStudioAutonomousStep & { state: WebStudioRunStepState; error?: string }>;
 };
 
+export type WebStudioRunSnapshot = {
+  version: "web_studio_snapshot_v1";
+  savedAt: string;
+  run: WebStudioAutonomousRun;
+};
+
 function boundedRepairAttempts(value: number | undefined) {
   if (!Number.isFinite(value)) return 2;
   return Math.max(1, Math.min(3, Math.trunc(value as number)));
@@ -83,15 +89,27 @@ export function createAutonomousWebStudioRun(plan: WebStudioAutonomousPlan): Web
   }));
   const first = steps.find((step) => step.state === "pending");
   if (first) first.state = "running";
-  return {
-    version: "web_studio_run_v1",
-    plan,
-    currentStage: first?.stage ?? null,
-    repairAttempts: 0,
-    completed: false,
-    blocked: false,
-    steps,
-  };
+  return { version: "web_studio_run_v1", plan, currentStage: first?.stage ?? null, repairAttempts: 0, completed: false, blocked: false, steps };
+}
+
+export function snapshotAutonomousWebStudioRun(run: WebStudioAutonomousRun, savedAt = new Date().toISOString()): WebStudioRunSnapshot {
+  assertDraftOnlyAutonomy(run.plan);
+  return { version: "web_studio_snapshot_v1", savedAt, run: { ...run, steps: run.steps.map((step) => ({ ...step })) } };
+}
+
+export function resumeAutonomousWebStudioRun(snapshot: WebStudioRunSnapshot): WebStudioAutonomousRun {
+  if (snapshot.version !== "web_studio_snapshot_v1") throw new Error("orchestrator_snapshot_version_invalid");
+  const run = snapshot.run;
+  assertDraftOnlyAutonomy(run.plan);
+  if (run.version !== "web_studio_run_v1") throw new Error("orchestrator_run_version_invalid");
+  if (run.repairAttempts < 0 || run.repairAttempts > run.plan.maxRepairAttempts) throw new Error("orchestrator_repair_attempts_invalid");
+  const running = run.steps.filter((step) => step.state === "running");
+  if (run.blocked || run.completed) {
+    if (run.currentStage !== null || running.length !== 0) throw new Error("orchestrator_terminal_state_invalid");
+  } else if (run.currentStage !== null) {
+    if (running.length !== 1 || running[0].stage !== run.currentStage) throw new Error("orchestrator_running_state_invalid");
+  }
+  return { ...run, steps: run.steps.map((step) => ({ ...step })) };
 }
 
 export function advanceAutonomousWebStudioRun(
@@ -100,14 +118,9 @@ export function advanceAutonomousWebStudioRun(
 ): WebStudioAutonomousRun {
   if (run.completed || run.blocked) throw new Error("orchestrator_run_not_advanceable");
   if (run.currentStage !== result.stage) throw new Error("orchestrator_stage_mismatch");
-
-  const next: WebStudioAutonomousRun = {
-    ...run,
-    steps: run.steps.map((step) => ({ ...step })),
-  };
+  const next: WebStudioAutonomousRun = { ...run, steps: run.steps.map((step) => ({ ...step })) };
   const current = next.steps.find((step) => step.stage === result.stage);
   if (!current || current.state !== "running") throw new Error("orchestrator_stage_not_running");
-
   if (!result.ok) {
     current.state = "failed";
     current.error = (result.error || "stage_failed").slice(0, 500);
@@ -115,10 +128,8 @@ export function advanceAutonomousWebStudioRun(
     next.blocked = true;
     return next;
   }
-
   current.state = "succeeded";
   delete current.error;
-
   if (result.stage === "verify_draft" && result.needsRepair) {
     const repair = next.steps.find((step) => step.stage === "repair_draft");
     if (!repair || next.repairAttempts >= next.plan.maxRepairAttempts) {
@@ -131,7 +142,6 @@ export function advanceAutonomousWebStudioRun(
     next.currentStage = "repair_draft";
     return next;
   }
-
   if (result.stage === "repair_draft") {
     const verify = next.steps.find((step) => step.stage === "verify_draft");
     if (!verify) throw new Error("verify_stage_missing");
@@ -139,7 +149,6 @@ export function advanceAutonomousWebStudioRun(
     next.currentStage = "verify_draft";
     return next;
   }
-
   const currentIndex = next.steps.findIndex((step) => step.stage === result.stage);
   const following = next.steps.slice(currentIndex + 1).find((step) => step.state !== "skipped" && step.state !== "succeeded");
   if (!following || following.state === "awaiting_approval") {

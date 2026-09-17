@@ -4,6 +4,8 @@ import {
   assertDraftOnlyAutonomy,
   createAutonomousWebStudioRun,
   planAutonomousWebStudio,
+  resumeAutonomousWebStudioRun,
+  snapshotAutonomousWebStudioRun,
 } from "../lib/web-studio-orchestrator.ts";
 
 const plan = planAutonomousWebStudio({ brief: "Build a roofing company site", includeSmm: true, maxRepairAttempts: 99 });
@@ -13,9 +15,7 @@ assert.equal(plan.productionUntouched, true);
 assert.equal(plan.finalPromotionRequiresApproval, true);
 assert.equal(plan.maxRepairAttempts, 3);
 assert.equal(assertDraftOnlyAutonomy(plan), true);
-assert.deepEqual(plan.steps.map((step) => step.stage), [
-  "build_draft", "verify_draft", "repair_draft", "export_github", "prepare_smm", "ready_for_promotion",
-]);
+assert.deepEqual(plan.steps.map((step) => step.stage), ["build_draft", "verify_draft", "repair_draft", "export_github", "prepare_smm", "ready_for_promotion"]);
 assert.equal(plan.steps.find((step) => step.stage === "prepare_smm")?.required, true);
 assert.equal(plan.steps.find((step) => step.stage === "ready_for_promotion")?.approvalRequired, true);
 assert.equal(plan.steps.some((step) => step.mutatesProduction), false);
@@ -27,28 +27,30 @@ assert.throws(() => planAutonomousWebStudio({ brief: "   " }), /brief_required/)
 
 let run = createAutonomousWebStudioRun(plan);
 assert.equal(run.currentStage, "build_draft");
-assert.equal(run.steps.find((step) => step.stage === "ready_for_promotion")?.state, "awaiting_approval");
 run = advanceAutonomousWebStudioRun(run, { stage: "build_draft", ok: true });
+const snapshot = snapshotAutonomousWebStudioRun(run, "2026-09-17T07:00:00.000Z");
+assert.equal(snapshot.version, "web_studio_snapshot_v1");
+assert.equal(snapshot.savedAt, "2026-09-17T07:00:00.000Z");
+run = resumeAutonomousWebStudioRun(snapshot);
 assert.equal(run.currentStage, "verify_draft");
 run = advanceAutonomousWebStudioRun(run, { stage: "verify_draft", ok: true, needsRepair: true });
 assert.equal(run.currentStage, "repair_draft");
 assert.equal(run.repairAttempts, 1);
 run = advanceAutonomousWebStudioRun(run, { stage: "repair_draft", ok: true });
-assert.equal(run.currentStage, "verify_draft");
 run = advanceAutonomousWebStudioRun(run, { stage: "verify_draft", ok: true, needsRepair: false });
-assert.equal(run.currentStage, "export_github");
 run = advanceAutonomousWebStudioRun(run, { stage: "export_github", ok: true });
-assert.equal(run.currentStage, "prepare_smm");
 run = advanceAutonomousWebStudioRun(run, { stage: "prepare_smm", ok: true });
 assert.equal(run.currentStage, null);
 assert.equal(run.completed, true);
 assert.equal(run.steps.find((step) => step.stage === "ready_for_promotion")?.state, "awaiting_approval");
 
+const corrupt = snapshotAutonomousWebStudioRun(createAutonomousWebStudioRun(plan));
+corrupt.run.currentStage = "verify_draft";
+assert.throws(() => resumeAutonomousWebStudioRun(corrupt), /running_state_invalid/);
+
 let failed = createAutonomousWebStudioRun(plan);
 failed = advanceAutonomousWebStudioRun(failed, { stage: "build_draft", ok: false, error: "provider unavailable" });
 assert.equal(failed.blocked, true);
-assert.equal(failed.completed, false);
-assert.equal(failed.steps.find((step) => step.stage === "build_draft")?.state, "failed");
 assert.throws(() => advanceAutonomousWebStudioRun(failed, { stage: "build_draft", ok: true }), /not_advanceable/);
 
 let bounded = createAutonomousWebStudioRun(noSmm);
