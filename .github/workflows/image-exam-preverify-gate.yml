@@ -1,0 +1,26 @@
+name: Image Exam Preverify Gate Proof
+
+on:
+  push:
+    branches: [autonomy/image-exam-preverify-gate-20260918]
+    paths:
+      - "scripts/image-exam-preverify-gate.mjs"
+      - "scripts/image-exam-artifact-gate.mjs"
+      - "scripts/validate-generated-image.mjs"
+      - "tests/image-exam-preverify-gate.mjs"
+      - ".github/workflows/image-exam-preverify-gate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+      - run: node tests/image-exam-preverify-gate.mjs
