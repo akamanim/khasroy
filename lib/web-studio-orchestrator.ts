@@ -1,3 +1,5 @@
+import { assertWebStudioArtifactLineage, invalidateWebStudioArtifactsFromStage } from "./web-studio-artifact-lineage";
+
 export type WebStudioAutonomousStage =
   | "build_draft"
   | "verify_draft"
@@ -116,23 +118,22 @@ export function recordAutonomousWebStudioArtifacts(run: WebStudioAutonomousRun, 
     if (!/^https?:$/.test(parsed.protocol)) throw new Error("orchestrator_draft_url_invalid");
     if (parsed.hostname === "vercel.app" || parsed.hostname.endsWith(".vercel.app")) throw new Error("orchestrator_vercel_draft_forbidden");
   }
-  return {
-    ...run,
-    artifacts: {
-      ...run.artifacts,
-      ...(cleanArtifactValue(artifacts.draftProjectId, 200) ? { draftProjectId: cleanArtifactValue(artifacts.draftProjectId, 200) } : {}),
-      ...(draftUrl ? { draftUrl } : {}),
-      ...(cleanArtifactValue(artifacts.verifiedFingerprint, 200) ? { verifiedFingerprint: cleanArtifactValue(artifacts.verifiedFingerprint, 200) } : {}),
-      ...(cleanArtifactValue(artifacts.githubRepository, 300) ? { githubRepository: cleanArtifactValue(artifacts.githubRepository, 300) } : {}),
-      ...(cleanArtifactValue(artifacts.githubCommitSha, 100) ? { githubCommitSha: cleanArtifactValue(artifacts.githubCommitSha, 100) } : {}),
-      ...(cleanArtifactValue(artifacts.smmPlanId, 200) ? { smmPlanId: cleanArtifactValue(artifacts.smmPlanId, 200) } : {}),
-    },
-    steps: run.steps.map((step) => ({ ...step })),
+  const nextArtifacts = {
+    ...run.artifacts,
+    ...(cleanArtifactValue(artifacts.draftProjectId, 200) ? { draftProjectId: cleanArtifactValue(artifacts.draftProjectId, 200) } : {}),
+    ...(draftUrl ? { draftUrl } : {}),
+    ...(cleanArtifactValue(artifacts.verifiedFingerprint, 200) ? { verifiedFingerprint: cleanArtifactValue(artifacts.verifiedFingerprint, 200) } : {}),
+    ...(cleanArtifactValue(artifacts.githubRepository, 300) ? { githubRepository: cleanArtifactValue(artifacts.githubRepository, 300) } : {}),
+    ...(cleanArtifactValue(artifacts.githubCommitSha, 100) ? { githubCommitSha: cleanArtifactValue(artifacts.githubCommitSha, 100) } : {}),
+    ...(cleanArtifactValue(artifacts.smmPlanId, 200) ? { smmPlanId: cleanArtifactValue(artifacts.smmPlanId, 200) } : {}),
   };
+  assertWebStudioArtifactLineage(nextArtifacts, run.currentStage);
+  return { ...run, artifacts: nextArtifacts, steps: run.steps.map((step) => ({ ...step })) };
 }
 
 export function snapshotAutonomousWebStudioRun(run: WebStudioAutonomousRun, savedAt = new Date().toISOString()): WebStudioRunSnapshot {
   assertDraftOnlyAutonomy(run.plan);
+  assertWebStudioArtifactLineage(run.artifacts, run.currentStage);
   return { version: "web_studio_snapshot_v1", savedAt, run: { ...run, artifacts: { ...run.artifacts }, steps: run.steps.map((step) => ({ ...step })) } };
 }
 
@@ -148,6 +149,7 @@ export function resumeAutonomousWebStudioRun(snapshot: WebStudioRunSnapshot): We
   } else if (run.currentStage !== null) {
     if (running.length !== 1 || running[0].stage !== run.currentStage) throw new Error("orchestrator_running_state_invalid");
   }
+  assertWebStudioArtifactLineage(run.artifacts || {}, run.currentStage);
   return { ...run, artifacts: { ...(run.artifacts || {}) }, steps: run.steps.map((step) => ({ ...step })) };
 }
 
@@ -159,11 +161,12 @@ export function retryBlockedAutonomousWebStudioRun(run: WebStudioAutonomousRun):
   if (failed.length !== 1) throw new Error("orchestrator_retry_failed_stage_invalid");
   const failedStep = failed[0];
   if (failedStep.stage === "ready_for_promotion" || failedStep.approvalRequired || failedStep.mutatesProduction) throw new Error("orchestrator_retry_stage_forbidden");
-  const next: WebStudioAutonomousRun = { ...run, blocked: false, currentStage: failedStep.stage, artifacts: { ...run.artifacts }, steps: run.steps.map((step) => ({ ...step })) };
+  const next: WebStudioAutonomousRun = { ...run, blocked: false, currentStage: failedStep.stage, artifacts: invalidateWebStudioArtifactsFromStage(run.artifacts, failedStep.stage), steps: run.steps.map((step) => ({ ...step })) };
   const retry = next.steps.find((step) => step.stage === failedStep.stage);
   if (!retry) throw new Error("orchestrator_retry_stage_missing");
   retry.state = "running";
   delete retry.error;
+  assertWebStudioArtifactLineage(next.artifacts, next.currentStage);
   return next;
 }
 
@@ -190,6 +193,7 @@ export function advanceAutonomousWebStudioRun(run: WebStudioAutonomousRun, resul
       return next;
     }
     next.repairAttempts += 1;
+    next.artifacts = invalidateWebStudioArtifactsFromStage(next.artifacts, "repair_draft");
     repair.state = "running";
     next.currentStage = "repair_draft";
     return next;
@@ -197,6 +201,7 @@ export function advanceAutonomousWebStudioRun(run: WebStudioAutonomousRun, resul
   if (result.stage === "repair_draft") {
     const verify = next.steps.find((step) => step.stage === "verify_draft");
     if (!verify) throw new Error("verify_stage_missing");
+    next.artifacts = invalidateWebStudioArtifactsFromStage(next.artifacts, "verify_draft");
     verify.state = "running";
     next.currentStage = "verify_draft";
     return next;
@@ -206,9 +211,12 @@ export function advanceAutonomousWebStudioRun(run: WebStudioAutonomousRun, resul
   if (!following || following.state === "awaiting_approval") {
     next.currentStage = null;
     next.completed = Boolean(following?.stage === "ready_for_promotion");
+    if (next.completed) assertWebStudioArtifactLineage(next.artifacts, "ready_for_promotion");
     return next;
   }
+  next.artifacts = invalidateWebStudioArtifactsFromStage(next.artifacts, following.stage);
   following.state = "running";
   next.currentStage = following.stage;
+  assertWebStudioArtifactLineage(next.artifacts, next.currentStage);
   return next;
 }
