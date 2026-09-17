@@ -5,6 +5,7 @@ import {
   createAutonomousWebStudioRun,
   planAutonomousWebStudio,
   resumeAutonomousWebStudioRun,
+  retryBlockedAutonomousWebStudioRun,
   snapshotAutonomousWebStudioRun,
 } from "../lib/web-studio-orchestrator.ts";
 
@@ -52,6 +53,13 @@ let failed = createAutonomousWebStudioRun(plan);
 failed = advanceAutonomousWebStudioRun(failed, { stage: "build_draft", ok: false, error: "provider unavailable" });
 assert.equal(failed.blocked, true);
 assert.throws(() => advanceAutonomousWebStudioRun(failed, { stage: "build_draft", ok: true }), /not_advanceable/);
+failed = retryBlockedAutonomousWebStudioRun(failed);
+assert.equal(failed.blocked, false);
+assert.equal(failed.currentStage, "build_draft");
+assert.equal(failed.steps.find((step) => step.stage === "build_draft")?.state, "running");
+failed = advanceAutonomousWebStudioRun(failed, { stage: "build_draft", ok: true });
+assert.equal(failed.currentStage, "verify_draft");
+assert.throws(() => retryBlockedAutonomousWebStudioRun(failed), /not_retryable/);
 
 let bounded = createAutonomousWebStudioRun(noSmm);
 bounded = advanceAutonomousWebStudioRun(bounded, { stage: "build_draft", ok: true });
@@ -60,5 +68,6 @@ bounded = advanceAutonomousWebStudioRun(bounded, { stage: "repair_draft", ok: tr
 bounded = advanceAutonomousWebStudioRun(bounded, { stage: "verify_draft", ok: true, needsRepair: true });
 assert.equal(bounded.blocked, true);
 assert.equal(bounded.repairAttempts, 1);
+assert.throws(() => retryBlockedAutonomousWebStudioRun(bounded), /failed_stage_invalid/);
 
 console.log("web studio orchestrator contract: ok");

@@ -112,6 +112,24 @@ export function resumeAutonomousWebStudioRun(snapshot: WebStudioRunSnapshot): We
   return { ...run, steps: run.steps.map((step) => ({ ...step })) };
 }
 
+export function retryBlockedAutonomousWebStudioRun(run: WebStudioAutonomousRun): WebStudioAutonomousRun {
+  assertDraftOnlyAutonomy(run.plan);
+  if (!run.blocked || run.completed || run.currentStage !== null) throw new Error("orchestrator_run_not_retryable");
+  if (run.steps.some((step) => step.state === "running")) throw new Error("orchestrator_retry_running_state_invalid");
+  const failed = run.steps.filter((step) => step.state === "failed");
+  if (failed.length !== 1) throw new Error("orchestrator_retry_failed_stage_invalid");
+  const failedStep = failed[0];
+  if (failedStep.stage === "ready_for_promotion" || failedStep.approvalRequired || failedStep.mutatesProduction) {
+    throw new Error("orchestrator_retry_stage_forbidden");
+  }
+  const next: WebStudioAutonomousRun = { ...run, blocked: false, currentStage: failedStep.stage, steps: run.steps.map((step) => ({ ...step })) };
+  const retry = next.steps.find((step) => step.stage === failedStep.stage);
+  if (!retry) throw new Error("orchestrator_retry_stage_missing");
+  retry.state = "running";
+  delete retry.error;
+  return next;
+}
+
 export function advanceAutonomousWebStudioRun(
   run: WebStudioAutonomousRun,
   result: { stage: WebStudioAutonomousStage; ok: boolean; error?: string; needsRepair?: boolean },
