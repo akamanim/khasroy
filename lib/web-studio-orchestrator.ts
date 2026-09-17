@@ -31,6 +31,15 @@ export type WebStudioAutonomousPlan = {
 
 export type WebStudioRunStepState = "pending" | "running" | "succeeded" | "failed" | "skipped" | "awaiting_approval";
 
+export type WebStudioRunArtifacts = {
+  draftProjectId?: string;
+  draftUrl?: string;
+  verifiedFingerprint?: string;
+  githubRepository?: string;
+  githubCommitSha?: string;
+  smmPlanId?: string;
+};
+
 export type WebStudioAutonomousRun = {
   version: "web_studio_run_v1";
   plan: WebStudioAutonomousPlan;
@@ -38,6 +47,7 @@ export type WebStudioAutonomousRun = {
   repairAttempts: number;
   completed: boolean;
   blocked: boolean;
+  artifacts: WebStudioRunArtifacts;
   steps: Array<WebStudioAutonomousStep & { state: WebStudioRunStepState; error?: string }>;
 };
 
@@ -50,6 +60,11 @@ export type WebStudioRunSnapshot = {
 function boundedRepairAttempts(value: number | undefined) {
   if (!Number.isFinite(value)) return 2;
   return Math.max(1, Math.min(3, Math.trunc(value as number)));
+}
+
+function cleanArtifactValue(value: string | undefined, maxLength: number) {
+  const cleaned = value?.trim();
+  return cleaned ? cleaned.slice(0, maxLength) : undefined;
 }
 
 export function planAutonomousWebStudio(input: WebStudioAutonomousInput): WebStudioAutonomousPlan {
@@ -89,12 +104,36 @@ export function createAutonomousWebStudioRun(plan: WebStudioAutonomousPlan): Web
   }));
   const first = steps.find((step) => step.state === "pending");
   if (first) first.state = "running";
-  return { version: "web_studio_run_v1", plan, currentStage: first?.stage ?? null, repairAttempts: 0, completed: false, blocked: false, steps };
+  return { version: "web_studio_run_v1", plan, currentStage: first?.stage ?? null, repairAttempts: 0, completed: false, blocked: false, artifacts: {}, steps };
+}
+
+export function recordAutonomousWebStudioArtifacts(run: WebStudioAutonomousRun, artifacts: WebStudioRunArtifacts): WebStudioAutonomousRun {
+  assertDraftOnlyAutonomy(run.plan);
+  const draftUrl = cleanArtifactValue(artifacts.draftUrl, 500);
+  if (draftUrl) {
+    let parsed: URL;
+    try { parsed = new URL(draftUrl); } catch { throw new Error("orchestrator_draft_url_invalid"); }
+    if (!/^https?:$/.test(parsed.protocol)) throw new Error("orchestrator_draft_url_invalid");
+    if (parsed.hostname === "vercel.app" || parsed.hostname.endsWith(".vercel.app")) throw new Error("orchestrator_vercel_draft_forbidden");
+  }
+  return {
+    ...run,
+    artifacts: {
+      ...run.artifacts,
+      ...(cleanArtifactValue(artifacts.draftProjectId, 200) ? { draftProjectId: cleanArtifactValue(artifacts.draftProjectId, 200) } : {}),
+      ...(draftUrl ? { draftUrl } : {}),
+      ...(cleanArtifactValue(artifacts.verifiedFingerprint, 200) ? { verifiedFingerprint: cleanArtifactValue(artifacts.verifiedFingerprint, 200) } : {}),
+      ...(cleanArtifactValue(artifacts.githubRepository, 300) ? { githubRepository: cleanArtifactValue(artifacts.githubRepository, 300) } : {}),
+      ...(cleanArtifactValue(artifacts.githubCommitSha, 100) ? { githubCommitSha: cleanArtifactValue(artifacts.githubCommitSha, 100) } : {}),
+      ...(cleanArtifactValue(artifacts.smmPlanId, 200) ? { smmPlanId: cleanArtifactValue(artifacts.smmPlanId, 200) } : {}),
+    },
+    steps: run.steps.map((step) => ({ ...step })),
+  };
 }
 
 export function snapshotAutonomousWebStudioRun(run: WebStudioAutonomousRun, savedAt = new Date().toISOString()): WebStudioRunSnapshot {
   assertDraftOnlyAutonomy(run.plan);
-  return { version: "web_studio_snapshot_v1", savedAt, run: { ...run, steps: run.steps.map((step) => ({ ...step })) } };
+  return { version: "web_studio_snapshot_v1", savedAt, run: { ...run, artifacts: { ...run.artifacts }, steps: run.steps.map((step) => ({ ...step })) } };
 }
 
 export function resumeAutonomousWebStudioRun(snapshot: WebStudioRunSnapshot): WebStudioAutonomousRun {
@@ -109,7 +148,7 @@ export function resumeAutonomousWebStudioRun(snapshot: WebStudioRunSnapshot): We
   } else if (run.currentStage !== null) {
     if (running.length !== 1 || running[0].stage !== run.currentStage) throw new Error("orchestrator_running_state_invalid");
   }
-  return { ...run, steps: run.steps.map((step) => ({ ...step })) };
+  return { ...run, artifacts: { ...(run.artifacts || {}) }, steps: run.steps.map((step) => ({ ...step })) };
 }
 
 export function retryBlockedAutonomousWebStudioRun(run: WebStudioAutonomousRun): WebStudioAutonomousRun {
@@ -119,10 +158,8 @@ export function retryBlockedAutonomousWebStudioRun(run: WebStudioAutonomousRun):
   const failed = run.steps.filter((step) => step.state === "failed");
   if (failed.length !== 1) throw new Error("orchestrator_retry_failed_stage_invalid");
   const failedStep = failed[0];
-  if (failedStep.stage === "ready_for_promotion" || failedStep.approvalRequired || failedStep.mutatesProduction) {
-    throw new Error("orchestrator_retry_stage_forbidden");
-  }
-  const next: WebStudioAutonomousRun = { ...run, blocked: false, currentStage: failedStep.stage, steps: run.steps.map((step) => ({ ...step })) };
+  if (failedStep.stage === "ready_for_promotion" || failedStep.approvalRequired || failedStep.mutatesProduction) throw new Error("orchestrator_retry_stage_forbidden");
+  const next: WebStudioAutonomousRun = { ...run, blocked: false, currentStage: failedStep.stage, artifacts: { ...run.artifacts }, steps: run.steps.map((step) => ({ ...step })) };
   const retry = next.steps.find((step) => step.stage === failedStep.stage);
   if (!retry) throw new Error("orchestrator_retry_stage_missing");
   retry.state = "running";
@@ -130,13 +167,10 @@ export function retryBlockedAutonomousWebStudioRun(run: WebStudioAutonomousRun):
   return next;
 }
 
-export function advanceAutonomousWebStudioRun(
-  run: WebStudioAutonomousRun,
-  result: { stage: WebStudioAutonomousStage; ok: boolean; error?: string; needsRepair?: boolean },
-): WebStudioAutonomousRun {
+export function advanceAutonomousWebStudioRun(run: WebStudioAutonomousRun, result: { stage: WebStudioAutonomousStage; ok: boolean; error?: string; needsRepair?: boolean }): WebStudioAutonomousRun {
   if (run.completed || run.blocked) throw new Error("orchestrator_run_not_advanceable");
   if (run.currentStage !== result.stage) throw new Error("orchestrator_stage_mismatch");
-  const next: WebStudioAutonomousRun = { ...run, steps: run.steps.map((step) => ({ ...step })) };
+  const next: WebStudioAutonomousRun = { ...run, artifacts: { ...run.artifacts }, steps: run.steps.map((step) => ({ ...step })) };
   const current = next.steps.find((step) => step.stage === result.stage);
   if (!current || current.state !== "running") throw new Error("orchestrator_stage_not_running");
   if (!result.ok) {
