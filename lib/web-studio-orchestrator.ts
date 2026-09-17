@@ -29,6 +29,18 @@ export type WebStudioAutonomousPlan = {
   steps: WebStudioAutonomousStep[];
 };
 
+export type WebStudioRunStepState = "pending" | "running" | "succeeded" | "failed" | "skipped" | "awaiting_approval";
+
+export type WebStudioAutonomousRun = {
+  version: "web_studio_run_v1";
+  plan: WebStudioAutonomousPlan;
+  currentStage: WebStudioAutonomousStage | null;
+  repairAttempts: number;
+  completed: boolean;
+  blocked: boolean;
+  steps: Array<WebStudioAutonomousStep & { state: WebStudioRunStepState; error?: string }>;
+};
+
 function boundedRepairAttempts(value: number | undefined) {
   if (!Number.isFinite(value)) return 2;
   return Math.max(1, Math.min(3, Math.trunc(value as number)));
@@ -61,4 +73,81 @@ export function assertDraftOnlyAutonomy(plan: WebStudioAutonomousPlan) {
   const promotion = plan.steps.find((step) => step.stage === "ready_for_promotion");
   if (!promotion?.approvalRequired) throw new Error("promotion_boundary_missing");
   return true;
+}
+
+export function createAutonomousWebStudioRun(plan: WebStudioAutonomousPlan): WebStudioAutonomousRun {
+  assertDraftOnlyAutonomy(plan);
+  const steps = plan.steps.map((step) => ({
+    ...step,
+    state: (!step.required ? "skipped" : step.approvalRequired ? "awaiting_approval" : "pending") as WebStudioRunStepState,
+  }));
+  const first = steps.find((step) => step.state === "pending");
+  if (first) first.state = "running";
+  return {
+    version: "web_studio_run_v1",
+    plan,
+    currentStage: first?.stage ?? null,
+    repairAttempts: 0,
+    completed: false,
+    blocked: false,
+    steps,
+  };
+}
+
+export function advanceAutonomousWebStudioRun(
+  run: WebStudioAutonomousRun,
+  result: { stage: WebStudioAutonomousStage; ok: boolean; error?: string; needsRepair?: boolean },
+): WebStudioAutonomousRun {
+  if (run.completed || run.blocked) throw new Error("orchestrator_run_not_advanceable");
+  if (run.currentStage !== result.stage) throw new Error("orchestrator_stage_mismatch");
+
+  const next: WebStudioAutonomousRun = {
+    ...run,
+    steps: run.steps.map((step) => ({ ...step })),
+  };
+  const current = next.steps.find((step) => step.stage === result.stage);
+  if (!current || current.state !== "running") throw new Error("orchestrator_stage_not_running");
+
+  if (!result.ok) {
+    current.state = "failed";
+    current.error = (result.error || "stage_failed").slice(0, 500);
+    next.currentStage = null;
+    next.blocked = true;
+    return next;
+  }
+
+  current.state = "succeeded";
+  delete current.error;
+
+  if (result.stage === "verify_draft" && result.needsRepair) {
+    const repair = next.steps.find((step) => step.stage === "repair_draft");
+    if (!repair || next.repairAttempts >= next.plan.maxRepairAttempts) {
+      next.currentStage = null;
+      next.blocked = true;
+      return next;
+    }
+    next.repairAttempts += 1;
+    repair.state = "running";
+    next.currentStage = "repair_draft";
+    return next;
+  }
+
+  if (result.stage === "repair_draft") {
+    const verify = next.steps.find((step) => step.stage === "verify_draft");
+    if (!verify) throw new Error("verify_stage_missing");
+    verify.state = "running";
+    next.currentStage = "verify_draft";
+    return next;
+  }
+
+  const currentIndex = next.steps.findIndex((step) => step.stage === result.stage);
+  const following = next.steps.slice(currentIndex + 1).find((step) => step.state !== "skipped" && step.state !== "succeeded");
+  if (!following || following.state === "awaiting_approval") {
+    next.currentStage = null;
+    next.completed = Boolean(following?.stage === "ready_for_promotion");
+    return next;
+  }
+  following.state = "running";
+  next.currentStage = following.stage;
+  return next;
 }
