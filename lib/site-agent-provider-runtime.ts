@@ -10,6 +10,7 @@ export type JsonProviderRequest = {
   maxTokens?: number;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  groqApiKey?: string;
 };
 
 type ProviderConfig = {
@@ -22,11 +23,12 @@ type ProviderConfig = {
 const DEFAULT_TIMEOUT_MS = 25_000;
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
 
-function providers(): ProviderConfig[] {
+function providers(groqApiKey?: string): ProviderConfig[] {
   const result: ProviderConfig[] = [];
-  if (process.env.GROQ_API_KEY) result.push({
+  const groqKey = groqApiKey || process.env.GROQ_API_KEY;
+  if (groqKey) result.push({
     provider: "groq",
-    apiKey: process.env.GROQ_API_KEY,
+    apiKey: groqKey,
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
     model: process.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b",
   });
@@ -48,7 +50,7 @@ function retryableStatus(status: number) {
 }
 
 export async function siteAgentJson(request: JsonProviderRequest): Promise<Record<string, unknown>> {
-  const available = providers();
+  const available = providers(request.groqApiKey);
   if (!available.length) throw new Error("Site Agent provider is not configured");
   const fetchImpl = request.fetchImpl || fetch;
   const failures: string[] = [];
