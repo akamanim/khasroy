@@ -46,6 +46,17 @@ export type ResourceRuntimeOverrides = Partial<
   Record<ResourceId, ResourceRuntimeOverride>
 >;
 
+type HealthSnapshot = Record<
+  string,
+  {
+    successes?: number;
+    failures?: number;
+    consecutiveFailures?: number;
+    averageLatencyMs?: number | null;
+    cooldownRemainingMs?: number;
+  }
+>;
+
 function env(name: string) {
   return Boolean(process.env[name]?.trim());
 }
@@ -146,13 +157,26 @@ function survivalProvider(id: ResourceId): SurvivalProvider {
   return id;
 }
 
+function runtimeScore(resource: ResourceDescriptor, snapshot: HealthSnapshot) {
+  const health = snapshot[resource.id];
+  if (!health) return resource.priority;
+  const successes = Math.max(0, Number(health.successes) || 0);
+  const failures = Math.max(0, Number(health.failures) || 0);
+  const total = successes + failures;
+  const reliability = total ? (successes / total - 0.5) * 16 : 0;
+  const consecutivePenalty = Math.min(
+    Math.max(0, Number(health.consecutiveFailures) || 0) * 10,
+    30,
+  );
+  const latency = Math.max(0, Number(health.averageLatencyMs) || 0);
+  const latencyPenalty = latency ? Math.min(latency / 2_500, 8) : 0;
+  return resource.priority + reliability - consecutivePenalty - latencyPenalty;
+}
+
 export function resourceRegistry(
   overrides: ResourceRuntimeOverrides = {},
 ): ResourceDescriptor[] {
-  const snapshot = providerHealthSnapshot() as Record<
-    string,
-    { available?: boolean; cooldownRemainingMs?: number }
-  >;
+  const snapshot = providerHealthSnapshot() as HealthSnapshot;
 
   return DEFINITIONS.map((definition) => {
     const override = overrides[definition.id];
@@ -187,10 +211,14 @@ export function resourcesFor(
     overrides?: ResourceRuntimeOverrides;
   } = {},
 ) {
+  const snapshot = providerHealthSnapshot() as HealthSnapshot;
   return resourceRegistry(options.overrides)
     .filter((resource) => resource.capabilities.includes(capability))
     .filter((resource) => options.includeUnavailable || resource.available)
-    .sort((a, b) => b.priority - a.priority);
+    .sort((a, b) => {
+      if (a.available !== b.available) return a.available ? -1 : 1;
+      return runtimeScore(b, snapshot) - runtimeScore(a, snapshot);
+    });
 }
 
 export function preferredResource(
