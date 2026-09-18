@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { TriagedLead } from "@/lib/web-studio-lead-triage";
+import type { TriagedLead } from "@/lib/web-studio-lead-triage.ts";
 
 export type LeadFollowupPlan = {
   leadId: string;
