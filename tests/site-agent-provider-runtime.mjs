@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-process.env.OPENAI_API_KEY = "openai-test";
+process.env.OPENAI_API_KEY = "openai-env-test";
 process.env.OPENAI_SITE_AGENT_MODEL = "test-model";
 delete process.env.GROQ_API_KEY;
 
@@ -19,12 +19,25 @@ const result = await siteAgentJson({
   messages: [{ role: "user", content: "test" }],
   fetchImpl,
   groqApiKey: "legacy-route-key",
+  openaiApiKey: "vault-openai-key",
 });
 assert.deepEqual(result, { ok: true });
 assert.equal(calls.length, 2);
 assert.match(calls[0], /groq/);
 assert.match(calls[1], /openai/);
 assert.equal(auth[0], "Bearer legacy-route-key");
-assert.equal(auth[1], "Bearer openai-test");
+assert.equal(auth[1], "Bearer vault-openai-key");
 
-console.log("site-agent provider runtime legacy key failover: ok");
+calls.length = 0;
+auth.length = 0;
+const openaiOnly = await siteAgentJson({
+  messages: [{ role: "user", content: "openai only" }],
+  fetchImpl,
+  openaiApiKey: "vault-openai-only",
+});
+assert.deepEqual(openaiOnly, { ok: true });
+assert.equal(calls.length, 1);
+assert.match(calls[0], /openai/);
+assert.equal(auth[0], "Bearer vault-openai-only");
+
+console.log("site-agent provider runtime vault-key failover: ok");
