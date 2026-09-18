@@ -9,10 +9,14 @@ assert.match(route, /const\s+repair\s*=\s*auditAndRepairSmmPlan\(generatedPlan\)
 assert.match(route, /const\s+plan\s*=\s*repair\.plan/);
 
 const repairIndex = route.indexOf("auditAndRepairSmmPlan(generatedPlan)");
-const persistenceIndex = route.indexOf("khasroy_social_queue");
+const persistableIndex = route.indexOf("const persistableItems = plan.items.filter");
+const queueIndex = route.indexOf("queuePlanItem(ownerKey, apiKey, item)");
 assert.ok(repairIndex >= 0, "repair call missing");
-assert.ok(persistenceIndex >= 0, "Supabase social queue persistence missing");
-assert.ok(repairIndex < persistenceIndex, "SMM plan must be repaired before Supabase persistence");
+assert.ok(persistableIndex >= 0, "repaired plan persistence selection missing");
+assert.ok(queueIndex >= 0, "Supabase social-store queue call missing");
+assert.ok(repairIndex < persistableIndex, "SMM plan must be repaired before persistence selection");
+assert.ok(persistableIndex < queueIndex, "repaired items must be selected before queue persistence");
+assert.match(route, /action:\s*["']queue_social["']/);
 
 assert.match(route, /repair:\s*\{[\s\S]*?repaired:\s*repair\.repaired,[\s\S]*?issues:\s*repair\.issues/);
 
