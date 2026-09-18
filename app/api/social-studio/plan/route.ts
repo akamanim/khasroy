@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { buildSmmPlan } from "@/lib/smm-pipeline";
 import type { SmmChannel, SmmContentItem } from "@/lib/smm-pipeline";
+import { auditAndRepairSmmPlan } from "@/lib/smm-repair";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
 import type { WebStudioSpec } from "@/lib/web-studio";
 
@@ -108,7 +109,9 @@ export async function POST(request: Request) {
   const cadenceDays = typeof body?.cadenceDays === "number" && Number.isFinite(body.cadenceDays)
     ? body.cadenceDays
     : 7;
-  const plan = buildSmmPlan(body.spec, cadenceDays);
+  const generatedPlan = buildSmmPlan(body.spec, cadenceDays);
+  const repair = auditAndRepairSmmPlan(generatedPlan);
+  const plan = repair.plan;
   const persist = body?.persist === true;
 
   let persistence: {
@@ -185,6 +188,10 @@ export async function POST(request: Request) {
     deterministic: true,
     externalProviderUsed: false,
     plan,
+    repair: {
+      repaired: repair.repaired,
+      issues: repair.issues,
+    },
     persistence,
   });
 }
