@@ -1,4 +1,4 @@
-import type { LeadFollowupPlan } from "@/lib/web-studio-lead-followup";
+import type { LeadFollowupPlan } from "@/lib/web-studio-lead-followup.ts";
 
 export type FollowupQueueItem = {
   operationKey: string;
