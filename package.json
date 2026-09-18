@@ -5,7 +5,7 @@
   "engines": { "node": ">=22.13.0" },
   "scripts": {
     "dev": "node scripts/ensure-local-owner-key.mjs && next dev",
-    "build": "npm run test:site-agent-provider && npm run test:site-agent-v8-runtime && npm run test:web-studio-orchestrator && npm run test:web-studio-github-staging && npm run test:web-studio-quality && npm run test:web-studio-lead-followup && npm run test:web-studio-followup-worker && npm run test:smm-pipeline && npm run test:smm-compose && npm run test:smm-publisher && next build",
+    "build": "npm run test:site-agent-provider && npm run test:site-agent-v8-runtime && npm run test:web-studio-orchestrator && npm run test:web-studio-github-staging && npm run test:web-studio-quality && npm run test:web-studio-lead-followup && npm run test:web-studio-followup-worker && npm run test:smm-pipeline && npm run test:smm-compose && npm run test:smm-publisher && npm run test:smm-repair && next build",
     "typecheck": "tsc --noEmit",
     "start": "next start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
@@ -22,6 +22,7 @@
     "test:smm-pipeline": "node --experimental-strip-types tests/smm-pipeline.mjs",
     "test:smm-compose": "node --experimental-strip-types tests/smm-compose.mjs",
     "test:smm-publisher": "node --experimental-strip-types tests/smm-publisher.mjs",
+    "test:smm-repair": "node --experimental-strip-types tests/smm-repair.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
