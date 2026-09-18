@@ -1,4 +1,4 @@
-import type { SmmContentItem, SmmPlan } from "@/lib/smm-pipeline.ts";
+import type { SmmContentItem, SmmPlan } from "./smm-pipeline.ts";
 
 export type SmmRepairIssue = {
   itemId: string;
