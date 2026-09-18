@@ -41,15 +41,10 @@ export function auditAndRepairSmmPlan(input: SmmPlan): SmmRepairResult {
 
   const items = input.items.map((source) => {
     const item = { ...source };
-    const hookKey = normalized(item.hook);
 
-    if (!hookKey) {
+    if (!normalized(item.hook)) {
       issues.push({ itemId: item.id, code: "empty_hook" });
       item.hook = safeHook(item, input.brandName);
-      repaired += 1;
-    } else if (seenHooks.has(hookKey)) {
-      issues.push({ itemId: item.id, code: "duplicate_hook" });
-      item.hook = `${item.hook} — день ${item.day}`.slice(0, 160);
       repaired += 1;
     }
 
@@ -64,6 +59,13 @@ export function auditAndRepairSmmPlan(input: SmmPlan): SmmRepairResult {
       issues.push({ itemId: item.id, code: "unsupported_claim" });
       item[field] = stripUnsupportedClaims(item[field]);
       if (!item[field]) item[field] = field === "cta" ? safeCta(input) : safeHook(item, input.brandName);
+      repaired += 1;
+    }
+
+    const hookKey = normalized(item.hook);
+    if (seenHooks.has(hookKey)) {
+      issues.push({ itemId: item.id, code: "duplicate_hook" });
+      item.hook = `${item.hook} — день ${item.day}`.slice(0, 160);
       repaired += 1;
     }
 
