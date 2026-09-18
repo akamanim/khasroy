@@ -5,7 +5,7 @@
   "engines": { "node": ">=22.13.0" },
   "scripts": {
     "dev": "node scripts/ensure-local-owner-key.mjs && next dev",
-    "build": "npm run test:site-agent-provider && npm run test:web-studio-orchestrator && npm run test:web-studio-github-staging && npm run test:web-studio-quality && npm run test:web-studio-lead-followup && npm run test:web-studio-followup-worker && npm run test:smm-pipeline && npm run test:smm-compose && npm run test:smm-publisher && next build",
+    "build": "npm run test:site-agent-provider && npm run test:site-agent-v8-runtime && npm run test:web-studio-orchestrator && npm run test:web-studio-github-staging && npm run test:web-studio-quality && npm run test:web-studio-lead-followup && npm run test:web-studio-followup-worker && npm run test:smm-pipeline && npm run test:smm-compose && npm run test:smm-publisher && next build",
     "typecheck": "tsc --noEmit",
     "start": "next start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
@@ -13,6 +13,7 @@
     "test:image-intent": "node --experimental-strip-types tests/image-intent.mjs",
     "test:image-integrity": "node tests/generated-image-integrity.mjs",
     "test:site-agent-provider": "node --experimental-strip-types tests/site-agent-provider-runtime.mjs",
+    "test:site-agent-v8-runtime": "node tests/site-agent-v8-runtime-contract.mjs",
     "test:web-studio-orchestrator": "node --experimental-strip-types tests/web-studio-orchestrator.mjs",
     "test:web-studio-github-staging": "node --experimental-strip-types tests/web-studio-github-staging.mjs",
     "test:web-studio-quality": "node --experimental-strip-types tests/web-studio-quality.mjs",
