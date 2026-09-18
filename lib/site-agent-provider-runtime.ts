@@ -11,6 +11,7 @@ export type JsonProviderRequest = {
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
   groqApiKey?: string;
+  openaiApiKey?: string;
 };
 
 type ProviderConfig = {
@@ -23,18 +24,19 @@ type ProviderConfig = {
 const DEFAULT_TIMEOUT_MS = 25_000;
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
 
-function providers(groqApiKey?: string): ProviderConfig[] {
+function providers(groqApiKey?: string, openaiApiKey?: string): ProviderConfig[] {
   const result: ProviderConfig[] = [];
   const groqKey = groqApiKey || process.env.GROQ_API_KEY;
+  const openaiKey = openaiApiKey || process.env.OPENAI_API_KEY;
   if (groqKey) result.push({
     provider: "groq",
     apiKey: groqKey,
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
     model: process.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b",
   });
-  if (process.env.OPENAI_API_KEY) result.push({
+  if (openaiKey) result.push({
     provider: "openai",
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: openaiKey,
     endpoint: "https://api.openai.com/v1/chat/completions",
     model: process.env.OPENAI_SITE_AGENT_MODEL || "gpt-5-mini",
   });
@@ -50,7 +52,7 @@ function retryableStatus(status: number) {
 }
 
 export async function siteAgentJson(request: JsonProviderRequest): Promise<Record<string, unknown>> {
-  const available = providers(request.groqApiKey);
+  const available = providers(request.groqApiKey, request.openaiApiKey);
   if (!available.length) throw new Error("Site Agent provider is not configured");
   const fetchImpl = request.fetchImpl || fetch;
   const failures: string[] = [];
