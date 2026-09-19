@@ -1,5 +1,6 @@
 import {
   canAttemptProvider,
+  providerHealthSnapshot,
   recordProviderFailure,
   recordProviderSuccess,
 } from "./survival/provider-health.ts";
@@ -32,8 +33,17 @@ type ProviderConfig = {
   model: string;
 };
 
+type RuntimeHealth = {
+  available?: boolean;
+  successes?: number;
+  failures?: number;
+  consecutiveFailures?: number;
+  averageLatencyMs?: number | null;
+};
+
 const DEFAULT_TIMEOUT_MS = 25_000;
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
+const PROVIDER_PRIORITY: Record<SiteAgentProvider, number> = { groq: 96, openai: 92 };
 
 function providers(groqApiKey?: string, openaiApiKey?: string): ProviderConfig[] {
   const result: ProviderConfig[] = [];
@@ -62,6 +72,18 @@ function retryableStatus(status: number) {
   return RETRYABLE.has(status) || status >= 500;
 }
 
+function runtimeScore(provider: SiteAgentProvider, health?: RuntimeHealth) {
+  if (!health) return PROVIDER_PRIORITY[provider];
+  const successes = Math.max(0, Number(health.successes) || 0);
+  const failures = Math.max(0, Number(health.failures) || 0);
+  const total = successes + failures;
+  const reliability = total ? (successes / total - 0.5) * 16 : 0;
+  const consecutivePenalty = Math.min(Math.max(0, Number(health.consecutiveFailures) || 0) * 10, 30);
+  const latency = Math.max(0, Number(health.averageLatencyMs) || 0);
+  const latencyPenalty = latency ? Math.min(latency / 2_500, 8) : 0;
+  return PROVIDER_PRIORITY[provider] + reliability - consecutivePenalty - latencyPenalty;
+}
+
 async function markSuccess(provider: SiteAgentProvider, status: number, latencyMs: number) {
   recordProviderSuccess(provider, status, latencyMs);
   await persistProviderSuccess(provider, status, latencyMs).catch(() => undefined);
@@ -80,12 +102,16 @@ export async function siteAgentJson(request: JsonProviderRequest): Promise<Recor
   if (!configured.length) throw new Error("Site Agent provider is not configured");
 
   // Hydrate shared Supabase-backed provider state before choosing an expensive
-  // Site Agent model. Healthy providers run first; blocked providers remain as
-  // last-chance fallbacks so stale health data can never deadlock the agent.
+  // Site Agent model. Availability is the hard gate; observed reliability and
+  // latency decide ordering among providers that are currently usable.
   await hydratePersistentProviderHealth().catch(() => undefined);
-  const available = [...configured].sort((a, b) =>
-    Number(canAttemptProvider(b.provider)) - Number(canAttemptProvider(a.provider)),
-  );
+  const snapshot = providerHealthSnapshot() as Record<string, RuntimeHealth>;
+  const available = [...configured].sort((a, b) => {
+    const aAvailable = canAttemptProvider(a.provider);
+    const bAvailable = canAttemptProvider(b.provider);
+    if (aAvailable !== bAvailable) return aAvailable ? -1 : 1;
+    return runtimeScore(b.provider, snapshot[b.provider]) - runtimeScore(a.provider, snapshot[a.provider]);
+  });
 
   const fetchImpl = request.fetchImpl || fetch;
   const failures: string[] = [];
