@@ -30,3 +30,21 @@ export async function siteIntelligenceJson(
     openaiApiKey: request.openaiApiKey,
   });
 }
+
+/**
+ * Drop-in bridge for the legacy v3 groqJson call shape.
+ * This lets the Site Intelligence job move each business-map/design/repair call
+ * to the resilient runtime without changing prompt construction or result parsing.
+ */
+export async function siteIntelligenceLegacyJson(
+  apiKey: string,
+  messages: ProviderMessage[],
+  maxTokens = 1000,
+): Promise<Record<string, unknown>> {
+  return siteIntelligenceJson({
+    messages,
+    maxTokens,
+    timeoutMs: 25_000,
+    groqApiKey: apiKey,
+  });
+}
