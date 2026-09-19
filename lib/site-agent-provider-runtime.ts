@@ -2,12 +2,12 @@ import {
   canAttemptProvider,
   recordProviderFailure,
   recordProviderSuccess,
-} from "@/lib/survival/provider-health";
+} from "./survival/provider-health.ts";
 import {
   hydratePersistentProviderHealth,
   persistProviderFailure,
   persistProviderSuccess,
-} from "@/lib/survival/persistent-provider-health";
+} from "./survival/persistent-provider-health.ts";
 
 export type SiteAgentProvider = "groq" | "openai";
 
