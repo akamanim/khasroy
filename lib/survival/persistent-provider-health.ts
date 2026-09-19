@@ -1,7 +1,7 @@
 import {
   applyPersistentProviderHealth,
   type SurvivalProvider,
-} from "@/lib/survival/provider-health";
+} from "./provider-health.ts";
 
 const MEMORY_ENDPOINT =
   process.env.KHASROY_MEMORY_ENDPOINT ||
