@@ -7,9 +7,12 @@ on:
       - "package.json"
       - "scripts/ensure-local-owner-key.mjs"
       - "scripts/validate-generated-image.mjs"
+      - "scripts/image-exam-preverify.mjs"
+      - "scripts/image-exam-direct.mjs"
       - "tests/local-owner-key.mjs"
       - "tests/image-intent.mjs"
       - "tests/generated-image-integrity.mjs"
+      - "tests/image-exam-preverify-integration.mjs"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
       - "lib/server-image-lab.ts"
@@ -26,9 +29,12 @@ on:
       - "package.json"
       - "scripts/ensure-local-owner-key.mjs"
       - "scripts/validate-generated-image.mjs"
+      - "scripts/image-exam-preverify.mjs"
+      - "scripts/image-exam-direct.mjs"
       - "tests/local-owner-key.mjs"
       - "tests/image-intent.mjs"
       - "tests/generated-image-integrity.mjs"
+      - "tests/image-exam-preverify-integration.mjs"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
       - "lib/server-image-lab.ts"
@@ -63,6 +69,8 @@ jobs:
         run: npm run test:image-intent
       - name: Generated image integrity test
         run: npm run test:image-integrity
+      - name: Image exam pre-verifier integration test
+        run: node tests/image-exam-preverify-integration.mjs
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Next production build
