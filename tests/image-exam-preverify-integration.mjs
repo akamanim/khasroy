@@ -26,11 +26,10 @@ assert.throws(
 );
 
 const examSource = await readFile(new URL("../scripts/image-exam-direct.mjs", import.meta.url), "utf8");
-assert.match(examSource, /const integrity=validateImageExamArtifact\(image\)/);
-assert.match(examSource, /const audit=await verifyImage\(token,image\)/);
-assert.ok(
-  examSource.indexOf("validateImageExamArtifact(image)") < examSource.indexOf("verifyImage(token,image)"),
-  "integrity gate must execute before visual verifier",
-);
+const gateCall = examSource.indexOf("const integrity=validateImageExamArtifact(image)");
+const verifierCall = examSource.lastIndexOf("const audit=await verifyImage(token,image)");
+assert.ok(gateCall >= 0, "real image exam must call integrity gate");
+assert.ok(verifierCall >= 0, "real image exam must call visual verifier");
+assert.ok(gateCall < verifierCall, "integrity gate must execute before visual verifier");
 
 console.log("image-exam-preverify-integration: 5/5 ok");
