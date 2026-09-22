@@ -13,6 +13,7 @@ on:
       - "tests/image-intent.mjs"
       - "tests/generated-image-integrity.mjs"
       - "tests/image-exam-preverify-integration.mjs"
+      - "tests/image-exam-repair-loop-contract.mjs"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
       - "lib/server-image-lab.ts"
@@ -35,6 +36,7 @@ on:
       - "tests/image-intent.mjs"
       - "tests/generated-image-integrity.mjs"
       - "tests/image-exam-preverify-integration.mjs"
+      - "tests/image-exam-repair-loop-contract.mjs"
       - "lib/chat.ts"
       - "lib/image-intent.ts"
       - "lib/server-image-lab.ts"
@@ -71,6 +73,8 @@ jobs:
         run: npm run test:image-integrity
       - name: Image exam pre-verifier integration test
         run: node tests/image-exam-preverify-integration.mjs
+      - name: Image exam repair-loop contract test
+        run: node tests/image-exam-repair-loop-contract.mjs
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Next production build
