@@ -5,7 +5,7 @@ const source = await readFile(new URL("../scripts/image-exam-direct.mjs", import
 const compact = source.replace(/\s+/g, "");
 
 assert.match(compact, /for\(letattempt=1;attempt<=2;attempt\+=1\)/, "exam must allow exactly one repair retry");
-assert.match(compact, /repair=audit\.repairPrompt\|\|audit\.mismatches\.join\('; '\)/, "failed audit must feed a repair instruction into the next attempt");
+assert.match(compact, /repair=audit\.repairPrompt\|\|audit\.mismatches\.join\(';'\)/, "failed audit must feed a repair instruction into the next attempt");
 assert.match(compact, /avoidModel=image\.requestedModel/, "retry must avoid the model that failed the visual exam");
 assert.match(compact, /compiledPrompt\(repair\)/, "repair instruction must be compiled into the next generation prompt");
 
