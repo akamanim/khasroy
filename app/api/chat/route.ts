@@ -23,6 +23,7 @@ import {
   rememberKnowledge,
   upsertSkill,
 } from "@/lib/server-memory";
+import { looksLikeOwnerPreference, rankKnowledgeForChat } from "@/lib/memory-relevance";
 import { buildWebsite } from "@/lib/web-studio";
 import { looksLikeWebsiteBuildRequest } from "@/lib/web-studio-intent";
 import {
@@ -387,7 +388,7 @@ export async function POST(request: Request) {
   try {
     const [recent, knowledge] = await Promise.all([
       getRecentMessages(ownerKey, 20),
-      recallKnowledge(ownerKey, "", 12),
+      recallKnowledge(ownerKey, "", 100),
     ]);
 
     const current = new Set(
@@ -396,7 +397,10 @@ export async function POST(request: Request) {
     const olderRecent = recent.filter(
       (message) => !current.has(`${message.role}:${message.content}`),
     );
-    memoryContext = buildMemoryContext(olderRecent, knowledge);
+    memoryContext = buildMemoryContext(
+      olderRecent,
+      rankKnowledgeForChat(knowledge, latestUser.content, 6),
+    );
     memoryRead = true;
   } catch (error) {
     console.error("Khasroy memory read failed", error);
@@ -539,22 +543,22 @@ export async function POST(request: Request) {
   const memoryWrites: Promise<unknown>[] = [
     appendMessage(ownerKey, "user", latestUser.content),
     appendMessage(ownerKey, "assistant", content),
+    // A single successful request is an observation, not proof the capability is ready.
+    // Skills here stay "learning"; only a dedicated, evidenced trial may mark one "verified".
     upsertSkill(ownerKey, {
       slug: "live_ai_dialogue",
       name: "Живой AI-диалог",
       description: "Хасрой ведёт реальный диалог через подключаемый AI-мозг.",
-      status: "verified",
+      status: "learning",
       level: 1,
-      testsPassed: 1,
       metadata: { provider: providerLabel, model: brain.model },
     }),
     upsertSkill(ownerKey, {
       slug: "owner_access_control",
       name: "Контроль владельца",
       description: "Доступ к интеллекту Хасроя защищён отдельной авторизацией владельца.",
-      status: "verified",
+      status: "learning",
       level: 1,
-      testsPassed: 1,
     }),
   ];
 
@@ -564,9 +568,8 @@ export async function POST(request: Request) {
         slug: "github_self_repository_reader",
         name: "Чтение собственного GitHub-кода",
         description: "Хасрой читает актуальное дерево и исходные файлы собственного GitHub-репозитория перед техническим ответом.",
-        status: "verified",
+        status: "learning",
         level: 1,
-        testsPassed: 1,
         metadata: {
           repository: "akamanim/khasroy",
           branch: "main",
@@ -583,9 +586,8 @@ export async function POST(request: Request) {
         slug: "internet_research",
         name: "Интернет-исследование",
         description: "Хасрой использует реальный веб-поиск или посещение сайта и отвечает на основе найденных источников.",
-        status: "verified",
+        status: "learning",
         level: 1,
-        testsPassed: 1,
         metadata: {
           provider: providerLabel,
           model: brain.model,
@@ -601,9 +603,8 @@ export async function POST(request: Request) {
         slug: "cloud_code_sandbox",
         name: "Облачная песочница кода",
         description: "Хасрой может запускать Python/Node.js-код в изолированной облачной среде для вычислений и проверки решений.",
-        status: "verified",
+        status: "learning",
         level: 1,
-        testsPassed: 1,
         metadata: {
           provider: providerLabel,
           model: brain.model,
@@ -622,9 +623,8 @@ export async function POST(request: Request) {
         slug: "independent_response_critic",
         name: "Независимая проверка ответа",
         description: "Хасрой пропускает технические ответы через отдельный критический проход и при необходимости исправляет их перед показом владельцу.",
-        status: "verified",
+        status: "learning",
         level: 1,
-        testsPassed: 1,
         metadata: {
           model: criticModel,
           revised: criticRevised,
@@ -635,7 +635,8 @@ export async function POST(request: Request) {
     );
   }
 
-  if (explicitMemoryRequest(latestUser.content)) {
+  const explicitMemory = explicitMemoryRequest(latestUser.content);
+  if (explicitMemory || looksLikeOwnerPreference(latestUser.content)) {
     const fingerprint = createHash("sha256")
       .update(latestUser.content)
       .digest("hex")
@@ -644,9 +645,9 @@ export async function POST(request: Request) {
       rememberKnowledge(
         ownerKey,
         `owner_${fingerprint}`,
-        "owner_instruction",
+        explicitMemory ? "owner_instruction" : "owner_preference",
         latestUser.content,
-        1,
+        explicitMemory ? 1 : 0.9,
       ),
     );
   }
