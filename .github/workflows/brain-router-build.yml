@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - "lib/brain/**"
+      - "lib/memory-relevance.ts"
+      - "lib/server-memory.ts"
+      - "app/api/chat/**"
+      - "tests/memory-relevance.mjs"
       - "lib/survival/**"
       - "lib/ai/**"
       - "lib/site-agent*.ts"
@@ -34,6 +38,10 @@ on:
     branches: [main]
     paths:
       - "lib/brain/**"
+      - "lib/memory-relevance.ts"
+      - "lib/server-memory.ts"
+      - "app/api/chat/**"
+      - "tests/memory-relevance.mjs"
       - "lib/survival/**"
       - "lib/ai/**"
       - "lib/site-agent*.ts"
