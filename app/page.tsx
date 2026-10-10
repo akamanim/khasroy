@@ -284,17 +284,16 @@ export default function Home() {
         <div className="core-wrap">
           <Core
             state={responding ? "responding" : busy ? "thinking" : focused ? "listening" : "idle"}
-            evolution={evolution}
           />
           <span className="core-coordinate coord-left">
-            CORE EVOLUTION<br />LEVEL {levelLabel}
+            STORM CORE<br />{responding ? "VOICE" : busy ? "STORM" : focused ? "LISTENING" : "CALM"}
           </span>
           <span className="core-coordinate coord-right">
             {responding ? "RESPONDING" : busy ? "PROCESSING" : "STANDBY"}<br />● ACTIVE
           </span>
         </div>
 
-        <div className="stage-index">{levelLabel} / CORE EVOLUTION</div>
+        <div className="stage-index">ХАСРОЙ / STORM CORE</div>
       </section>
 
       <section className="chat" aria-label="Чат с «Хасрой»">
