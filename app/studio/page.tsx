@@ -505,7 +505,7 @@ export default function StudioPage() {
     <div className={`${styles.studio} ${preview ? styles.previewMode : ""}`}>
       <header className={styles.topbar}>
         <div className={styles.topbarLeft}>
-          <a className={styles.back} href="/" aria-label="Назад к Хасрою">
+          <a className={styles.back} href="/owner" aria-label="Назад к Хасрою">
             <ArrowLeft size={17} />
           </a>
           <div className={styles.logo}>K</div>

@@ -1,0 +1,192 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+
+// Storage gateway for the invitation studio. Only the Khasroy server calls it,
+// authenticating with the owner key; public clients never reach it directly.
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const BUCKET = "invitations";
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const PHOTO_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+const ACTIVE = "status=in.(draft,submitted,approved,published)";
+const ROW = "id,slug,status,event_type,template_id,data,history,message_count,contact,created_at,updated_at";
+
+const knownOwners = new Set<string>();
+
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+  });
+}
+
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function db(path: string, init: RequestInit = {}) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      "content-type": "application/json",
+      ...(init.headers || {}),
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`database ${response.status}: ${text.slice(0, 300)}`);
+  }
+  return response;
+}
+
+async function ownerAllowed(hash: string) {
+  if (knownOwners.has(hash)) return true;
+  const rows = await (await db(`khasroy_skills?owner_hash=eq.${hash}&select=owner_hash&limit=1`)).json();
+  const ok = Array.isArray(rows) && rows.length > 0;
+  if (ok) knownOwners.add(hash);
+  return ok;
+}
+
+function hex64(value: unknown) {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value) ? value : "";
+}
+
+function slugValue(value: unknown) {
+  return typeof value === "string" && /^[a-z0-9]{6,24}$/u.test(value) ? value : "";
+}
+
+function newSlug() {
+  const alphabet = "abcdefghijkmnpqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(10));
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
+}
+
+function obj(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+async function latestForSession(sessionHash: string) {
+  const rows = await (await db(
+    `khasroy_invitations?session_hash=eq.${sessionHash}&${ACTIVE}&select=${ROW}&order=updated_at.desc&limit=1`,
+  )).json();
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+Deno.serve(async (request) => {
+  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 1 });
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+  try {
+    const body = await request.json().catch(() => ({}));
+    const ownerKey = typeof body?.ownerKey === "string" ? body.ownerKey.trim() : "";
+    if (!ownerKey) return json({ error: "unauthorized" }, 401);
+    const ownerHash = await sha256(ownerKey);
+    if (!(await ownerAllowed(ownerHash))) return json({ error: "unauthorized" }, 401);
+    const action = typeof body?.action === "string" ? body.action : "";
+
+    if (action === "by_slug") {
+      const slug = slugValue(body.slug);
+      if (!slug) return json({ error: "invalid_slug" }, 400);
+      const rows = await (await db(`khasroy_invitations?slug=eq.${slug}&${ACTIVE}&select=${ROW}&limit=1`)).json();
+      return json({ invitation: Array.isArray(rows) && rows[0] ? rows[0] : null });
+    }
+
+    if (action === "list") {
+      const status = typeof body.status === "string" && /^[a-z]{4,12}$/u.test(body.status) ? body.status : "submitted";
+      const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 100);
+      const rows = await (await db(
+        `khasroy_invitations?status=eq.${status}&select=${ROW}&order=updated_at.desc&limit=${limit}`,
+      )).json();
+      return json({ invitations: rows });
+    }
+
+    const sessionHash = hex64(body.sessionHash);
+    if (!sessionHash) return json({ error: "invalid_session" }, 400);
+
+    if (action === "get_session") {
+      return json({ invitation: await latestForSession(sessionHash) });
+    }
+
+    if (action === "save") {
+      const data = obj(body.data);
+      if (!data) return json({ error: "invalid_data" }, 400);
+      const history = Array.isArray(body.history) ? body.history.slice(-60) : [];
+      const patch = {
+        data,
+        history,
+        event_type: typeof data.eventType === "string" ? data.eventType.slice(0, 40) : null,
+        template_id: typeof data.templateId === "string" ? data.templateId.slice(0, 40) : null,
+        updated_at: new Date().toISOString(),
+      };
+      const existing = await latestForSession(sessionHash);
+      if (existing) {
+        const count = Number(existing.message_count || 0) + (body.countMessage ? 1 : 0);
+        const rows = await (await db(`khasroy_invitations?id=eq.${existing.id}&select=${ROW}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=representation" },
+          body: JSON.stringify({ ...patch, message_count: count }),
+        })).json();
+        return json({ invitation: rows[0] });
+      }
+      const rows = await (await db(`khasroy_invitations?select=${ROW}`, {
+        method: "POST",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          ...patch,
+          owner_hash: ownerHash,
+          session_hash: sessionHash,
+          slug: newSlug(),
+          status: "draft",
+          message_count: body.countMessage ? 1 : 0,
+        }),
+      })).json();
+      return json({ invitation: rows[0] });
+    }
+
+    if (action === "submit") {
+      const existing = await latestForSession(sessionHash);
+      if (!existing) return json({ error: "not_found" }, 404);
+      const contact = obj(body.contact) ?? {};
+      const clean = {
+        name: typeof contact.name === "string" ? contact.name.trim().slice(0, 80) : "",
+        phone: typeof contact.phone === "string" ? contact.phone.replace(/[^\d+()\-\s]/gu, "").slice(0, 24) : "",
+      };
+      if (!clean.phone) return json({ error: "phone_required" }, 400);
+      const rows = await (await db(`khasroy_invitations?id=eq.${existing.id}&select=${ROW}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ status: "submitted", contact: clean, updated_at: new Date().toISOString() }),
+      })).json();
+      return json({ invitation: rows[0] });
+    }
+
+    if (action === "upload_photo") {
+      const ext = PHOTO_TYPES[typeof body.contentType === "string" ? body.contentType : ""];
+      if (!ext) return json({ error: "unsupported_type" }, 400);
+      const base64 = typeof body.base64 === "string" ? body.base64 : "";
+      if (!base64 || base64.length > Math.ceil(MAX_PHOTO_BYTES * 1.37)) return json({ error: "too_large" }, 413);
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      if (bytes.length > MAX_PHOTO_BYTES) return json({ error: "too_large" }, 413);
+      const existing = await latestForSession(sessionHash);
+      if (!existing) return json({ error: "not_found" }, 404);
+      const path = `${existing.slug}/${crypto.randomUUID()}.${ext}`;
+      const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
+        method: "POST",
+        headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": body.contentType },
+        body: bytes,
+      });
+      if (!upload.ok) {
+        const text = await upload.text().catch(() => "");
+        throw new Error(`storage ${upload.status}: ${text.slice(0, 200)}`);
+      }
+      return json({ url: `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${path}` });
+    }
+
+    return json({ error: "unknown_action" }, 400);
+  } catch (error) {
+    console.error("khasroy-invitations", error);
+    return json({ error: "invitation_service_unavailable" }, 500);
+  }
+});

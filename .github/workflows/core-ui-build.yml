@@ -5,6 +5,13 @@ on:
     paths:
       - "components/khasroy/**"
       - "app/page.tsx"
+      - "app/studio-home.module.css"
+      - "app/owner/**"
+      - "app/i/**"
+      - "app/api/invite/**"
+      - "lib/invitations/**"
+      - "components/invitations/**"
+      - "tests/invitation-schema.mjs"
       - "app/layout.tsx"
       - "app/globals.css"
       - "package.json"
