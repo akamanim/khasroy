@@ -95,7 +95,8 @@ main {
 }
 .core-canvas { width: 100%; height: 100%; transition: filter .5s; }
 .khasroy-core { position: relative; width: 100%; height: 100%; }
-.core-canvas { display: block; }
+.core-canvas { display: block; cursor: pointer; touch-action: pan-y; }
+.core-canvas-fallback { background: radial-gradient(ellipse 42% 30% at 50% 50%, rgba(120, 175, 255, .35), rgba(40, 80, 170, .12) 55%, transparent 75%); }
 .core-fallback { position: absolute; inset: 0; width: 100%; height: 100%; }
 .core-coordinate { position: absolute; top: 49%; font: 10px/1.8 monospace; letter-spacing: 1px; color: #557585; }
 .coord-left { left: 0; }

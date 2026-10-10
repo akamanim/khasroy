@@ -1,0 +1,30 @@
+name: Core UI Build
+
+on:
+  pull_request:
+    paths:
+      - "components/khasroy/**"
+      - "app/page.tsx"
+      - "app/layout.tsx"
+      - "app/globals.css"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/core-ui-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Next production build
+        run: npm run build
