@@ -1,0 +1,519 @@
+"use client";
+
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { ArrowUp, Plus, Activity, Sparkles, ShieldCheck } from "lucide-react";
+import { Core, type CoreEvolution } from "@/components/khasroy/core";
+import { MarkdownMessage } from "@/components/khasroy/markdown-message";
+import {
+  authenticateOwner,
+  chat,
+  KhasroyAuthError,
+  type ChatProgress,
+  type Message,
+} from "@/lib/chat";
+
+const welcome: Message = {
+  id: "welcome",
+  role: "assistant",
+  content:
+    "Все системы готовы. Я Хасрой — ваш универсальный AI-союзник. Мои подтверждённые способности хранятся в памяти и напрямую меняют ядро. С чего начнём?",
+};
+
+const FALLBACK_EVOLUTION: CoreEvolution = {
+  level: 4,
+  skills: 4,
+  knowledge: 0,
+  testsPassed: 2,
+  capabilities: {
+    intelligence: 1,
+    security: 1,
+    code: 1,
+    memory: 1,
+    internet: 0,
+    vision: 0,
+    voice: 0,
+    agents: 0,
+    images: 0,
+  },
+};
+
+type ModuleState =
+  | "VERIFIED"
+  | "LOCKED"
+  | "WAITING"
+  | "READY"
+  | "ONLINE"
+  | "OFFLINE";
+
+type StatusResponse = {
+  level: number;
+  skills: number;
+  testsPassed: number;
+  capabilities: CoreEvolution["capabilities"];
+  modules: {
+    memory: ModuleState;
+    github: ModuleState;
+    internet: ModuleState;
+    sandbox: ModuleState;
+    critic: ModuleState;
+    selfHosted: ModuleState;
+    autonomy: ModuleState;
+  };
+};
+
+const FALLBACK_MODULES: StatusResponse["modules"] = {
+  memory: "VERIFIED",
+  github: "VERIFIED",
+  internet: "LOCKED",
+  sandbox: "LOCKED",
+  critic: "LOCKED",
+  selfHosted: "WAITING",
+  autonomy: "WAITING",
+};
+
+export default function Home() {
+  const [messages, setMessages] = useState<Message[]>([welcome]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [responding, setResponding] = useState(false);
+  const [progressLog, setProgressLog] = useState<ChatProgress[]>([]);
+  const responseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (responseTimer.current) clearTimeout(responseTimer.current); }, []);
+  const [error, setError] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [ownerKey, setOwnerKey] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [evolution, setEvolution] = useState<CoreEvolution>(FALLBACK_EVOLUTION);
+  const [modules, setModules] = useState(FALLBACK_MODULES);
+  const pendingMessages = useRef<Message[] | null>(null);
+  const bottom = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
+
+  const levelLabel = String(evolution.level).padStart(2, "0");
+
+  async function refreshStatus() {
+    try {
+      const response = await fetch("/api/status", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as StatusResponse;
+      if (!data || typeof data.level !== "number" || !data.capabilities) return;
+      setEvolution({
+        level: data.level,
+        skills: data.skills,
+        knowledge: 0,
+        testsPassed: data.testsPassed,
+        capabilities: data.capabilities,
+      });
+      if (data.modules) setModules(data.modules);
+    } catch {
+      // The visual core keeps its last verified state if status is temporarily unavailable.
+    }
+  }
+
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [messages, busy, progressLog]);
+
+  useEffect(() => {
+    void refreshStatus();
+  }, []);
+
+  async function finishChat(next: Message[]) {
+    const assistantId = crypto.randomUUID();
+    setProgressLog([]);
+    setMessages([...next, { id: assistantId, role: "assistant", content: "" }]);
+
+    try {
+      const content = await chat(next, {
+        onProgress(progress) {
+          setProgressLog((previous) => {
+            if (previous[previous.length - 1]?.message === progress.message) return previous;
+            return [...previous.slice(-7), progress];
+          });
+        },
+        onChunk(_delta, full) {
+          setMessages((previous) =>
+            previous.map((message) =>
+              message.id === assistantId ? { ...message, content: full } : message,
+            ),
+          );
+        },
+      });
+
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.id === assistantId ? { ...message, content } : message,
+        ),
+      );
+      setResponding(true);
+      if (responseTimer.current) clearTimeout(responseTimer.current);
+      responseTimer.current = setTimeout(() => setResponding(false), 3600);
+      void refreshStatus();
+    } catch (err) {
+      setMessages(next);
+      setProgressLog([]);
+      throw err;
+    }
+  }
+
+  async function send(value = input) {
+    if (!value.trim() || busy) return;
+
+    const next: Message[] = [
+      ...messages.filter((message) => message.content.trim()),
+      { id: crypto.randomUUID(), role: "user", content: value.trim() },
+    ];
+
+    setMessages(next);
+    setInput("");
+    setBusy(true);
+    setResponding(false);
+    setProgressLog([]);
+    if (responseTimer.current) clearTimeout(responseTimer.current);
+    setError("");
+
+    try {
+      await finishChat(next);
+    } catch (err) {
+      if (err instanceof KhasroyAuthError) {
+        pendingMessages.current = next;
+        setAuthError("");
+        setAuthOpen(true);
+        return;
+      }
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Не удалось получить ответ. Попробуйте ещё раз.",
+      );
+    } finally {
+      setBusy(false);
+      setProgressLog([]);
+      field.current?.focus();
+    }
+  }
+
+  async function submitOwnerKey(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!ownerKey.trim() || authBusy) return;
+
+    setAuthBusy(true);
+    setAuthError("");
+
+    try {
+      const authenticated = await authenticateOwner(ownerKey.trim());
+      if (!authenticated) {
+        setAuthError("Неверный ключ владельца.");
+        return;
+      }
+
+      setAuthOpen(false);
+      setOwnerKey("");
+      await refreshStatus();
+      const queued = pendingMessages.current;
+      pendingMessages.current = null;
+
+      if (queued) {
+        setBusy(true);
+        try {
+          await finishChat(queued);
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Не удалось получить ответ. Попробуйте ещё раз.",
+          );
+        } finally {
+          setBusy(false);
+          setProgressLog([]);
+        }
+      }
+    } catch {
+      setAuthError("Не удалось проверить ключ. Попробуйте ещё раз.");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  const latestProgress = progressLog[progressLog.length - 1];
+
+  return (
+    <main>
+      <header className="topbar">
+        <a href="/owner" className="brand">
+          <span className="brand-symbol">Х</span>
+          <span>
+            Хасрой<span className="version">v0.4</span>
+          </span>
+        </a>
+        <div className="online">
+          <span />Хасрой ONLINE
+        </div>
+        <span className="header-meta">EVOLVING CODE INTELLIGENCE</span>
+      </header>
+
+      <section className="stage" aria-label="AI-ядро">
+        <aside className="system">
+          <div className="eyebrow">
+            <Activity size={14} /> SYSTEM STATUS
+          </div>
+          <dl>
+            <div><dt>Ядро</dt><dd>Активно</dd></div>
+            <div><dt>Режим</dt><dd>Brain Router</dd></div>
+            <div><dt>Память</dt><dd>{modules.memory}</dd></div>
+            <div><dt>GitHub</dt><dd>{modules.github}</dd></div>
+            <div><dt>Интернет</dt><dd>{modules.internet}</dd></div>
+            <div><dt>Sandbox</dt><dd>{modules.sandbox}</dd></div>
+            <div><dt>Critic</dt><dd>{modules.critic}</dd></div>
+            <div><dt>Self‑Hosted</dt><dd>{modules.selfHosted}</dd></div>
+            <div><dt>Автономия</dt><dd>{modules.autonomy}</dd></div>
+            <div><dt>Эволюция</dt><dd>LEVEL {levelLabel}</dd></div>
+          </dl>
+          <div className="signal">
+            {Array.from({ length: 24 }, (_, i) => <i key={i} />)}
+          </div>
+          <p>{evolution.skills} VERIFIED CAPABILITIES</p>
+        </aside>
+
+        <div className="core-wrap">
+          <Core
+            state={responding ? "responding" : busy ? "thinking" : focused ? "listening" : "idle"}
+          />
+          <span className="core-coordinate coord-left">
+            STORM CORE<br />{responding ? "VOICE" : busy ? "STORM" : focused ? "LISTENING" : "CALM"}
+          </span>
+          <span className="core-coordinate coord-right">
+            {responding ? "RESPONDING" : busy ? "PROCESSING" : "STANDBY"}<br />● ACTIVE
+          </span>
+        </div>
+
+        <div className="stage-index">ХАСРОЙ / STORM CORE</div>
+      </section>
+
+      <section className="chat" aria-label="Чат с «Хасрой»">
+        <div className="chat-heading">
+          <div>
+            <span className="chat-indicator" />
+            Диалог <span className="demo">LIVE</span>
+          </div>
+          <button
+            className="new-chat"
+            disabled={busy}
+            onClick={() => {
+              setMessages([welcome]);
+              setResponding(false);
+              setProgressLog([]);
+              if (responseTimer.current) clearTimeout(responseTimer.current);
+              setInput("");
+              setError("");
+              field.current?.focus();
+            }}
+          >
+            <Plus size={16} />Новый диалог
+          </button>
+        </div>
+
+        <div
+          className="messages"
+          role="log"
+          aria-live="polite"
+          aria-label="История сообщений"
+        >
+          {messages.filter((m) => m.role === "user" || m.content).map((m) => (
+            <article className={`message ${m.role}`} key={m.id}>
+              <div className="avatar">
+                {m.role === "assistant" ? <Sparkles size={16} /> : "ВЫ"}
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="message-label">
+                  {m.role === "assistant" ? "Хасрой" : "ВЫ"}
+                  {m.role === "assistant" && <span>AI RESPONSE</span>}
+                </div>
+                {m.role === "assistant" ? (
+                  <MarkdownMessage content={m.content} />
+                ) : (
+                  <p>{m.content}</p>
+                )}
+              </div>
+            </article>
+          ))}
+
+          {busy && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                margin: "4px 0 14px 43px",
+                border: "1px solid #213744",
+                borderRadius: 12,
+                background: "#0c171f",
+                padding: "11px 13px",
+                color: "#9eb8c5",
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 9, color: "#c5e8f2" }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#82d9d0", boxShadow: "0 0 10px #82d9d077", flex: "none" }} />
+                <strong style={{ fontWeight: 600 }}>{latestProgress?.message || "Хасрой начинает задачу…"}</strong>
+              </div>
+              {progressLog.length > 1 && (
+                <div style={{ marginTop: 8, paddingLeft: 15, borderLeft: "1px solid #24404d", color: "#718d9a" }}>
+                  {progressLog.slice(-5, -1).reverse().map((item, index) => (
+                    <div key={`${item.stage || "step"}-${index}`} style={{ margin: "3px 0" }}>✓ {item.message}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <div ref={bottom} />
+        </div>
+
+        {messages.length === 1 && !busy && (
+          <div className="suggestions">
+            {["Найди свежие новости об ИИ", "Изучи свой собственный код", "Запусти Python и вычисли √101"].map(
+              (text) => (
+                <button key={text} onClick={() => send(text)}>
+                  {text}<span>↗</span>
+                </button>
+              ),
+            )}
+          </div>
+        )}
+
+        {error && <p role="alert" className="error">{error}</p>}
+
+        <form
+          className="composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            send();
+          }}
+        >
+          <textarea
+            ref={field}
+            value={input}
+            maxLength={4000}
+            rows={1}
+            placeholder="Напишите «Хасрой»…"
+            aria-label="Сообщение для «Хасрой»"
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                send();
+              }
+            }}
+          />
+          <button
+            type="submit"
+            className="send"
+            aria-label="Отправить сообщение"
+            disabled={!input.trim() || busy}
+          >
+            <ArrowUp size={21} />
+          </button>
+        </form>
+
+        <div className="chat-footer">
+          <span>LIVE AI · ACTION TRACE · DYNAMIC VERIFIED CORE · Доступ владельца</span>
+          <span>Enter — отправить ↵</span>
+        </div>
+      </section>
+
+      <footer className="page-footer">
+        <span>Хасрой LAB / v0.4</span>
+        <span>CORE EVOLUTION / LEVEL {levelLabel}</span>
+      </footer>
+
+      {authOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Вход владельца Хасроя"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "grid",
+            placeItems: "center",
+            padding: 20,
+            background: "rgba(1, 8, 12, 0.82)",
+            backdropFilter: "blur(14px)",
+          }}
+        >
+          <form
+            onSubmit={submitOwnerKey}
+            style={{
+              width: "min(440px, 100%)",
+              border: "1px solid rgba(102, 214, 235, 0.28)",
+              borderRadius: 18,
+              padding: 24,
+              background: "rgba(5, 17, 24, 0.98)",
+              boxShadow: "0 24px 90px rgba(0,0,0,.55), 0 0 45px rgba(69,190,220,.08)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+              <ShieldCheck size={24} />
+              <strong style={{ fontSize: 17, letterSpacing: ".06em" }}>ДОСТУП ВЛАДЕЛЬЦА</strong>
+            </div>
+            <p style={{ margin: "0 0 18px", opacity: 0.66, lineHeight: 1.55, fontSize: 14 }}>
+              Введите ваш личный ключ KHASROY_OWNER_KEY. Он отправляется только на сервер Хасроя и не сохраняется в браузере как обычный текст.
+            </p>
+            <input
+              autoFocus
+              type="password"
+              value={ownerKey}
+              onChange={(event) => setOwnerKey(event.target.value)}
+              placeholder="Ключ владельца"
+              autoComplete="current-password"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                border: "1px solid rgba(113, 213, 235, .28)",
+                borderRadius: 12,
+                background: "rgba(255,255,255,.035)",
+                color: "inherit",
+                padding: "14px 15px",
+                outline: "none",
+                fontSize: 15,
+              }}
+            />
+            {authError && (
+              <p role="alert" style={{ margin: "10px 0 0", color: "#ff8f8f", fontSize: 13 }}>
+                {authError}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={!ownerKey.trim() || authBusy}
+              style={{
+                width: "100%",
+                marginTop: 16,
+                border: 0,
+                borderRadius: 12,
+                padding: "13px 16px",
+                cursor: authBusy ? "wait" : "pointer",
+                background: "#8adbea",
+                color: "#041016",
+                fontWeight: 700,
+                letterSpacing: ".04em",
+                opacity: !ownerKey.trim() || authBusy ? 0.55 : 1,
+              }}
+            >
+              {authBusy ? "ПРОВЕРЯЮ…" : "ВОЙТИ КАК ВЛАДЕЛЕЦ"}
+            </button>
+          </form>
+        </div>
+      )}
+    </main>
+  );
+}

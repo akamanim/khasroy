@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Хасрой v0.4 — Evolving Code Intelligence",
+  title: "Хасрой — онлайн-приглашения",
   description:
-    "Хасрой — развивающаяся AI-система с долговременной памятью и проверенным чтением собственного GitHub-кода.",
+    "Хасрой создаёт онлайн-приглашения на свадьбу, тушоо той, кыз узатуу, день рождения и другие события через простой разговор.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

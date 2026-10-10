@@ -1,519 +1,296 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { ArrowUp, Plus, Activity, Sparkles, ShieldCheck } from "lucide-react";
-import { Core, type CoreEvolution } from "@/components/khasroy/core";
-import { MarkdownMessage } from "@/components/khasroy/markdown-message";
+import { ArrowUp, ImagePlus, ExternalLink } from "lucide-react";
+import { Core, type CoreState } from "@/components/khasroy/core";
+import { InvitationView } from "@/components/invitations/invitation-view";
 import {
-  authenticateOwner,
-  chat,
-  KhasroyAuthError,
-  type ChatProgress,
-  type Message,
-} from "@/lib/chat";
+  EVENT_LABELS,
+  EVENT_TYPES,
+  TEMPLATE_IDS,
+  TEMPLATE_LABELS,
+  sampleInvitation,
+  type EventType,
+  type Invitation,
+  type TemplateId,
+} from "@/lib/invitations/schema";
+import styles from "./studio-home.module.css";
 
-const welcome: Message = {
-  id: "welcome",
-  role: "assistant",
-  content:
-    "Все системы готовы. Я Хасрой — ваш универсальный AI-союзник. Мои подтверждённые способности хранятся в памяти и напрямую меняют ядро. С чего начнём?",
+type Turn = { role: "user" | "assistant"; content: string };
+type StudioState = {
+  slug: string | null;
+  status: string | null;
+  invitation: Invitation | null;
+  history: Turn[];
+  missing: string[];
 };
 
-const FALLBACK_EVOLUTION: CoreEvolution = {
-  level: 4,
-  skills: 4,
-  knowledge: 0,
-  testsPassed: 2,
-  capabilities: {
-    intelligence: 1,
-    security: 1,
-    code: 1,
-    memory: 1,
-    internet: 0,
-    vision: 0,
-    voice: 0,
-    agents: 0,
-    images: 0,
-  },
-};
+const FONT_HREF =
+  "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Forum&family=Manrope:wght@400;500;600&family=Marck+Script&display=swap";
 
-type ModuleState =
-  | "VERIFIED"
-  | "LOCKED"
-  | "WAITING"
-  | "READY"
-  | "ONLINE"
-  | "OFFLINE";
+const GREETING =
+  "Здравствуйте! Я Хасрой. Создам для вас онлайн-приглашение, которое можно отправить гостям ссылкой. Какое событие готовите?";
 
-type StatusResponse = {
-  level: number;
-  skills: number;
-  testsPassed: number;
-  capabilities: CoreEvolution["capabilities"];
-  modules: {
-    memory: ModuleState;
-    github: ModuleState;
-    internet: ModuleState;
-    sandbox: ModuleState;
-    critic: ModuleState;
-    selfHosted: ModuleState;
-    autonomy: ModuleState;
-  };
-};
+function Phone({ invitation }: { invitation: Invitation }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.5);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const update = () => setScale(el.clientWidth / 390);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div ref={box} className={styles.phone}>
+      <div className={styles.phoneInner} style={{ transform: `scale(${scale})` }}>
+        <InvitationView invitation={invitation} live={false} />
+      </div>
+    </div>
+  );
+}
 
-const FALLBACK_MODULES: StatusResponse["modules"] = {
-  memory: "VERIFIED",
-  github: "VERIFIED",
-  internet: "LOCKED",
-  sandbox: "LOCKED",
-  critic: "LOCKED",
-  selfHosted: "WAITING",
-  autonomy: "WAITING",
-};
+async function resizeToJpeg(file: File): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("image"));
+      el.src = url;
+    });
+    const max = 1600;
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * k);
+    canvas.height = Math.round(img.naturalHeight * k);
+    canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.86).split(",")[1] ?? "";
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([welcome]);
+  const [state, setState] = useState<StudioState>({ slug: null, status: null, invitation: null, history: [], missing: [] });
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [responding, setResponding] = useState(false);
-  const [progressLog, setProgressLog] = useState<ChatProgress[]>([]);
-  const responseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (responseTimer.current) clearTimeout(responseTimer.current); }, []);
-  const [error, setError] = useState("");
   const [focused, setFocused] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [ownerKey, setOwnerKey] = useState("");
-  const [authBusy, setAuthBusy] = useState(false);
-  const [authError, setAuthError] = useState("");
-  const [evolution, setEvolution] = useState<CoreEvolution>(FALLBACK_EVOLUTION);
-  const [modules, setModules] = useState(FALLBACK_MODULES);
-  const pendingMessages = useRef<Message[] | null>(null);
-  const bottom = useRef<HTMLDivElement>(null);
-  const field = useRef<HTMLTextAreaElement>(null);
-
-  const levelLabel = String(evolution.level).padStart(2, "0");
-
-  async function refreshStatus() {
-    try {
-      const response = await fetch("/api/status", {
-        credentials: "include",
-        cache: "no-store",
-      });
-      if (!response.ok) return;
-      const data = (await response.json()) as StatusResponse;
-      if (!data || typeof data.level !== "number" || !data.capabilities) return;
-      setEvolution({
-        level: data.level,
-        skills: data.skills,
-        knowledge: 0,
-        testsPassed: data.testsPassed,
-        capabilities: data.capabilities,
-      });
-      if (data.modules) setModules(data.modules);
-    } catch {
-      // The visual core keeps its last verified state if status is temporarily unavailable.
-    }
-  }
+  const [error, setError] = useState("");
+  const [ordering, setOrdering] = useState(false);
+  const [contact, setContact] = useState({ name: "", phone: "" });
+  const thread = useRef<HTMLDivElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [messages, busy, progressLog]);
-
-  useEffect(() => {
-    void refreshStatus();
+    fetch("/api/invite/session")
+      .then((r) => r.json() as Promise<StudioState>)
+      .then((data) => setState((s) => ({ ...s, ...data, history: data.history ?? [] })))
+      .catch(() => undefined);
   }, []);
 
-  async function finishChat(next: Message[]) {
-    const assistantId = crypto.randomUUID();
-    setProgressLog([]);
-    setMessages([...next, { id: assistantId, role: "assistant", content: "" }]);
+  useEffect(() => {
+    thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: "smooth" });
+  }, [state.history.length, busy]);
 
-    try {
-      const content = await chat(next, {
-        onProgress(progress) {
-          setProgressLog((previous) => {
-            if (previous[previous.length - 1]?.message === progress.message) return previous;
-            return [...previous.slice(-7), progress];
-          });
-        },
-        onChunk(_delta, full) {
-          setMessages((previous) =>
-            previous.map((message) =>
-              message.id === assistantId ? { ...message, content: full } : message,
-            ),
-          );
-        },
-      });
+  const coreState: CoreState = responding ? "responding" : busy ? "thinking" : focused ? "listening" : "idle";
+  const eventType: EventType = state.invitation?.eventType ?? "wedding";
+  const submitted = Boolean(state.status && state.status !== "draft");
 
-      setMessages((previous) =>
-        previous.map((message) =>
-          message.id === assistantId ? { ...message, content } : message,
-        ),
-      );
-      setResponding(true);
-      if (responseTimer.current) clearTimeout(responseTimer.current);
-      responseTimer.current = setTimeout(() => setResponding(false), 3600);
-      void refreshStatus();
-    } catch (err) {
-      setMessages(next);
-      setProgressLog([]);
-      throw err;
-    }
+  async function post(path: string, body: unknown) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await response.json().catch(() => ({}))) as StudioState & { reply?: string; error?: string };
+    if (!response.ok) throw new Error(data.error || "Что-то пошло не так. Попробуйте ещё раз.");
+    return data;
   }
 
-  async function send(value = input) {
-    if (!value.trim() || busy) return;
-
-    const next: Message[] = [
-      ...messages.filter((message) => message.content.trim()),
-      { id: crypto.randomUUID(), role: "user", content: value.trim() },
-    ];
-
-    setMessages(next);
+  async function send(text: string) {
+    const message = text.trim();
+    if (!message || busy) return;
+    setError("");
     setInput("");
     setBusy(true);
-    setResponding(false);
-    setProgressLog([]);
-    if (responseTimer.current) clearTimeout(responseTimer.current);
-    setError("");
-
+    setState((s) => ({ ...s, history: [...s.history, { role: "user", content: message }] }));
     try {
-      await finishChat(next);
-    } catch (err) {
-      if (err instanceof KhasroyAuthError) {
-        pendingMessages.current = next;
-        setAuthError("");
-        setAuthOpen(true);
-        return;
-      }
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Не удалось получить ответ. Попробуйте ещё раз.",
-      );
+      const data = await post("/api/invite/chat", { message });
+      setResponding(true);
+      setState({ slug: data.slug, status: data.status, invitation: data.invitation, history: data.history, missing: data.missing });
+      window.setTimeout(() => setResponding(false), 2200);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setState((s) => ({ ...s, history: s.history.slice(0, -1) }));
+      setInput(message);
     } finally {
       setBusy(false);
-      setProgressLog([]);
-      field.current?.focus();
     }
   }
 
-  async function submitOwnerKey(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!ownerKey.trim() || authBusy) return;
-
-    setAuthBusy(true);
-    setAuthError("");
-
+  async function chooseTemplate(templateId: TemplateId) {
+    if (submitted) return;
     try {
-      const authenticated = await authenticateOwner(ownerKey.trim());
-      if (!authenticated) {
-        setAuthError("Неверный ключ владельца.");
-        return;
-      }
-
-      setAuthOpen(false);
-      setOwnerKey("");
-      await refreshStatus();
-      const queued = pendingMessages.current;
-      pendingMessages.current = null;
-
-      if (queued) {
-        setBusy(true);
-        try {
-          await finishChat(queued);
-        } catch (err) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Не удалось получить ответ. Попробуйте ещё раз.",
-          );
-        } finally {
-          setBusy(false);
-          setProgressLog([]);
-        }
-      }
-    } catch {
-      setAuthError("Не удалось проверить ключ. Попробуйте ещё раз.");
-    } finally {
-      setAuthBusy(false);
+      const data = await post("/api/invite/template", { templateId });
+      setState((s) => ({ ...s, ...data, history: data.history ?? s.history }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
-  const latestProgress = progressLog[progressLog.length - 1];
+  async function uploadPhoto(file: File) {
+    setError("");
+    setBusy(true);
+    try {
+      const base64 = await resizeToJpeg(file);
+      const data = await post("/api/invite/photo", { contentType: "image/jpeg", base64 });
+      setState((s) => ({ ...s, ...data, history: data.history ?? s.history }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось загрузить фото.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitOrder(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      const data = await post("/api/invite/submit", contact);
+      setState((s) => ({ ...s, ...data, history: data.history ?? s.history }));
+      setOrdering(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const turns: Turn[] = [{ role: "assistant", content: GREETING }, ...state.history];
 
   return (
-    <main>
-      <header className="topbar">
-        <a href="/" className="brand">
-          <span className="brand-symbol">Х</span>
-          <span>
-            Хасрой<span className="version">v0.4</span>
-          </span>
-        </a>
-        <div className="online">
-          <span />Хасрой ONLINE
-        </div>
-        <span className="header-meta">EVOLVING CODE INTELLIGENCE</span>
-      </header>
-
-      <section className="stage" aria-label="AI-ядро">
-        <aside className="system">
-          <div className="eyebrow">
-            <Activity size={14} /> SYSTEM STATUS
-          </div>
-          <dl>
-            <div><dt>Ядро</dt><dd>Активно</dd></div>
-            <div><dt>Режим</dt><dd>Brain Router</dd></div>
-            <div><dt>Память</dt><dd>{modules.memory}</dd></div>
-            <div><dt>GitHub</dt><dd>{modules.github}</dd></div>
-            <div><dt>Интернет</dt><dd>{modules.internet}</dd></div>
-            <div><dt>Sandbox</dt><dd>{modules.sandbox}</dd></div>
-            <div><dt>Critic</dt><dd>{modules.critic}</dd></div>
-            <div><dt>Self‑Hosted</dt><dd>{modules.selfHosted}</dd></div>
-            <div><dt>Автономия</dt><dd>{modules.autonomy}</dd></div>
-            <div><dt>Эволюция</dt><dd>LEVEL {levelLabel}</dd></div>
-          </dl>
-          <div className="signal">
-            {Array.from({ length: 24 }, (_, i) => <i key={i} />)}
-          </div>
-          <p>{evolution.skills} VERIFIED CAPABILITIES</p>
-        </aside>
-
-        <div className="core-wrap">
-          <Core
-            state={responding ? "responding" : busy ? "thinking" : focused ? "listening" : "idle"}
-          />
-          <span className="core-coordinate coord-left">
-            STORM CORE<br />{responding ? "VOICE" : busy ? "STORM" : focused ? "LISTENING" : "CALM"}
-          </span>
-          <span className="core-coordinate coord-right">
-            {responding ? "RESPONDING" : busy ? "PROCESSING" : "STANDBY"}<br />● ACTIVE
-          </span>
+    <div className={styles.shell}>
+      <link rel="stylesheet" href={FONT_HREF} precedence="default" />
+      <main className={styles.main}>
+        <div className={styles.cloud}>
+          <Core state={coreState} />
         </div>
 
-        <div className="stage-index">ХАСРОЙ / STORM CORE</div>
-      </section>
-
-      <section className="chat" aria-label="Чат с «Хасрой»">
-        <div className="chat-heading">
-          <div>
-            <span className="chat-indicator" />
-            Диалог <span className="demo">LIVE</span>
-          </div>
-          <button
-            className="new-chat"
-            disabled={busy}
-            onClick={() => {
-              setMessages([welcome]);
-              setResponding(false);
-              setProgressLog([]);
-              if (responseTimer.current) clearTimeout(responseTimer.current);
-              setInput("");
-              setError("");
-              field.current?.focus();
-            }}
-          >
-            <Plus size={16} />Новый диалог
-          </button>
-        </div>
-
-        <div
-          className="messages"
-          role="log"
-          aria-live="polite"
-          aria-label="История сообщений"
-        >
-          {messages.filter((m) => m.role === "user" || m.content).map((m) => (
-            <article className={`message ${m.role}`} key={m.id}>
-              <div className="avatar">
-                {m.role === "assistant" ? <Sparkles size={16} /> : "ВЫ"}
-              </div>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div className="message-label">
-                  {m.role === "assistant" ? "Хасрой" : "ВЫ"}
-                  {m.role === "assistant" && <span>AI RESPONSE</span>}
-                </div>
-                {m.role === "assistant" ? (
-                  <MarkdownMessage content={m.content} />
-                ) : (
-                  <p>{m.content}</p>
-                )}
-              </div>
-            </article>
+        <div ref={thread} className={styles.thread} aria-live="polite">
+          {turns.map((turn, i) => (
+            <p key={i} className={turn.role === "user" ? styles.user : styles.assistant}>{turn.content}</p>
           ))}
-
-          {busy && (
-            <div
-              role="status"
-              aria-live="polite"
-              style={{
-                margin: "4px 0 14px 43px",
-                border: "1px solid #213744",
-                borderRadius: 12,
-                background: "#0c171f",
-                padding: "11px 13px",
-                color: "#9eb8c5",
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 9, color: "#c5e8f2" }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#82d9d0", boxShadow: "0 0 10px #82d9d077", flex: "none" }} />
-                <strong style={{ fontWeight: 600 }}>{latestProgress?.message || "Хасрой начинает задачу…"}</strong>
-              </div>
-              {progressLog.length > 1 && (
-                <div style={{ marginTop: 8, paddingLeft: 15, borderLeft: "1px solid #24404d", color: "#718d9a" }}>
-                  {progressLog.slice(-5, -1).reverse().map((item, index) => (
-                    <div key={`${item.stage || "step"}-${index}`} style={{ margin: "3px 0" }}>✓ {item.message}</div>
-                  ))}
-                </div>
-              )}
+          {!state.history.length ? (
+            <div className={styles.chips}>
+              {EVENT_TYPES.map((type) => (
+                <button key={type} type="button" onClick={() => send(EVENT_LABELS[type])}>{EVENT_LABELS[type]}</button>
+              ))}
             </div>
-          )}
-          <div ref={bottom} />
+          ) : null}
+          {busy ? <p className={`${styles.assistant} ${styles.typing}`}><span /><span /><span /></p> : null}
+          {submitted ? (
+            <p className={styles.assistant}>Спасибо! Заказ принят. Мы проверим приглашение и свяжемся с вами по указанному номеру.</p>
+          ) : null}
         </div>
 
-        {messages.length === 1 && !busy && (
-          <div className="suggestions">
-            {["Найди свежие новости об ИИ", "Изучи свой собственный код", "Запусти Python и вычисли √101"].map(
-              (text) => (
-                <button key={text} onClick={() => send(text)}>
-                  {text}<span>↗</span>
-                </button>
-              ),
-            )}
-          </div>
-        )}
-
-        {error && <p role="alert" className="error">{error}</p>}
+        {error ? <p className={styles.error} role="alert">{error}</p> : null}
 
         <form
-          className="composer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            send();
+          className={styles.composer}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send(input);
           }}
         >
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Добавить фото"
+            disabled={busy || submitted}
+            onClick={() => fileInput.current?.click()}
+          >
+            <ImagePlus size={18} />
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void uploadPhoto(file);
+            }}
+          />
           <textarea
-            ref={field}
             value={input}
-            maxLength={4000}
             rows={1}
-            placeholder="Напишите «Хасрой»…"
-            aria-label="Сообщение для «Хасрой»"
+            placeholder={submitted ? "Заказ оформлен" : "Напишите Хасрою…"}
+            disabled={submitted}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                send();
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send(input);
               }
             }}
           />
-          <button
-            type="submit"
-            className="send"
-            aria-label="Отправить сообщение"
-            disabled={!input.trim() || busy}
-          >
-            <ArrowUp size={21} />
+          <button type="submit" className={styles.sendButton} aria-label="Отправить" disabled={busy || !input.trim() || submitted}>
+            <ArrowUp size={18} />
           </button>
         </form>
+      </main>
 
-        <div className="chat-footer">
-          <span>LIVE AI · ACTION TRACE · DYNAMIC VERIFIED CORE · Доступ владельца</span>
-          <span>Enter — отправить ↵</span>
-        </div>
-      </section>
-
-      <footer className="page-footer">
-        <span>Хасрой LAB / v0.4</span>
-        <span>CORE EVOLUTION / LEVEL {levelLabel}</span>
-      </footer>
-
-      {authOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Вход владельца Хасроя"
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 1000,
-            display: "grid",
-            placeItems: "center",
-            padding: 20,
-            background: "rgba(1, 8, 12, 0.82)",
-            backdropFilter: "blur(14px)",
-          }}
-        >
-          <form
-            onSubmit={submitOwnerKey}
-            style={{
-              width: "min(440px, 100%)",
-              border: "1px solid rgba(102, 214, 235, 0.28)",
-              borderRadius: 18,
-              padding: 24,
-              background: "rgba(5, 17, 24, 0.98)",
-              boxShadow: "0 24px 90px rgba(0,0,0,.55), 0 0 45px rgba(69,190,220,.08)",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-              <ShieldCheck size={24} />
-              <strong style={{ fontSize: 17, letterSpacing: ".06em" }}>ДОСТУП ВЛАДЕЛЬЦА</strong>
+      <aside className={styles.gallery} aria-label="Шаблоны">
+        {state.invitation && state.slug ? (
+          <section className={styles.current}>
+            <Phone invitation={state.invitation} />
+            <div className={styles.currentActions}>
+              <a href={`/i/${state.slug}`} target="_blank" rel="noopener noreferrer">
+                <ExternalLink size={14} /> Открыть
+              </a>
+              {!submitted ? (
+                <button type="button" disabled={state.missing.length > 0} onClick={() => setOrdering((v) => !v)}>
+                  Оформить заказ
+                </button>
+              ) : null}
             </div>
-            <p style={{ margin: "0 0 18px", opacity: 0.66, lineHeight: 1.55, fontSize: 14 }}>
-              Введите ваш личный ключ KHASROY_OWNER_KEY. Он отправляется только на сервер Хасроя и не сохраняется в браузере как обычный текст.
-            </p>
-            <input
-              autoFocus
-              type="password"
-              value={ownerKey}
-              onChange={(event) => setOwnerKey(event.target.value)}
-              placeholder="Ключ владельца"
-              autoComplete="current-password"
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                border: "1px solid rgba(113, 213, 235, .28)",
-                borderRadius: 12,
-                background: "rgba(255,255,255,.035)",
-                color: "inherit",
-                padding: "14px 15px",
-                outline: "none",
-                fontSize: 15,
-              }}
-            />
-            {authError && (
-              <p role="alert" style={{ margin: "10px 0 0", color: "#ff8f8f", fontSize: 13 }}>
-                {authError}
-              </p>
-            )}
-            <button
-              type="submit"
-              disabled={!ownerKey.trim() || authBusy}
-              style={{
-                width: "100%",
-                marginTop: 16,
-                border: 0,
-                borderRadius: 12,
-                padding: "13px 16px",
-                cursor: authBusy ? "wait" : "pointer",
-                background: "#8adbea",
-                color: "#041016",
-                fontWeight: 700,
-                letterSpacing: ".04em",
-                opacity: !ownerKey.trim() || authBusy ? 0.55 : 1,
-              }}
-            >
-              {authBusy ? "ПРОВЕРЯЮ…" : "ВОЙТИ КАК ВЛАДЕЛЕЦ"}
-            </button>
-          </form>
+            {!submitted && state.missing.length ? (
+              <p className={styles.hint}>Осталось: {state.missing.join(", ")}</p>
+            ) : null}
+            {ordering && !submitted ? (
+              <form className={styles.order} onSubmit={submitOrder}>
+                <input placeholder="Ваше имя" value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} />
+                <input placeholder="+996 700 123 456" inputMode="tel" required value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} />
+                <button type="submit">Отправить заказ</button>
+              </form>
+            ) : null}
+          </section>
+        ) : null}
+
+        <div className={styles.templates}>
+          {TEMPLATE_IDS.map((id) => {
+            const active = state.invitation?.templateId === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.template} ${active ? styles.templateOn : ""}`}
+                onClick={() => chooseTemplate(id)}
+                aria-pressed={active}
+                title={TEMPLATE_LABELS[id].note}
+              >
+                <Phone invitation={sampleInvitation(id, eventType)} />
+                <span>{TEMPLATE_LABELS[id].name}</span>
+              </button>
+            );
+          })}
         </div>
-      )}
-    </main>
+      </aside>
+    </div>
   );
 }

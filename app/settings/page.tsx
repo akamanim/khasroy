@@ -136,7 +136,7 @@ export default function SettingsPage() {
   return (
     <main style={{ minHeight: "100vh", padding: "28px 18px 70px", background: "#061017", color: "#dff8ff" }}>
       <div style={{ width: "min(920px,100%)", margin: "0 auto" }}>
-        <a href="/" style={{ display: "inline-flex", gap: 8, alignItems: "center", color: "#8db4c1", textDecoration: "none", fontSize: 13, marginBottom: 24 }}>
+        <a href="/owner" style={{ display: "inline-flex", gap: 8, alignItems: "center", color: "#8db4c1", textDecoration: "none", fontSize: 13, marginBottom: 24 }}>
           <ArrowLeft size={16} /> Назад к Хасрою
         </a>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
