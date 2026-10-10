@@ -87,8 +87,8 @@ export default function Home() {
 
   useEffect(() => {
     fetch("/api/invite/session")
-      .then((r) => r.json())
-      .then((data: StudioState) => setState((s) => ({ ...s, ...data, history: data.history ?? [] })))
+      .then((r) => r.json() as Promise<StudioState>)
+      .then((data) => setState((s) => ({ ...s, ...data, history: data.history ?? [] })))
       .catch(() => undefined);
   }, []);
 
@@ -106,9 +106,9 @@ export default function Home() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error || "Что-то пошло не так. Попробуйте ещё раз.");
-    return data as StudioState & { reply?: string };
+    const data = (await response.json().catch(() => ({}))) as StudioState & { reply?: string; error?: string };
+    if (!response.ok) throw new Error(data.error || "Что-то пошло не так. Попробуйте ещё раз.");
+    return data;
   }
 
   async function send(text: string) {
