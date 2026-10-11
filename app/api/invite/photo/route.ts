@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const hash = await sessionHash(true);
     if (!hash) return studioError("Сессия не создана.", 400);
     let record = await loadSessionInvitation(hash);
-    if (record && record.status !== "draft") return studioError("Заказ уже оформлен.", 409);
+    // Ordered invitations stay editable: clients often change the time or venue later.
     if (!record) record = await saveSessionInvitation(hash, emptyInvitation(), [], false);
     if (record.data.photos.length >= 8) return studioError("Можно добавить до 8 фото.", 400);
     const url = await uploadSessionPhoto(hash, contentType, base64);

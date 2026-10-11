@@ -148,7 +148,6 @@ export default function Home() {
   }
 
   async function chooseTemplate(templateId: TemplateId) {
-    if (submitted) return;
     try {
       const data = await post("/api/invite/template", { templateId });
       setState((s) => ({ ...s, ...data, history: data.history ?? s.history }));
@@ -208,6 +207,7 @@ export default function Home() {
           {submitted ? (
             <p className={styles.assistant}>
               Спасибо! Заказ принят. Мы проверим приглашение и свяжемся с вами по указанному номеру.
+              {" "}Если что-то изменится — время, место, текст, — просто напишите здесь: правка сразу появится в приглашении.
               {state.guestsLink ? (
                 <>
                   {" "}Ответы гостей и именные ссылки — на <a href={state.guestsLink} target="_blank" rel="noopener noreferrer">вашей странице гостей</a>. Сохраните эту ссылку.
@@ -230,7 +230,7 @@ export default function Home() {
             type="button"
             className={styles.iconButton}
             aria-label="Добавить фото"
-            disabled={busy || submitted}
+            disabled={busy}
             onClick={() => fileInput.current?.click()}
           >
             <ImagePlus size={18} />
@@ -249,8 +249,7 @@ export default function Home() {
           <textarea
             value={input}
             rows={1}
-            placeholder={submitted ? "Заказ оформлен" : "Напишите Хасрою…"}
-            disabled={submitted}
+            placeholder={submitted ? "Напишите, что поменять в приглашении…" : "Напишите Хасрою…"}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             onChange={(e) => setInput(e.target.value)}
@@ -261,7 +260,7 @@ export default function Home() {
               }
             }}
           />
-          <button type="submit" className={styles.sendButton} aria-label="Отправить" disabled={busy || !input.trim() || submitted}>
+          <button type="submit" className={styles.sendButton} aria-label="Отправить" disabled={busy || !input.trim()}>
             <ArrowUp size={18} />
           </button>
         </form>

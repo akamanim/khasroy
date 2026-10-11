@@ -14,6 +14,8 @@ export type InvitationRecord = {
   data: Invitation;
   history: ChatTurn[];
   messageCount: number;
+  /** Custom short link chosen by the organizer (/i/<alias>). */
+  alias?: string;
   /** Secret for the organizer's guest-list link; present only on the organizer's own rows. */
   manageToken?: string;
   contact?: { name: string; phone: string };
@@ -28,6 +30,7 @@ type RawRow = {
   history: unknown;
   message_count: number;
   manage_token?: string;
+  alias?: string | null;
   contact?: unknown;
   created_at?: string;
   updated_at?: string;
@@ -56,6 +59,7 @@ function normalize(row: RawRow | null | undefined): InvitationRecord | null {
     history,
     messageCount: Number(row.message_count) || 0,
     ...(typeof row.manage_token === "string" ? { manageToken: row.manage_token } : {}),
+    ...(typeof row.alias === "string" && row.alias ? { alias: row.alias } : {}),
     ...(row.contact && typeof row.contact === "object"
       ? {
           contact: {
@@ -122,8 +126,9 @@ export async function saveSessionInvitation(
   return record;
 }
 
+/** Accepts the generated slug or the organizer's custom alias. */
 export async function loadInvitationBySlug(slug: string): Promise<InvitationRecord | null> {
-  if (!/^[a-z0-9]{6,24}$/u.test(slug)) return null;
+  if (!/^[a-z0-9][a-z0-9-]{2,39}$/u.test(slug)) return null;
   const result = await call<{ invitation: RawRow | null }>("by_slug", { slug });
   return normalize(result.invitation);
 }
@@ -168,12 +173,17 @@ export async function listRsvps(slug: string): Promise<Rsvp[]> {
 }
 
 /** The organizer's view: invitation + all answers, only with the matching secret token. */
-export async function loadManagedInvitation(slug: string, token: string): Promise<{ record: InvitationRecord; rsvps: Rsvp[] } | null> {
+export type Wish = { id: string; guest_name: string; text: string; created_at: string; hidden?: boolean };
+
+export async function loadManagedInvitation(
+  slug: string,
+  token: string,
+): Promise<{ record: InvitationRecord; rsvps: Rsvp[]; wishes: Wish[] } | null> {
   if (!/^[a-z0-9]{6,24}$/u.test(slug) || !/^[a-f0-9]{32}$/u.test(token)) return null;
   try {
-    const result = await call<{ invitation: RawRow | null; rsvps: Rsvp[] }>("manage", { slug, token });
+    const result = await call<{ invitation: RawRow | null; rsvps: Rsvp[]; wishes: Wish[] }>("manage", { slug, token });
     const record = normalize(result.invitation);
-    return record ? { record, rsvps: result.rsvps ?? [] } : null;
+    return record ? { record, rsvps: result.rsvps ?? [], wishes: result.wishes ?? [] } : null;
   } catch (error) {
     if (error instanceof Error && / 404 /u.test(error.message)) return null;
     throw error;
@@ -187,4 +197,40 @@ export async function listOrders(): Promise<InvitationRecord[]> {
 
 export async function setOrderStatus(slug: string, status: "submitted" | "approved" | "published" | "archived") {
   await call("set_status", { slug, status });
+}
+
+// ---------------------------------------------------------------- short links and wishes
+
+export class ConflictError extends Error {}
+
+/** Organizer-only (checked with the secret token): set or clear the custom short link. */
+export async function setAlias(slug: string, token: string, alias: string): Promise<string | null> {
+  try {
+    const result = await call<{ alias: string | null }>("set_alias", { slug, token, alias });
+    return result.alias;
+  } catch (error) {
+    if (error instanceof Error && / 409 /u.test(error.message)) throw new ConflictError("alias taken");
+    if (error instanceof Error && / 404 /u.test(error.message)) throw new NotFoundError("not found");
+    throw error;
+  }
+}
+
+export async function addWish(slug: string, name: string, text: string): Promise<void> {
+  if (!/^[a-z0-9]{6,24}$/u.test(slug)) throw new NotFoundError("invalid slug");
+  try {
+    await call("wish_add", { slug, name, text });
+  } catch (error) {
+    if (error instanceof Error && / 404 /u.test(error.message)) throw new NotFoundError("not found");
+    throw error;
+  }
+}
+
+export async function listWishes(slug: string): Promise<Wish[]> {
+  if (!/^[a-z0-9]{6,24}$/u.test(slug)) return [];
+  const result = await call<{ wishes: Wish[] }>("wishes", { slug });
+  return result.wishes ?? [];
+}
+
+export async function hideWish(slug: string, token: string, id: string, hidden: boolean): Promise<void> {
+  await call("wish_hide", { slug, token, id, hidden });
 }

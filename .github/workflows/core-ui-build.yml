@@ -12,6 +12,8 @@ on:
       - "app/api/owner/**"
       - "lib/owner-session.ts"
       - "lib/xlsx-write.ts"
+      - "lib/qr.ts"
+      - "tests/qr.mjs"
       - "tests/xlsx-write.mjs"
       - "app/sales/**"
       - "app/api/sales/**"

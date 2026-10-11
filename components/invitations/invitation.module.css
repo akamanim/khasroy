@@ -168,6 +168,12 @@
   letter-spacing: .02em;
   color: var(--accent, currentColor);
 }
+.wishes { display: grid; gap: 14px; width: 100%; }
+.wishList { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-height: 420px; overflow-y: auto; text-align: left; }
+.wishList li { padding: 12px 14px; border-radius: 14px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+.wishList p { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.wishList span { font-size: 13px; opacity: .7; }
+.wishInput { resize: vertical; min-height: 76px; font: inherit; }
 .rsvpParty { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
 .rsvpParty input {
   width: 72px; padding: 8px 10px; border-radius: 10px; border: 1px solid currentColor;

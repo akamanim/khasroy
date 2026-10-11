@@ -43,3 +43,21 @@
   .stats b { font-size: 22px; }
   .table th:nth-child(4), .table td:nth-child(4) { display: none; }
 }
+.short { display: grid; gap: 10px; }
+.aliasForm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; color: #756c63; }
+.aliasForm input {
+  flex: 1 1 160px; min-width: 0; padding: 8px 10px; border: 1px solid #e0d8cc; border-radius: 10px;
+  font: inherit; color: #1f1b17; background: #fcfaf7;
+}
+.button:disabled { opacity: .45; cursor: default; }
+.error { margin: 0; color: #b3261e; font-size: 13px; }
+.qr { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.qr img { border-radius: 12px; border: 1px solid #e7e0d6; background: #fff; }
+.qr > div { flex: 1 1 220px; display: grid; gap: 10px; }
+.wishAdmin { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.wishAdmin li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid #f0ebe3; }
+.wishAdmin li > div { flex: 1; min-width: 0; }
+.wishAdmin p { margin: 0 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wishAdmin span { color: #756c63; font-size: 13px; }
+.wishAdmin button { padding: 5px 10px; border-radius: 999px; border: 1px solid #d9cfc1; background: #fff; font: inherit; font-size: 13px; cursor: pointer; }
+.hiddenWish { opacity: .5; }
