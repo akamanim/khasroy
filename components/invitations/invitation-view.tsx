@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { BackgroundMusic, type MusicControl } from "./music";
 import styles from "./invitation.module.css";
 import {
@@ -25,6 +25,8 @@ import {
   ShyrdakMedallion,
   Stamp,
   SteppeSunset,
+  ScallopCap,
+  GoldHeart,
   StarField,
   Sunburst,
   Tunduk,
@@ -47,6 +49,7 @@ const UI: Record<Lang, Record<string, string>> = {
     rsvpSoon: "Подтверждение откроется после публикации приглашения", deadline: "Просим ответить до",
     wait: "Ждём вас!", photos: "Фото",
     hosts: "Хозяева торжества", calendar_title: "Сохраните дату",
+    rsvpAsk: "Пожалуйста, подтвердите ваше присутствие", yourName: "Ваше имя", ansYes: "Приду", ansFamily: "Приду с семьёй", ansNo: "К сожалению, не смогу прийти", send: "Отправить ответ", sending: "Отправляем…", thanks: "Спасибо! Ваш ответ получен.", nameErr: "Напишите ваше имя", choiceErr: "Выберите вариант ответа", sendErr: "Не удалось отправить. Попробуйте ещё раз.", previewNote: "Форма заработает в опубликованном приглашении",
     open: "Открыть приглашение", invited: "Вы приглашены", musicOn: "Включить музыку", musicOff: "Выключить музыку",
   },
   ky: {
@@ -56,6 +59,7 @@ const UI: Record<Lang, Record<string, string>> = {
     rsvpSoon: "Тастыктоо чакыруу жарыялангандан кийин ачылат", deadline: "Жообуңузду күтөбүз:",
     wait: "Сиздерди күтөбүз!", photos: "Сүрөттөр",
     hosts: "Той ээлери", calendar_title: "Датаны белгилеп алыңыз",
+    rsvpAsk: "Сураныч, келериңизди тастыктаңыз", yourName: "Атыңыз", ansYes: "Барам", ansFamily: "Үй-бүлөм менен барам", ansNo: "Тилекке каршы, бара албайм", send: "Жоопту жөнөтүү", sending: "Жөнөтүлүүдө…", thanks: "Рахмат! Жообуңуз кабыл алынды.", nameErr: "Атыңызды жазыңыз", choiceErr: "Жооп вариантын тандаңыз", sendErr: "Жөнөтүлгөн жок. Кайра аракет кылыңыз.", previewNote: "Форма жарыяланган чакырууда иштейт",
     open: "Чакырууну ачуу", invited: "Сиз чакырылдыңыз", musicOn: "Музыканы күйгүзүү", musicOff: "Музыканы өчүрүү",
   },
   en: {
@@ -65,6 +69,7 @@ const UI: Record<Lang, Record<string, string>> = {
     rsvpSoon: "RSVP opens once the invitation is published", deadline: "Please reply by",
     wait: "We look forward to seeing you!", photos: "Photos",
     hosts: "Hosted by", calendar_title: "Save the date",
+    rsvpAsk: "Please confirm your attendance", yourName: "Your name", ansYes: "I will come", ansFamily: "Coming with family", ansNo: "Sorry, I can't make it", send: "Send answer", sending: "Sending…", thanks: "Thank you! Your answer has been received.", nameErr: "Enter your name", choiceErr: "Choose an answer", sendErr: "Could not send. Please try again.", previewNote: "The form works in the published invitation",
     open: "Open invitation", invited: "You are invited", musicOn: "Play music", musicOff: "Mute music",
   },
 };
@@ -318,7 +323,91 @@ function Title({ inv }: { inv: Invitation }) {
   return <h1 className={styles.title}>{displayTitle(inv)}</h1>;
 }
 
-export function InvitationView({ invitation, live = true }: { invitation: Invitation; live?: boolean }) {
+type RsvpAnswer = "yes" | "family" | "no";
+
+function RsvpForm({ slug, live, t }: { slug?: string; live: boolean; t: Record<string, string> }) {
+  const [name, setName] = useState("");
+  const [answer, setAnswer] = useState<RsvpAnswer | null>(null);
+  const [state, setState] = useState<"idle" | "sending" | "done">("idle");
+  const [error, setError] = useState("");
+  const enabled = live && Boolean(slug);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!enabled) return;
+    if (!name.trim()) return setError(t.nameErr);
+    if (!answer) return setError(t.choiceErr);
+    setError("");
+    setState("sending");
+    try {
+      const response = await fetch("/api/invite/rsvp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: name.trim(), answer }),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      setState("done");
+    } catch {
+      setState("idle");
+      setError(t.sendErr);
+    }
+  }
+
+  if (state === "done") return <p className={styles.rsvpThanks} role="status">{t.thanks}</p>;
+  const options: Array<[RsvpAnswer, string]> = [["yes", t.ansYes], ["family", t.ansFamily], ["no", t.ansNo]];
+  return (
+    <form className={styles.rsvpForm} onSubmit={submit} noValidate>
+      <input
+        className={styles.rsvpInput}
+        value={name}
+        onChange={(e) => {
+          setName(e.target.value);
+          setError("");
+        }}
+        placeholder={t.yourName}
+        aria-label={t.yourName}
+        maxLength={80}
+        disabled={!enabled}
+      />
+      <div className={styles.rsvpOptions} role="radiogroup">
+        {options.map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={answer === value}
+            className={`${styles.rsvpOption} ${answer === value ? styles.rsvpOptionOn : ""}`}
+            onClick={() => {
+              setAnswer(value);
+              setError("");
+            }}
+            disabled={!enabled}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {error ? <p className={styles.rsvpError} role="alert">{error}</p> : null}
+      <button type="submit" className={styles.rsvpSend} disabled={!enabled || state === "sending"}>
+        {state === "sending" ? t.sending : t.send}
+      </button>
+      {!enabled ? <p className={styles.note}>{t.previewNote}</p> : null}
+    </form>
+  );
+}
+
+function Swatches({ colors }: { colors: string[] }) {
+  if (!colors.length) return null;
+  return (
+    <div className={styles.swatches} aria-hidden="true">
+      {colors.map((c) => (
+        <span key={c} style={{ background: c }} />
+      ))}
+    </div>
+  );
+}
+
+export function InvitationView({ invitation, live = true, slug }: { invitation: Invitation; live?: boolean; slug?: string }) {
   const languages = invitation.languages.length ? invitation.languages : (["ru"] as Lang[]);
   const [lang, setLang] = useState<Lang>(languages[0]);
   useEffect(() => {
@@ -420,6 +509,133 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
         </nav>
       ) : null}
 
+      {id === "golden" ? (
+        <>
+          <header className={styles.gHero}>
+            {invitation.photos[0] ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img className={styles.gHeroImg} src={invitation.photos[0]} alt="" />
+            ) : (
+              <SteppeSunset className={styles.gHeroArt} />
+            )}
+            <span className={styles.gShade} />
+            <p className={styles.gHeroTitle}>{EVENT_LABELS_LANG[lang][invitation.eventType] ?? EVENT_LABELS[invitation.eventType]}</p>
+          </header>
+
+          <section className={styles.gCard} data-reveal="">
+            <ScallopCap className={styles.gCap} />
+            <div className={styles.gCardBody}>
+              {invitation.hosts.length >= 2 && !invitation.title ? (
+                <h1 className={styles.gNames}>
+                  <span>{invitation.hosts[0]}</span>
+                  <GoldHeart className={styles.gHeart} />
+                  <span>{invitation.hosts[1]}</span>
+                </h1>
+              ) : (
+                <h1 className={styles.gNames}>{displayTitle(invitation)}</h1>
+              )}
+              {invitation.date ? <p className={styles.gDate}>{shortDate(invitation)}</p> : null}
+              {message ? <p className={styles.gMessage}>{message}</p> : null}
+              {invitation.inviters ? (
+                <>
+                  <span className={styles.gRule} aria-hidden="true" />
+                  <p className={styles.gLabel}>{t.hosts}:</p>
+                  <p className={styles.gInviters}>{invitation.inviters}</p>
+                </>
+              ) : null}
+            </div>
+            <ScallopCap className={`${styles.gCap} ${styles.gCapBottom}`} />
+          </section>
+
+          {invitation.venue.name || invitation.venue.address ? (
+            <section
+              className={styles.gBand}
+              style={invitation.photos[1] ? { backgroundImage: `url("${invitation.photos[1]}")` } : undefined}
+              data-reveal=""
+            >
+              <span className={styles.gShade} />
+              <div className={styles.gBandBody}>
+                {invitation.time ? <p className={styles.gTime}>{invitation.time}</p> : null}
+                <p className={styles.gVenue}>
+                  {[invitation.venue.address, invitation.venue.name].filter(Boolean).join(", ")}
+                </p>
+                <div className={styles.actions}>
+                  {mapHref ? <a className={styles.gPill} href={mapHref} target="_blank" rel="noopener noreferrer">{t.map}</a> : null}
+                  {calHref ? <a className={`${styles.gPill} ${styles.gPillGhost}`} href={calHref} target="_blank" rel="noopener noreferrer">{t.calendar}</a> : null}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          <div className={styles.gPaper}>
+            {invitation.date ? <MonthCalendar date={invitation.date} lang={lang} title={formatDate(invitation, lang).replace(/^[^,]+,\s*/u, "")} /> : null}
+            {target && target.getTime() > Date.now() - 86_400_000 ? <Countdown target={target} lang={lang} live={live} /> : null}
+            {invitation.program.length ? (
+              <section className={styles.section} data-reveal="">
+                <h2>{t.program}</h2>
+                <ol className={styles.timeline}>
+                  {invitation.program.map((item, i) => (
+                    <li key={i}>
+                      <time>{item.time}</time>
+                      <span>{item.title}</span>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            ) : null}
+          </div>
+
+          {invitation.dressCode || invitation.dressColors.length ? (
+            <section
+              className={styles.gBand}
+              style={invitation.photos[2] ? { backgroundImage: `url("${invitation.photos[2]}")` } : undefined}
+              data-reveal=""
+            >
+              <span className={styles.gShade} />
+              <div className={styles.gBandBody}>
+                <h2 className={styles.gBandTitle}>{t.dress}</h2>
+                {invitation.dressCode ? <p className={styles.gVenue}>{invitation.dressCode}</p> : null}
+                <Swatches colors={invitation.dressColors} />
+              </div>
+            </section>
+          ) : null}
+
+          {invitation.rsvpEnabled ? (
+            <section className={styles.gCard} data-reveal="">
+              <ScallopCap className={styles.gCap} />
+              <div className={styles.gCardBody}>
+                <h2 className={styles.gAsk}>{t.rsvpAsk}</h2>
+                {invitation.rsvpDeadline ? (
+                  <p className={styles.gLabel}>
+                    {t.deadline}{" "}
+                    {new Date(`${invitation.rsvpDeadline}T12:00:00+06:00`).toLocaleDateString(LOCALE[lang], { day: "numeric", month: "long", timeZone: "Asia/Bishkek" })}
+                  </p>
+                ) : null}
+                <RsvpForm slug={slug} live={live} t={t} />
+              </div>
+              <ScallopCap className={`${styles.gCap} ${styles.gCapBottom}`} />
+            </section>
+          ) : null}
+
+          {invitation.contacts.length ? (
+            <section className={`${styles.section} ${styles.gContacts}`} data-reveal="">
+              <h2>{t.contacts}</h2>
+              <ul className={styles.contacts}>
+                {invitation.contacts.map((c) => (
+                  <li key={c.phone}>
+                    <span>{c.name}</span>
+                    <a href={`tel:${c.phone.replace(/[^\d+]/gu, "")}`}>{c.phone}</a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          <footer className={`${styles.footer} ${styles.gFooter}`} data-reveal="">
+            <p className={styles.wait}>{t.wait}</p>
+          </footer>
+        </>
+      ) : (
+        <>
       <header className={styles.hero}>
         {decor.heroTop}
         <p className={styles.kicker}>{EVENT_LABELS_LANG[lang][invitation.eventType] ?? EVENT_LABELS[invitation.eventType]}</p>
@@ -504,10 +720,11 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
           </section>
         ) : null}
 
-        {invitation.dressCode ? (
+        {invitation.dressCode || invitation.dressColors.length ? (
           <section className={styles.section} data-reveal="">
             <h2>{t.dress}</h2>
-            <p className={styles.muted}>{invitation.dressCode}</p>
+            {invitation.dressCode ? <p className={styles.muted}>{invitation.dressCode}</p> : null}
+            <Swatches colors={invitation.dressColors} />
           </section>
         ) : null}
 
@@ -520,7 +737,7 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
                 {new Date(`${invitation.rsvpDeadline}T12:00:00+06:00`).toLocaleDateString(LOCALE[lang], { day: "numeric", month: "long", timeZone: "Asia/Bishkek" })}
               </p>
             ) : null}
-            <p className={styles.note}>{t.rsvpSoon}</p>
+            <RsvpForm slug={slug} live={live} t={t} />
           </section>
         ) : null}
 
@@ -545,6 +762,8 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
         {mono.length ? <p className={styles.footMono}>{mono.join(" & ")}</p> : null}
         {invitation.date ? <p className={styles.footDate}>{shortDate(invitation)}</p> : null}
       </footer>
+        </>
+      )}
     </article>
   );
 }

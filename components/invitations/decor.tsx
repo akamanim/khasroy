@@ -492,3 +492,29 @@ export function SteppeSunset({ className }: { className?: string }) {
     </svg>
   );
 }
+
+/* Golden card crest: a raised dome with stepped shoulders. */
+export function ScallopCap({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 400 64" preserveAspectRatio="none" aria-hidden="true">
+      <path
+        d="M0 64 V44 C0 34 8 30 18 30 H104 C122 30 128 26 136 18 C160 -6 240 -6 264 18 C272 26 278 30 296 30 H382 C392 30 400 34 400 44 V64 Z"
+        className="capFill"
+      />
+      <path
+        d="M12 64 V48 C12 42 16 40 22 40 H108 C128 40 136 34 144 26 C166 6 234 6 256 26 C264 34 272 40 292 40 H378 C384 40 388 42 388 48 V64"
+        className="capLine"
+      />
+    </svg>
+  );
+}
+
+export function GoldHeart({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 48 44" aria-hidden="true">
+      <path d="M24 42 C 10 32 2 24 2 14 A 11 11 0 0 1 24 8 A 11 11 0 0 1 46 14 C 46 24 38 32 24 42 Z" fill="#c1121f" />
+      <path d="M24 42 C 32 35 40 28 44 20 C 40 30 32 36 24 42 Z" fill="#8f0d17" />
+      <ellipse cx="13" cy="13" rx="5" ry="3.4" transform="rotate(-35 13 13)" fill="#ff8a8a" opacity=".7" />
+    </svg>
+  );
+}

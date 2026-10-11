@@ -117,4 +117,8 @@ assert.equal(applyInvitationPatch(withMusic, { musicUrl: "" }).musicVideoId, "",
 assert.equal(applyInvitationPatch(base, { musicVideoId: "<script>" }).musicVideoId, "", "stored id is validated");
 assert.equal(applyInvitationPatch(emptyInvitation(), withMusic).musicVideoId, ID, "stored row round-trips");
 
+// Dress-code colours.
+const colors = applyInvitationPatch(base, { dressColors: ["#1D1D1F", "#1d1d1f", "red", "#abc", "#9b2335", 5] });
+assert.deepEqual(colors.dressColors, ["#1d1d1f", "#9b2335"], "only #rrggbb, deduplicated, lower-case");
+
 console.log("invitation schema: ok");

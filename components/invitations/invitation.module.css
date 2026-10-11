@@ -563,6 +563,110 @@
 .t_steppe :global(.steppeBird) { animation: fly 24s linear infinite; }
 .t_steppe { --reveal-from: translateY(26px); --reveal-filter: blur(3px); }
 
+/* ───────────── RSVP and dress colours (all templates) ───────────── */
+.rsvpForm { display: grid; gap: 10px; max-width: 340px; margin: 14px auto 0; }
+.rsvpInput {
+  width: 100%; padding: 14px 18px; border-radius: 999px; border: 1px solid var(--line);
+  background: #fff; color: #2a2520; font: inherit; font-size: 15px; text-align: center;
+}
+.rsvpInput:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rsvpOptions { display: grid; gap: 8px; }
+.rsvpOption {
+  padding: 13px 16px; border-radius: 999px; border: 1.5px solid var(--accent);
+  background: transparent; color: var(--ink); font: inherit; font-size: 14.5px; cursor: pointer;
+  transition: background .2s, color .2s, transform .15s;
+}
+.rsvpOption:active { transform: scale(.98); }
+.rsvpOptionOn { background: var(--accent); color: var(--bg); }
+.rsvpSend {
+  margin-top: 6px; padding: 15px 18px; border-radius: 999px; border: 0;
+  background: var(--ink); color: var(--bg); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.rsvpSend:disabled, .rsvpOption:disabled, .rsvpInput:disabled { opacity: .55; cursor: default; }
+.rsvpError { margin: 0; color: #b3261e; font-size: 13px; }
+.rsvpThanks { margin: 10px 0 0; font-family: var(--display); font-size: 22px; animation: rise .6s both; }
+.swatches { display: flex; justify-content: center; margin-top: 16px; }
+.swatches span { width: 46px; height: 46px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .85); margin-left: -12px; box-shadow: 0 3px 10px rgba(0, 0, 0, .18); }
+.swatches span:first-child { margin-left: 0; }
+
+/* ───────────── 15. Алтын баракча ───────────── */
+.t_golden {
+  --bg: #f0d6ad; --bg2: #e2bd86; --surface: rgba(255, 248, 236, .5);
+  --ink: #4a2f1b; --muted: #7a5a3e; --accent: #b98a4b; --accent2: #8a6136; --line: rgba(74, 47, 27, .25);
+  --display: "Cormorant Garamond", Georgia, serif; --body: "Cormorant Garamond", Georgia, serif;
+  --script: "Great Vibes", cursive;
+  padding: 0 0 36px;
+  background: #2a1d14;
+  font-size: 18px;
+}
+.gHero { position: relative; height: min(88vh, 720px); min-height: 520px; overflow: hidden; display: grid; align-items: end; }
+.gHeroImg, .gHeroArt { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.gShade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(20, 12, 6, 0) 45%, rgba(20, 12, 6, .65) 100%); pointer-events: none; }
+.gHeroTitle {
+  position: relative; margin: 0 0 96px; padding: 0 20px;
+  font-family: var(--display); font-weight: 500; font-size: clamp(30px, 9vw, 44px);
+  letter-spacing: .08em; text-transform: uppercase; color: #fff8ee; text-shadow: 0 2px 16px rgba(0, 0, 0, .45);
+}
+.live .gHeroImg, .live .gHeroArt { animation: kenburns 24s ease-in-out infinite alternate; }
+@keyframes kenburns { from { transform: scale(1); } to { transform: scale(1.08) translateY(-1.5%); } }
+
+.gCard { position: relative; margin: -70px 10px 0; z-index: 2; color: var(--ink); }
+.gCard + .gCard, .gBand + .gCard { margin-top: -50px; }
+.gCap { display: block; width: 100%; height: 56px; }
+.gCapBottom { transform: scaleY(-1); margin-top: -1px; }
+.t_golden :global(.capFill) { fill: #f0d6ad; }
+.t_golden :global(.capLine) { fill: none; stroke: rgba(74, 47, 27, .45); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.gCardBody {
+  margin-top: -1px; padding: 6px 26px 18px;
+  background: linear-gradient(180deg, #f0d6ad, #e7c48f);
+  box-shadow: inset 12px 0 0 -10.6px rgba(74, 47, 27, .45), inset -12px 0 0 -10.6px rgba(74, 47, 27, .45);
+}
+.gNames { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 12px; font-family: var(--script); font-weight: 400; font-size: clamp(38px, 11vw, 52px); line-height: 1.15; color: #5a3517; }
+.gHeart { width: 42px; height: 38px; filter: drop-shadow(0 3px 4px rgba(120, 10, 20, .35)); }
+.live .gHeart { animation: beat 1.6s ease-in-out infinite; }
+@keyframes beat { 0%, 100% { transform: scale(1); } 12% { transform: scale(1.14); } 24% { transform: scale(1); } 36% { transform: scale(1.1); } 48% { transform: scale(1); } }
+.gDate { margin: 6px 0 14px; font-family: var(--display); font-weight: 400; font-size: 34px; letter-spacing: .04em; color: #6b4524; }
+.gMessage { margin: 0 auto; max-width: 30ch; font-size: 20px; line-height: 1.75; color: var(--ink); }
+.gRule { display: block; width: 62%; height: 12px; margin: 22px auto 14px; background: radial-gradient(circle, var(--ink) 0 2px, transparent 2.5px) center / 12px 12px no-repeat, linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat; }
+.gLabel { margin: 0; font-size: 19px; color: var(--muted); }
+.gInviters { margin: 4px 0 0; font-size: 24px; color: var(--ink); }
+.gAsk { margin: 6px 0 4px; font-family: var(--display); font-weight: 500; font-size: 26px; line-height: 1.2; }
+.t_golden .rsvpOption { border-color: rgba(74, 47, 27, .55); font-family: "Montserrat", system-ui, sans-serif; font-size: 14px; }
+.t_golden .rsvpOptionOn { background: #c99a5b; color: #fff; border-color: #c99a5b; }
+.t_golden .rsvpInput { font-family: "Montserrat", system-ui, sans-serif; }
+.t_golden .rsvpSend { background: #4a2f1b; color: #f7e6c8; font-family: "Montserrat", system-ui, sans-serif; }
+
+.gBand {
+  position: relative; display: grid; place-items: end center; min-height: 420px; padding: 120px 24px 90px;
+  margin-top: -30px; background: radial-gradient(120% 80% at 50% 20%, #5a3a24, #1e140c) center / cover no-repeat;
+  color: #fff8ee; text-align: center; overflow: hidden;
+}
+.gBand .gShade { background: linear-gradient(180deg, rgba(20, 12, 6, .15), rgba(20, 12, 6, .7)); }
+.gBandBody { position: relative; }
+.gTime { margin: 0 0 6px; font-family: var(--display); font-size: 46px; line-height: 1; }
+.gVenue { margin: 0 auto; max-width: 28ch; font-size: 21px; line-height: 1.45; }
+.gBandTitle { margin: 0 0 6px; font-family: var(--display); font-weight: 500; font-size: 34px; }
+.gPill { display: inline-block; padding: 12px 24px; border-radius: 999px; background: #d8b583; color: #3a2414; font-family: var(--display); font-size: 18px; text-decoration: none; }
+.gPillGhost { background: transparent; color: #fff8ee; border: 1px solid rgba(255, 248, 238, .7); }
+
+.gPaper { position: relative; margin: 0; padding: 40px 22px 34px; background: linear-gradient(180deg, #f0d6ad, #ead0a2); color: var(--ink); z-index: 1; }
+.gPaper::before, .gPaper::after { content: ""; position: absolute; left: 0; right: 0; height: 18px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='18' viewBox='0 0 120 18' preserveAspectRatio='none'%3E%3Cpath d='M0 18 L0 9 L7 12 L13 6 L21 11 L28 4 L36 10 L43 7 L50 12 L58 3 L66 10 L73 6 L81 12 L88 5 L96 11 L103 7 L111 12 L120 8 L120 18 Z' fill='%23f0d6ad'/%3E%3C/svg%3E") repeat-x 0 0 / 120px 18px; }
+.gPaper::before { top: -17px; }
+.gPaper::after { bottom: -17px; transform: scaleY(-1); }
+.gPaper .calendar h2 { font-weight: 400; font-size: 34px; }
+.gPaper .calMonth { display: none; }
+.t_golden .calGrid { font-family: var(--display); font-size: 21px; max-width: 340px; }
+.t_golden .calHead { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; }
+.t_golden .calDay { background: transparent; color: var(--ink); border: 1.5px solid var(--ink); }
+.t_golden .calDay::after { border-color: #c1121f; }
+.t_golden .countCell { background: rgba(255, 248, 236, .55); border-color: var(--line); }
+.t_golden .timeline li::after { background: #f0d6ad; }
+.gContacts { color: #f3e2c6; padding: 30px 20px 0; }
+.gContacts a { color: #f3e2c6; }
+.gFooter { color: #f3e2c6; padding: 18px 20px 0; }
+.t_golden .wait { font-family: var(--script); font-size: 44px; color: #e2bd86; }
+.t_golden { --reveal-from: translateY(30px); }
+
 /* ───────────── Motion ───────────── */
 
 /* Sections arrive as the guest scrolls (live page only). */

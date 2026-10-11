@@ -33,7 +33,7 @@ export default async function InvitationPage({ params }: Params) {
         background: (TEMPLATE_META[record.data.templateId] ?? TEMPLATE_META.minimal).pageBg,
       }}
     >
-      <InvitationView invitation={record.data} />
+      <InvitationView invitation={record.data} slug={record.slug} />
     </main>
   );
 }

@@ -26,6 +26,7 @@ export const TEMPLATE_IDS = [
   "postcard",
   "steps",
   "steppe",
+  "golden",
 ] as const;
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
 
@@ -140,6 +141,12 @@ export const TEMPLATE_META: Record<TemplateId, TemplateMeta> = {
     events: ["wedding", "kyz_uzatuu", "tushoo_toi", "birthday"],
     fonts: ["Kurale", "Manrope:wght@400;600"],
   },
+  golden: {
+    name: "Алтын баракча", note: "Фото на весь экран, золотые фигурные карточки и рукописные имена",
+    paletteable: false, defaultPalette: "gold", pageBg: "#2a1d14",
+    events: ["wedding", "kyz_uzatuu", "tushoo_toi", "birthday", "corporate"],
+    fonts: ["Great Vibes", "Cormorant Garamond:ital,wght@0,400;0,500;0,600;1,400", "Montserrat:wght@400;500"],
+  },
 };
 
 export const TEMPLATE_LABELS: Record<TemplateId, { name: string; note: string }> = Object.fromEntries(
@@ -174,6 +181,8 @@ export type Invitation = {
   message: Partial<Record<Lang, string>>;
   program: ProgramItem[];
   dressCode: string;
+  /** Dress-code colours as #rrggbb, shown as swatches. */
+  dressColors: string[];
   /** Who hosts the celebration, e.g. the parents (той ээлери). */
   inviters: string;
   contacts: Contact[];
@@ -201,6 +210,7 @@ export function emptyInvitation(eventType: EventType = "wedding"): Invitation {
     message: {},
     program: [],
     dressCode: "",
+    dressColors: [],
     inviters: "",
     contacts: [],
     photos: [],
@@ -315,6 +325,9 @@ export function applyInvitationPatch(base: Invitation, patch: unknown): Invitati
   next.time = clock(p.time) ?? next.time;
   next.dressCode = str(p.dressCode, LIMITS.short * 2) ?? next.dressCode;
   next.inviters = str(p.inviters, LIMITS.short * 2) ?? next.inviters;
+  if (Array.isArray(p.dressColors)) {
+    next.dressColors = [...new Set(p.dressColors.filter((c): c is string => typeof c === "string" && /^#[0-9a-f]{6}$/iu.test(c)).map((c) => c.toLowerCase()))].slice(0, 6);
+  }
   next.notes = str(p.notes, LIMITS.text) ?? next.notes;
   next.rsvpDeadline = isoDate(p.rsvpDeadline) ?? next.rsvpDeadline;
   if (typeof p.musicUrl === "string") {
@@ -448,5 +461,6 @@ export function sampleInvitation(templateId: TemplateId, eventType: EventType = 
     venue: { name: "Ресторан «Ала-Тоо»", address: "Бишкек, проспект Чуй", mapUrl: "" },
     dressCode: "Нарядно, в светлых тонах",
     inviters: "Родители: Асан и Айгуль",
+    dressColors: ["#1d1d1f", "#9b2335", "#1f3b8a", "#d4af62", "#f5f2ea"],
   };
 }

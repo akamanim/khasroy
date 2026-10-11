@@ -75,7 +75,7 @@ async function latestForSession(sessionHash: string) {
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 1 });
+  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 2 });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
@@ -100,6 +100,36 @@ Deno.serve(async (request) => {
         `khasroy_invitations?status=eq.${status}&select=${ROW}&order=updated_at.desc&limit=${limit}`,
       )).json();
       return json({ invitations: rows });
+    }
+
+    if (action === "rsvp") {
+      const slug = slugValue(body.slug);
+      const name = typeof body.name === "string" ? body.name.replace(/[\u0000-\u001f]/gu, "").trim().slice(0, 80) : "";
+      const answer = ["yes", "family", "no"].includes(body.answer) ? body.answer : "";
+      if (!slug || !name || !answer) return json({ error: "invalid_rsvp" }, 400);
+      const rows = await (await db(`khasroy_invitations?slug=eq.${slug}&${ACTIVE}&select=slug&limit=1`)).json();
+      if (!Array.isArray(rows) || !rows[0]) return json({ error: "not_found" }, 404);
+      const countRes = await db(`khasroy_invitation_rsvps?invitation_slug=eq.${slug}&select=id`, {
+        method: "HEAD",
+        headers: { Prefer: "count=exact" },
+      });
+      const total = Number((countRes.headers.get("content-range") || "").split("/")[1] || 0);
+      if (total >= 2000) return json({ error: "rsvp_limit" }, 429);
+      await db("khasroy_invitation_rsvps", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ invitation_slug: slug, guest_name: name, answer }),
+      });
+      return json({ ok: true });
+    }
+
+    if (action === "rsvps") {
+      const slug = slugValue(body.slug);
+      if (!slug) return json({ error: "invalid_slug" }, 400);
+      const rows = await (await db(
+        `khasroy_invitation_rsvps?invitation_slug=eq.${slug}&select=guest_name,answer,created_at&order=created_at.desc&limit=2000`,
+      )).json();
+      return json({ rsvps: rows });
     }
 
     const sessionHash = hex64(body.sessionHash);
