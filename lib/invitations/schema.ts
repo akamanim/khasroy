@@ -11,7 +11,21 @@ export type EventType = (typeof EVENT_TYPES)[number];
 export const LANGUAGES = ["ru", "ky", "en"] as const;
 export type Lang = (typeof LANGUAGES)[number];
 
-export const TEMPLATE_IDS = ["minimal", "floral", "ornament"] as const;
+export const TEMPLATE_IDS = [
+  "minimal",
+  "floral",
+  "ornament",
+  "shyrdak",
+  "tunduk",
+  "celestial",
+  "deco",
+  "confetti",
+  "reveal",
+  "tianshan",
+  "neon",
+  "postcard",
+  "steps",
+] as const;
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
 
 export const PALETTES = ["ivory", "blush", "sage", "night", "gold", "sky"] as const;
@@ -26,11 +40,115 @@ export const EVENT_LABELS: Record<EventType, string> = {
   corporate: "Корпоратив",
 };
 
-export const TEMPLATE_LABELS: Record<TemplateId, { name: string; note: string }> = {
-  minimal: { name: "Минимализм", note: "Чистая типографика и много воздуха" },
-  floral: { name: "Цветочный", note: "Нежные ветви и тёплые оттенки" },
-  ornament: { name: "Орнамент", note: "Геометрический узор в национальном духе" },
+type TemplateMeta = {
+  name: string;
+  note: string;
+  /** Whether the client's palette choice recolours this template. */
+  paletteable: boolean;
+  defaultPalette: Palette;
+  /** Colour around the invitation card on the guest page. */
+  pageBg: string;
+  /** Events this template is designed for; shown first in the gallery. */
+  events: EventType[];
+  /** Google Fonts families (all with Kyrgyz Cyrillic coverage). */
+  fonts: string[];
 };
+
+export const TEMPLATE_META: Record<TemplateId, TemplateMeta> = {
+  minimal: {
+    name: "Белый шёлк", note: "Монограмма, тонкие линии и много воздуха",
+    paletteable: true, defaultPalette: "ivory", pageBg: "#e9e4da",
+    events: ["wedding", "corporate", "birthday"],
+    fonts: ["Cormorant Garamond:ital,wght@0,300;0,500;1,300", "Montserrat:wght@300;500"],
+  },
+  floral: {
+    name: "Пионы", note: "Акварельные пионы и рукописные имена",
+    paletteable: true, defaultPalette: "blush", pageBg: "#eddcd8",
+    events: ["wedding", "kyz_uzatuu", "birthday"],
+    fonts: ["Great Vibes", "Cormorant Garamond:ital,wght@0,400;0,500;1,400", "Montserrat:wght@300;500"],
+  },
+  ornament: {
+    name: "Ою", note: "Золотой узор кочкор мүйүз на ночном синем",
+    paletteable: false, defaultPalette: "night", pageBg: "#070b16",
+    events: ["wedding", "kyz_uzatuu", "tushoo_toi"],
+    fonts: ["Forum", "Lora:ital@0;1"],
+  },
+  shyrdak: {
+    name: "Шырдак", note: "Войлочная мозаика: красный, индиго, охра",
+    paletteable: false, defaultPalette: "gold", pageBg: "#2b1d16",
+    events: ["kyz_uzatuu", "tushoo_toi", "wedding"],
+    fonts: ["Yeseva One", "Alice"],
+  },
+  tunduk: {
+    name: "Тундук", note: "Купол юрты над именами, тёплые степные тона",
+    paletteable: false, defaultPalette: "ivory", pageBg: "#d9c7a6",
+    events: ["wedding", "kyz_uzatuu", "tushoo_toi", "birthday"],
+    fonts: ["Philosopher:ital,wght@0,400;0,700;1,400", "Lora:ital@0;1"],
+  },
+  celestial: {
+    name: "Звёздная ночь", note: "Мерцающие звёзды, луна и созвездие",
+    paletteable: false, defaultPalette: "night", pageBg: "#05081a",
+    events: ["wedding", "birthday", "corporate"],
+    fonts: ["Cormorant Garamond:ital,wght@0,300;0,500;1,300", "Montserrat:wght@300;500"],
+  },
+  deco: {
+    name: "Ар-деко", note: "Изумруд и золото, веер-солнце, ступенчатая рамка",
+    paletteable: false, defaultPalette: "gold", pageBg: "#071f1b",
+    events: ["corporate", "wedding", "birthday"],
+    fonts: ["Oswald:wght@300;500", "Cormorant Garamond:ital,wght@0,400;1,400"],
+  },
+  confetti: {
+    name: "Конфетти", note: "Шары, конфетти и яркий праздничный шрифт",
+    paletteable: false, defaultPalette: "sky", pageBg: "#ffe2c4",
+    events: ["birthday", "corporate", "gender_party"],
+    fonts: ["Unbounded:wght@500;800", "Nunito:wght@400;700"],
+  },
+  reveal: {
+    name: "Он или она?", note: "Розовый и голубой, шары и главный вопрос",
+    paletteable: false, defaultPalette: "blush", pageBg: "#e8dcef",
+    events: ["gender_party", "birthday"],
+    fonts: ["Comfortaa:wght@400;700", "Nunito:wght@400;700"],
+  },
+  tianshan: {
+    name: "Тянь-Шань", note: "Слои гор на рассвете",
+    paletteable: false, defaultPalette: "sky", pageBg: "#c9d7e3",
+    events: ["wedding", "birthday", "corporate"],
+    fonts: ["Prata", "Manrope:wght@400;600"],
+  },
+  neon: {
+    name: "Неон", note: "Неоновое свечение и сетка-горизонт",
+    paletteable: false, defaultPalette: "night", pageBg: "#05020f",
+    events: ["corporate", "birthday"],
+    fonts: ["Unbounded:wght@400;700", "Exo 2:wght@400;600"],
+  },
+  postcard: {
+    name: "Ретро-открытка", note: "Бумага, почтовая марка и штемпель с датой",
+    paletteable: false, defaultPalette: "ivory", pageBg: "#c8b79a",
+    events: ["birthday", "wedding", "corporate"],
+    fonts: ["Old Standard TT:ital,wght@0,400;0,700;1,400", "Bad Script"],
+  },
+  steps: {
+    name: "Первые шаги", note: "Следы ножек и чёрно-белая тушоо-верёвка",
+    paletteable: false, defaultPalette: "sage", pageBg: "#d4ece2",
+    events: ["tushoo_toi", "birthday", "gender_party"],
+    fonts: ["Comfortaa:wght@400;700", "Caveat:wght@500;700"],
+  },
+};
+
+export const TEMPLATE_LABELS: Record<TemplateId, { name: string; note: string }> = Object.fromEntries(
+  TEMPLATE_IDS.map((id) => [id, { name: TEMPLATE_META[id].name, note: TEMPLATE_META[id].note }]),
+) as Record<TemplateId, { name: string; note: string }>;
+
+export function fontsHref(ids: readonly TemplateId[]): string {
+  const families = [...new Set(ids.flatMap((id) => TEMPLATE_META[id].fonts))];
+  return `https://fonts.googleapis.com/css2?${families.map((f) => `family=${f.replace(/ /gu, "+")}`).join("&")}&display=swap`;
+}
+
+/** Templates ordered for the gallery: the ones designed for this event first. */
+export function templatesFor(eventType: EventType): TemplateId[] {
+  const fit = TEMPLATE_IDS.filter((id) => TEMPLATE_META[id].events.includes(eventType));
+  return [...fit, ...TEMPLATE_IDS.filter((id) => !fit.includes(id))];
+}
 
 export type ProgramItem = { time: string; title: string };
 export type Contact = { name: string; phone: string };
@@ -248,15 +366,19 @@ export function sampleInvitation(templateId: TemplateId, eventType: EventType = 
     kyz_uzatuu: { hosts: ["Асель"], title: "Кыз узатуу", message: { ru: "Приглашаем проводить нашу дочь в новую жизнь." } },
     corporate: { title: "Новогодний вечер", hosts: [], message: { ru: "Приглашаем команду на праздничный вечер." } },
   };
-  const palettes: Record<TemplateId, Palette> = { minimal: "ivory", floral: "blush", ornament: "night" };
   return {
     ...base,
+    program: [
+      { time: "17:00", title: "Сбор гостей" },
+      { time: "18:00", title: "Торжественная часть" },
+      { time: "19:00", title: "Праздничный ужин" },
+    ],
     ...samples[eventType],
     templateId,
-    palette: palettes[templateId],
+    palette: TEMPLATE_META[templateId].defaultPalette,
     date: "2027-06-12",
     time: "17:00",
-    venue: { name: "Ресторан «Тянь-Шань»", address: "Бишкек, проспект Чуй", mapUrl: "" },
-    dressCode: "",
+    venue: { name: "Ресторан «Ала-Тоо»", address: "Бишкек, проспект Чуй", mapUrl: "" },
+    dressCode: "Нарядно, в светлых тонах",
   };
 }

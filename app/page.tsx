@@ -9,6 +9,8 @@ import {
   EVENT_TYPES,
   TEMPLATE_IDS,
   TEMPLATE_LABELS,
+  fontsHref,
+  templatesFor,
   sampleInvitation,
   type EventType,
   type Invitation,
@@ -25,8 +27,6 @@ type StudioState = {
   missing: string[];
 };
 
-const FONT_HREF =
-  "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Forum&family=Manrope:wght@400;500;600&family=Marck+Script&display=swap";
 
 const GREETING =
   "Здравствуйте! Я Хасрой. Создам для вас онлайн-приглашение, которое можно отправить гостям ссылкой. Какое событие готовите?";
@@ -172,7 +172,7 @@ export default function Home() {
 
   return (
     <div className={styles.shell}>
-      <link rel="stylesheet" href={FONT_HREF} precedence="default" />
+      <link rel="stylesheet" href={fontsHref(TEMPLATE_IDS)} precedence="default" />
       <main className={styles.main}>
         <div className={styles.cloud}>
           <Core state={coreState} />
@@ -273,7 +273,7 @@ export default function Home() {
         ) : null}
 
         <div className={styles.templates}>
-          {TEMPLATE_IDS.map((id) => {
+          {templatesFor(eventType).map((id) => {
             const active = state.invitation?.templateId === id;
             return (
               <button

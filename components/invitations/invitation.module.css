@@ -1,141 +1,499 @@
+/* ───────────── Base card ───────────── */
 .root {
-  --bg: #f7f2ea;
-  --surface: rgba(255, 255, 255, 0.55);
-  --ink: #2b2622;
-  --muted: #6d625a;
+  --bg: #f6f1e8;
+  --bg2: var(--bg);
+  --surface: rgba(255, 255, 255, .5);
+  --ink: #2a2520;
+  --muted: #6c6158;
   --accent: #a8865a;
-  --line: rgba(43, 38, 34, 0.14);
-  --display: "Cormorant Garamond", "Times New Roman", serif;
-  --body: "Manrope", system-ui, -apple-system, sans-serif;
+  --accent2: #c9b089;
+  --line: rgba(42, 37, 32, .14);
+  --display: "Cormorant Garamond", Georgia, serif;
+  --body: "Montserrat", system-ui, -apple-system, sans-serif;
+  --title-size: clamp(40px, 11.5vw, 56px);
+  --title-weight: 400;
+  --title-case: none;
+  --title-track: -.01em;
+  --photo-radius: 999px 999px 16px 16px;
   position: relative;
+  isolation: isolate;
   min-height: 100%;
   margin: 0 auto;
   max-width: 480px;
-  padding: 56px 28px 64px;
-  background: var(--bg);
+  padding: 64px 30px 56px;
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
   color: var(--ink);
   font-family: var(--body);
   font-size: 15px;
-  line-height: 1.6;
+  line-height: 1.65;
   text-align: center;
   overflow: hidden;
 }
 
-.p_ivory { --bg: #f7f2ea; --surface: rgba(255, 255, 255, .55); --ink: #2b2622; --muted: #6d625a; --accent: #a8865a; --line: rgba(43, 38, 34, .14); }
-.p_blush { --bg: #f8ece9; --surface: rgba(255, 255, 255, .55); --ink: #3a2a2c; --muted: #7a6265; --accent: #c0707a; --line: rgba(58, 42, 44, .14); }
-.p_sage { --bg: #eef1ea; --surface: rgba(255, 255, 255, .55); --ink: #263027; --muted: #5c6a5d; --accent: #6f8a6a; --line: rgba(38, 48, 39, .14); }
-.p_sky { --bg: #eef4fa; --surface: rgba(255, 255, 255, .6); --ink: #1f2b3a; --muted: #5a6878; --accent: #4f7fb3; --line: rgba(31, 43, 58, .14); }
-.p_night { --bg: #0f1626; --surface: rgba(255, 255, 255, .04); --ink: #efe7d6; --muted: #b2aa9b; --accent: #c9a45c; --line: rgba(239, 231, 214, .16); }
-.p_gold { --bg: #1c1712; --surface: rgba(255, 255, 255, .04); --ink: #f3e6c8; --muted: #c2b394; --accent: #d4af62; --line: rgba(243, 230, 200, .16); }
+.backdrop, .frameLayer { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
+.frameLayer { z-index: 0; }
+.frame { width: 100%; height: 100%; }
+.hero, .body, .footer { position: relative; z-index: 1; }
 
-.langs {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  display: flex;
-  gap: 4px;
-  z-index: 2;
-}
+.langs { position: absolute; top: 14px; right: 14px; display: flex; gap: 4px; z-index: 5; }
 .langs button {
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--muted);
-  font: 500 11px/1 var(--body);
-  padding: 6px 8px;
+  font: 600 11px/1 var(--body);
+  padding: 7px 9px;
   border-radius: 999px;
   cursor: pointer;
+  backdrop-filter: blur(6px);
 }
 .langs .langOn { color: var(--ink); border-color: var(--accent); }
 
-.hero { position: relative; padding: 8px 0 28px; }
+/* Hero */
+.hero { padding: 6px 0 26px; }
 .kicker {
-  display: block;
-  font-size: 11px;
-  letter-spacing: .22em;
-  text-transform: uppercase;
+  margin: 0;
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 19px;
   color: var(--accent);
 }
 .title {
-  margin: 14px 0 12px;
+  margin: 12px 0 14px;
   font-family: var(--display);
-  font-weight: 500;
-  font-size: clamp(38px, 11vw, 52px);
-  line-height: 1.05;
-  letter-spacing: -.01em;
+  font-weight: var(--title-weight);
+  font-size: var(--title-size);
+  line-height: 1.02;
+  letter-spacing: var(--title-track);
+  text-transform: var(--title-case);
   overflow-wrap: anywhere;
 }
-.date { margin: 0; color: var(--muted); font-size: 14px; }
-.date::first-letter { text-transform: uppercase; }
-.rule { display: block; width: 44px; height: 1px; margin: 26px auto 0; background: var(--accent); }
+.titleStack { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.amp { font-size: .55em; font-style: italic; color: var(--accent); line-height: 1.1; }
+.date { margin: 0; display: grid; gap: 2px; color: var(--muted); font-size: 14px; }
+.date span:first-child::first-letter { text-transform: uppercase; }
+.time { font-family: var(--display); font-size: 26px; color: var(--ink); letter-spacing: .04em; }
 
-.photoMain { margin: 8px auto 28px; width: 76%; aspect-ratio: 4 / 5; overflow: hidden; border-radius: 999px 999px 18px 18px; }
+.monogram { position: relative; width: 112px; height: 112px; margin: 18px auto 4px; display: grid; place-items: center; }
+.rings { position: absolute; inset: 0; width: 100%; height: 100%; }
+.monogram span { position: relative; font-family: var(--display); font-size: 40px; letter-spacing: .06em; color: var(--accent); }
+.root :global(.ring) { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+.root :global(.ringThin) { fill: none; stroke: var(--accent); stroke-width: .6; opacity: .6; }
+
+/* Body */
+.photoMain { margin: 6px auto 30px; width: 78%; aspect-ratio: 4 / 5; overflow: hidden; border-radius: var(--photo-radius); }
 .photoMain img, .gallery img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .message {
-  margin: 0 auto 30px;
-  max-width: 34ch;
+  margin: 0 auto 6px;
+  max-width: 32ch;
   font-family: var(--display);
-  font-size: 21px;
+  font-size: 22px;
   line-height: 1.45;
   font-style: italic;
 }
 
-.countdown { margin: 0 auto 34px; padding: 18px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.countRow { display: flex; justify-content: center; gap: 26px; margin-top: 10px; }
-.countCell strong { display: block; font-family: var(--display); font-weight: 500; font-size: 34px; line-height: 1; }
-.countCell span { font-size: 11px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.divider { display: flex; justify-content: center; align-items: center; margin: 22px auto; min-height: 20px; color: var(--accent); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: -22px 0 0 -2px var(--accent), 22px 0 0 -2px var(--accent); }
 
-.section { margin: 0 auto 30px; }
-.section h2 {
-  margin: 0 0 12px;
-  font-family: var(--display);
-  font-weight: 500;
-  font-size: 24px;
-}
+.countdown { margin: 0 auto 36px; }
+.countLabel { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+.countRow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-width: 340px; margin: 0 auto; }
+.countCell { padding: 12px 0 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.countCell strong { display: block; font-family: var(--display); font-weight: 500; font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
+.countCell span { display: block; margin-top: 4px; font-size: 10.5px; color: var(--muted); }
+
+.section { margin: 0 auto 34px; }
+.section h2 { margin: 0 0 14px; font-family: var(--display); font-weight: 500; font-size: 27px; line-height: 1.15; }
 .muted { margin: 0; color: var(--muted); }
-.venueName { margin: 0 0 2px; font-weight: 600; }
-.note { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.venueName { margin: 0 0 2px; font-weight: 600; font-size: 16px; }
+.note { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); }
 
-.program { list-style: none; margin: 0 auto; padding: 0; max-width: 300px; text-align: left; }
-.program li { display: grid; grid-template-columns: 58px 1fr; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
-.program li:last-child { border-bottom: 0; }
-.program time { font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+.timeline { list-style: none; margin: 0 auto; padding: 0; max-width: 300px; text-align: left; position: relative; }
+.timeline::before { content: ""; position: absolute; left: 64px; top: 10px; bottom: 10px; width: 1px; background: var(--line); }
+.timeline li { display: grid; grid-template-columns: 52px 1fr; gap: 26px; padding: 9px 0; position: relative; }
+.timeline li::after { content: ""; position: absolute; left: 60px; top: 17px; width: 9px; height: 9px; border-radius: 50%; background: var(--bg); border: 2px solid var(--accent); }
+.timeline time { font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; text-align: right; }
 
+.actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
 .button {
   display: inline-block;
-  margin-top: 14px;
-  padding: 11px 22px;
-  border: 1px solid var(--accent);
+  padding: 12px 20px;
   border-radius: 999px;
-  color: var(--ink);
+  background: var(--accent);
+  color: var(--bg);
   text-decoration: none;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
 }
+.buttonGhost { background: transparent; color: var(--ink); border: 1px solid var(--accent); }
 
-.gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 30px; }
-.gallery img { aspect-ratio: 1; border-radius: 10px; }
+.gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.gallery img { aspect-ratio: 1; border-radius: 12px; }
+
+.rsvp { padding: 22px 18px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); }
 
 .contacts { list-style: none; margin: 0; padding: 0; }
 .contacts li { display: flex; justify-content: center; gap: 10px; padding: 3px 0; }
 .contacts a { color: var(--ink); }
 
-/* Minimal: typography and air. */
-.minimal .title { font-size: clamp(40px, 12vw, 56px); }
+.footer { padding-top: 6px; }
+.wait { margin: 0; font-family: var(--display); font-size: 30px; line-height: 1.2; }
+.footMono { margin: 10px 0 0; font-family: var(--display); font-size: 22px; color: var(--accent); letter-spacing: .08em; }
+.footDate { margin: 2px 0 0; font-size: 12px; color: var(--muted); letter-spacing: .14em; }
 
-/* Floral: script names and soft branches. */
-.floral .title { font-family: "Marck Script", var(--display); font-weight: 400; font-size: clamp(42px, 12vw, 58px); color: var(--accent); }
-.branchTop, .branchBottom { display: block; width: 62%; height: auto; color: var(--accent); }
-.branchTop { margin: -24px 0 6px -20px; }
-.branchBottom { margin: 22px -20px -6px auto; transform: scale(-1, -1); }
-.floral .photoMain { border-radius: 50%; aspect-ratio: 1; width: 70%; border: 6px solid var(--surface); }
+/* One orchestrated entrance on the live page only. */
+.live .hero > * { animation: rise .9s cubic-bezier(.2, .7, .2, 1) both; }
+.live .hero > *:nth-child(2) { animation-delay: .12s; }
+.live .hero > *:nth-child(3) { animation-delay: .24s; }
+.live .hero > *:nth-child(4) { animation-delay: .36s; }
+.live .hero > *:nth-child(5) { animation-delay: .48s; }
+.live .hero > *:nth-child(6) { animation-delay: .6s; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
-/* Ornament: framed card with a geometric band. */
-.ornament { --display: "Forum", "Cormorant Garamond", serif; padding-top: 0; padding-bottom: 0; }
-.ornament .hero { padding-top: 22px; }
-.band { display: block; width: calc(100% + 56px); height: 36px; margin: 0 -28px; color: var(--accent); opacity: .85; }
-.ornament .hero .band { margin-bottom: 30px; }
-.ornament > .band:last-child { margin-top: 18px; }
-.ornament .title { text-transform: uppercase; letter-spacing: .04em; font-size: clamp(32px, 9.5vw, 44px); }
-.ornament .photoMain { border-radius: 4px; outline: 1px solid var(--accent); outline-offset: 6px; }
-.ornament .section h2::before, .ornament .section h2::after { content: "◆"; font-size: 9px; color: var(--accent); vertical-align: middle; margin: 0 10px; }
+/* ───────────── Palettes (paletteable templates only) ───────────── */
+.p_ivory { --bg: #f6f1e8; --bg2: #efe7da; --ink: #2a2520; --muted: #6c6158; --accent: #a8865a; --accent2: #d8c3a0; --line: rgba(42, 37, 32, .14); }
+.p_blush { --bg: #fbefec; --bg2: #f4dfdb; --ink: #3c2a2d; --muted: #7d6467; --accent: #b8646f; --accent2: #e9b3ba; --line: rgba(60, 42, 45, .14); }
+.p_sage { --bg: #f0f3ec; --bg2: #e2e9dc; --ink: #253026; --muted: #5d6b5e; --accent: #6c8a66; --accent2: #b9cdb1; --line: rgba(37, 48, 38, .14); }
+.p_sky { --bg: #f0f5fb; --bg2: #dfe9f5; --ink: #1d2a3a; --muted: #5a6879; --accent: #4f7fb3; --accent2: #a9c6e6; --line: rgba(29, 42, 58, .14); }
+.p_night { --bg: #121a2e; --bg2: #0b1120; --surface: rgba(255, 255, 255, .05); --ink: #efe7d6; --muted: #aaa494; --accent: #c9a45c; --accent2: #7d6a45; --line: rgba(239, 231, 214, .16); }
+.p_gold { --bg: #201a13; --bg2: #15110c; --surface: rgba(255, 255, 255, .05); --ink: #f3e6c8; --muted: #bfb092; --accent: #d4af62; --accent2: #826a3d; --line: rgba(243, 230, 200, .16); }
+
+/* ───────────── 1. Белый шёлк ───────────── */
+.t_minimal { --title-weight: 300; --title-size: clamp(44px, 13vw, 62px); padding-top: 52px; }
+.t_minimal::before {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  border: 1px solid var(--line);
+  pointer-events: none;
+  z-index: 0;
+}
+.t_minimal .kicker { font-size: 17px; }
+.t_minimal .monogram { margin-top: 26px; }
+.t_minimal .countCell { background: transparent; border-radius: 0; border-width: 0 0 1px; }
+
+/* ───────────── 2. Пионы ───────────── */
+.t_floral {
+  --display: "Cormorant Garamond", Georgia, serif;
+  --script: "Great Vibes", "Cormorant Garamond", cursive;
+  --title-size: clamp(50px, 14vw, 68px);
+  --photo-radius: 50%;
+  background:
+    radial-gradient(60% 30% at 15% 6%, color-mix(in srgb, var(--accent2) 45%, transparent), transparent 70%),
+    radial-gradient(50% 26% at 90% 96%, color-mix(in srgb, var(--accent2) 40%, transparent), transparent 70%),
+    linear-gradient(180deg, var(--bg), var(--bg2));
+}
+.t_floral .title { font-family: var(--script); color: var(--accent); font-weight: 400; letter-spacing: 0; }
+.t_floral .amp { font-family: var(--display); color: var(--ink); }
+.t_floral .wait { font-family: var(--script); font-size: 40px; color: var(--accent); }
+.t_floral .photoMain { aspect-ratio: 1; width: 70%; box-shadow: 0 0 0 8px var(--surface), 0 0 0 9px var(--accent2); }
+.peonyTop { display: block; width: 78%; margin: -60px 0 0 -44px; }
+.peonyBottom { display: block; width: 62%; margin: 8px -40px -30px auto; }
+.peonyDivider { width: 120px; height: 46px; }
+.t_floral :global(.petalOuter) { fill: var(--accent2); opacity: .75; }
+.t_floral :global(.petalMid) { fill: color-mix(in srgb, var(--accent2) 60%, var(--accent)); opacity: .8; }
+.t_floral :global(.petalInner) { fill: var(--accent); opacity: .7; }
+.t_floral :global(.petalHeart) { fill: #f2d48f; }
+.t_floral :global(.leaf) { fill: color-mix(in srgb, #7f9c74 70%, var(--accent2)); opacity: .75; }
+.t_floral :global(.stem) { fill: none; stroke: #7f9c74; stroke-width: 1.4; }
+.live.t_floral .peonyTop { animation: bloom 1.6s cubic-bezier(.2, .7, .2, 1) both; transform-origin: 20% 30%; }
+@keyframes bloom { from { opacity: 0; transform: scale(.86) rotate(-4deg); } to { opacity: 1; transform: none; } }
+
+/* ───────────── 3. Ою ───────────── */
+.t_ornament {
+  --bg: #111a33; --bg2: #0a0f1f; --surface: rgba(232, 197, 122, .06);
+  --ink: #f1e6cd; --muted: #b5ab95; --accent: #d9b56a; --accent2: #8a6f3c; --line: rgba(217, 181, 106, .25);
+  --display: "Forum", "Cormorant Garamond", serif; --body: "Lora", Georgia, serif;
+  --title-case: uppercase; --title-track: .05em; --title-size: clamp(34px, 10vw, 46px);
+  --photo-radius: 4px;
+  padding: 44px 40px 52px;
+  background:
+    radial-gradient(70% 40% at 50% 0%, rgba(217, 181, 106, .12), transparent 70%),
+    linear-gradient(180deg, var(--bg), var(--bg2));
+}
+.band { display: block; width: calc(100% + 40px); height: 40px; margin: 0 -20px 28px; color: var(--accent); }
+.hornDivider { width: 150px; height: 74px; }
+.t_ornament :global(.horn), .t_ornament :global(.hornThin) { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; }
+.t_ornament :global(.hornThin) { stroke-width: 1; opacity: .7; }
+.t_ornament :global(.hornFill) { fill: var(--accent); }
+.t_ornament :global(.frameLine) { fill: none; stroke: var(--accent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.t_ornament :global(.frameLineThin) { fill: none; stroke: var(--accent); stroke-width: .6; opacity: .6; vector-effect: non-scaling-stroke; }
+.t_ornament .photoMain { outline: 1px solid var(--accent); outline-offset: 7px; }
+.t_ornament .section h2 { text-transform: uppercase; letter-spacing: .08em; font-size: 22px; color: var(--accent); }
+.t_ornament .countCell { border-radius: 2px; }
+
+/* ───────────── 4. Шырдак ───────────── */
+.t_shyrdak {
+  --bg: #f3e6cf; --bg2: #ead7b5; --surface: rgba(255, 250, 240, .6);
+  --ink: #2c1a14; --muted: #6f5544; --accent: #a8262c; --accent2: #23396b; --gold: #e0a526; --line: rgba(44, 26, 20, .18);
+  --display: "Yeseva One", serif; --body: "Alice", Georgia, serif;
+  --title-size: clamp(38px, 11vw, 52px); --photo-radius: 28px;
+  padding: 0 22px 44px;
+  border: 10px solid var(--accent2);
+  box-shadow: inset 0 0 0 3px var(--gold), inset 0 0 0 6px var(--accent2);
+}
+.feltBorder { display: block; width: calc(100% + 44px); height: 30px; margin: 0 -22px 34px; }
+.feltBorderThin { width: 220px; height: 22px; }
+.medallion { display: block; width: 150px; margin: 26px auto 0; }
+.t_shyrdak .title { color: var(--accent); }
+.t_shyrdak .amp { color: var(--accent2); font-style: normal; }
+.t_shyrdak .kicker { font-family: var(--body); color: var(--accent2); }
+.t_shyrdak :global(.feltA) { fill: var(--accent); }
+.t_shyrdak :global(.feltB) { fill: var(--accent2); }
+.t_shyrdak :global(.feltC) { fill: var(--gold); }
+.t_shyrdak :global(.stitch) { fill: none; stroke: #f8ecd4; stroke-width: 1.6; stroke-dasharray: 4 3; }
+.t_shyrdak .countCell { background: var(--accent2); color: #f8ecd4; border: 2px dashed rgba(248, 236, 212, .5); }
+.t_shyrdak .countCell span { color: rgba(248, 236, 212, .8); }
+.t_shyrdak .rsvp { border: 2px dashed var(--accent); }
+.t_shyrdak .button { background: var(--accent); color: #f8ecd4; }
+.live.t_shyrdak .medallion { animation: spinIn 1.4s cubic-bezier(.2, .7, .2, 1) .3s both; }
+@keyframes spinIn { from { opacity: 0; transform: rotate(-90deg) scale(.7); } to { opacity: 1; transform: none; } }
+
+/* ───────────── 5. Тундук ───────────── */
+.t_tunduk {
+  --bg: #f4ead7; --bg2: #e7d6b6; --surface: rgba(255, 252, 245, .55);
+  --ink: #3a2616; --muted: #7b6249; --accent: #8a4b22; --accent2: #3f7aa6; --line: rgba(58, 38, 22, .16);
+  --display: "Philosopher", serif; --body: "Lora", Georgia, serif;
+  --title-weight: 700; --title-size: clamp(38px, 11vw, 52px);
+  --photo-radius: 50% 50% 18px 18px;
+}
+.tunduk { position: absolute; left: 50%; top: -6px; width: 360px; margin-left: -180px; opacity: .22; z-index: -1; }
+.live .tunduk, .still .tunduk { animation: turn 90s linear infinite; }
+.tundukSmall { width: 54px; }
+.t_tunduk :global(.uuk) { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+.t_tunduk :global(.ringOuter) { fill: none; stroke: var(--accent); stroke-width: 9; }
+.t_tunduk :global(.ringInner) { fill: none; stroke: var(--accent); stroke-width: 3; }
+.t_tunduk :global(.lattice) { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round; }
+.t_tunduk .hero { padding-top: 96px; }
+.t_tunduk .kicker { color: var(--accent2); }
+.t_tunduk .countCell { border-color: rgba(138, 75, 34, .3); }
+@keyframes turn { to { transform: rotate(360deg); } }
+
+/* ───────────── 6. Звёздная ночь ───────────── */
+.t_celestial {
+  --bg: #0b1233; --bg2: #04071a; --surface: rgba(255, 255, 255, .05);
+  --ink: #eef0ff; --muted: #a7acd0; --accent: #e8cf8a; --accent2: #7b86d6; --line: rgba(232, 207, 138, .22);
+  --title-weight: 300; --title-size: clamp(46px, 13vw, 62px); --photo-radius: 50%;
+  background:
+    radial-gradient(80% 40% at 50% 0%, rgba(123, 134, 214, .28), transparent 70%),
+    linear-gradient(180deg, var(--bg), var(--bg2));
+}
+.stars { width: 100%; height: 100%; }
+.t_celestial :global(.star) { fill: #fffbe8; animation: twinkle 3s ease-in-out infinite; }
+@keyframes twinkle { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+.moon { display: block; width: 100%; margin: -18px 0 4px; }
+.t_celestial :global(.constLine) { fill: none; stroke: var(--accent); stroke-width: .8; opacity: .55; stroke-dasharray: 3 4; }
+.t_celestial :global(.constStar) { fill: var(--accent); }
+.t_celestial :global(.moon) { fill: var(--accent); }
+.t_celestial :global(.moonGlow) { fill: var(--accent); opacity: .12; }
+.t_celestial .title { text-shadow: 0 0 30px rgba(232, 207, 138, .35); }
+.t_celestial .photoMain { aspect-ratio: 1; width: 66%; box-shadow: 0 0 0 1px var(--accent), 0 0 40px rgba(232, 207, 138, .25); }
+.sparkle { font-size: 22px; color: var(--accent); text-shadow: 0 0 12px var(--accent); }
+
+/* ───────────── 7. Ар-деко ───────────── */
+.t_deco {
+  --bg: #0f3b33; --bg2: #08241f; --surface: rgba(201, 162, 75, .07);
+  --ink: #f2e9d2; --muted: #b9b199; --accent: #c9a24b; --accent2: #7f6527; --line: rgba(201, 162, 75, .3);
+  --display: "Oswald", sans-serif; --body: "Cormorant Garamond", Georgia, serif;
+  --title-weight: 300; --title-case: uppercase; --title-track: .12em; --title-size: clamp(32px, 9.5vw, 44px);
+  --photo-radius: 160px 160px 0 0;
+  padding: 44px 40px 52px;
+  font-size: 17px;
+}
+.sunburst { display: block; width: 74%; margin: 0 auto -8px; }
+.t_deco :global(.ray) { stroke: var(--accent); stroke-width: 1; }
+.t_deco :global(.arc) { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+.t_deco :global(.decoGem) { fill: var(--accent); }
+.t_deco :global(.decoFrame) { fill: none; stroke: var(--accent); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.t_deco :global(.decoCorner) { fill: none; stroke: var(--accent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.decoDivider { width: 200px; height: 28px; }
+.t_deco .kicker { font-family: var(--body); font-size: 20px; }
+.t_deco .monogram span { font-family: var(--body); font-style: italic; }
+.t_deco .section h2 { font-weight: 300; text-transform: uppercase; letter-spacing: .14em; font-size: 20px; color: var(--accent); }
+.t_deco .message { font-family: var(--body); }
+.t_deco .time { font-family: var(--display); font-weight: 300; }
+.t_deco .countCell { border-radius: 0; border-color: var(--accent); }
+.t_deco .countCell strong { font-weight: 300; }
+.t_deco .button { border-radius: 0; letter-spacing: .1em; text-transform: uppercase; font-family: var(--display); font-weight: 400; }
+.t_deco .photoMain { outline: 1px solid var(--accent); outline-offset: 8px; }
+.t_deco .wait { font-family: var(--body); font-style: italic; }
+.live.t_deco .sunburst { animation: fanOpen 1.4s cubic-bezier(.2, .7, .2, 1) both; transform-origin: 50% 100%; }
+@keyframes fanOpen { from { opacity: 0; transform: scaleY(.2); } to { opacity: 1; transform: none; } }
+
+/* ───────────── 8. Конфетти ───────────── */
+.t_confetti {
+  --bg: #fff3e0; --bg2: #ffe4c7; --surface: #ffffff;
+  --ink: #1f1a3d; --muted: #5d5878; --accent: #ff5d73; --accent2: #3a86ff; --line: rgba(31, 26, 61, .12);
+  --display: "Unbounded", sans-serif; --body: "Nunito", system-ui, sans-serif;
+  --title-weight: 800; --title-size: clamp(38px, 11vw, 54px); --title-track: -.02em; --photo-radius: 28px;
+}
+.t_confetti .title { color: var(--ink); text-shadow: 3px 3px 0 #ffb703, 6px 6px 0 var(--accent); line-height: 1.08; }
+.t_confetti .kicker { font-family: var(--body); font-style: normal; font-weight: 700; display: inline-block; padding: 6px 14px; border-radius: 999px; background: var(--accent2); color: #fff; font-size: 13px; }
+.t_confetti .message { font-family: var(--body); font-style: normal; font-size: 19px; font-weight: 600; }
+.t_confetti .section h2, .t_confetti .wait { font-weight: 800; font-size: 22px; }
+.t_confetti .time { font-family: var(--display); font-size: 22px; }
+.t_confetti .countCell { border: 0; box-shadow: 0 6px 0 rgba(31, 26, 61, .08); background: #fff; }
+.t_confetti .countCell:nth-child(1) strong { color: var(--accent); }
+.t_confetti .countCell:nth-child(2) strong { color: #ffb703; }
+.t_confetti .countCell:nth-child(3) strong { color: var(--accent2); }
+.t_confetti .countCell:nth-child(4) strong { color: #06d6a0; }
+.t_confetti .countCell strong { font-family: var(--display); font-size: 24px; }
+.t_confetti .photoMain { transform: rotate(-3deg); border: 8px solid #fff; box-shadow: 0 10px 0 rgba(31, 26, 61, .08); }
+.t_confetti .rsvp { border: 0; background: #fff; box-shadow: 0 6px 0 rgba(31, 26, 61, .08); }
+.balloons { display: block; width: 62%; margin: -34px auto -10px; }
+.root :global(.balloon) { animation: bob 4s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
+.root :global(.string) { fill: none; stroke: rgba(31, 26, 61, .35); stroke-width: 1.2; }
+@keyframes bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -8px; } }
+.confetti { position: absolute; inset: 0; overflow: hidden; }
+.confetti i { position: absolute; top: -20px; opacity: .85; animation: fall linear infinite; }
+@keyframes fall { from { transform: translateY(-20px) rotate(0); } to { transform: translateY(1400px) rotate(720deg); } }
+.squiggle { width: 120px; height: 14px; background: radial-gradient(circle at 10px -4px, transparent 9px, var(--accent) 10px 12px, transparent 13px) 0 0 / 20px 14px repeat-x, radial-gradient(circle at 10px 18px, transparent 9px, var(--accent) 10px 12px, transparent 13px) 10px 0 / 20px 14px repeat-x; }
+
+/* ───────────── 9. Он или она? ───────────── */
+.t_reveal {
+  --bg: #fde4ef; --bg2: #ddeeff; --surface: rgba(255, 255, 255, .7);
+  --ink: #3a3350; --muted: #6d6685; --accent: #e9679f; --accent2: #4f9be8; --line: rgba(58, 51, 80, .12);
+  --display: "Comfortaa", sans-serif; --body: "Nunito", system-ui, sans-serif;
+  --title-weight: 700; --title-size: clamp(34px, 10vw, 46px); --photo-radius: 40px;
+  background: linear-gradient(160deg, #fde4ef 0%, #fde4ef 42%, #ddeeff 58%, #ddeeff 100%);
+}
+.t_reveal .title { background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.t_reveal .kicker { font-family: var(--body); font-style: normal; font-weight: 700; color: var(--muted); }
+.t_reveal .message { font-family: var(--body); font-style: normal; font-size: 18px; }
+.t_reveal .countCell:nth-child(odd) strong { color: var(--accent); }
+.t_reveal .countCell:nth-child(even) strong { color: var(--accent2); }
+.t_reveal .countCell { border-radius: 20px; }
+.t_reveal .button { background: linear-gradient(90deg, var(--accent), var(--accent2)); color: #fff; }
+.question { font-family: var(--display); font-size: 64px; font-weight: 700; line-height: 1; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; animation: wobble 3s ease-in-out infinite; }
+@keyframes wobble { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+.clouds { position: absolute; top: 20px; left: 0; width: 100%; height: 160px; }
+.root :global(.cloud) { fill: #fff; opacity: .85; }
+.root :global(.cloudFar) { opacity: .5; }
+
+/* ───────────── 10. Тянь-Шань ───────────── */
+.t_tianshan {
+  --bg: #fde9d7; --bg2: #e7eef4; --surface: rgba(255, 255, 255, .55);
+  --ink: #1e2d3d; --muted: #556576; --accent: #3d6a8f; --accent2: #e89a72; --line: rgba(30, 45, 61, .14);
+  --display: "Prata", serif; --body: "Manrope", system-ui, sans-serif;
+  --title-size: clamp(38px, 11vw, 52px); --photo-radius: 18px;
+  padding-top: 0;
+  background: linear-gradient(180deg, #fbd7bd 0%, #fde9d7 22%, #e7eef4 46%, #f4f7fa 100%);
+}
+.t_tianshan .hero { padding-top: 76px; padding-bottom: 0; }
+.mountains { display: block; width: calc(100% + 60px); margin: 18px -30px 30px; }
+.t_tianshan :global(.sun) { fill: #f6b38c; opacity: .9; }
+.t_tianshan :global(.ridge4) { fill: #a9bfd3; }
+.t_tianshan :global(.snow) { fill: #fff; }
+.t_tianshan :global(.ridge3) { fill: #7f9cb8; }
+.t_tianshan :global(.ridge2) { fill: #5a7d9c; }
+.t_tianshan :global(.ridge1) { fill: #3d6a8f; }
+.t_tianshan :global(.bird) { fill: none; stroke: #3d5068; stroke-width: 1.4; stroke-linecap: round; }
+.t_tianshan .kicker { color: var(--accent2); }
+.t_tianshan .message { font-family: var(--display); font-style: normal; font-size: 20px; }
+.peak { width: 0; height: 0; border-left: 12px solid transparent; border-right: 12px solid transparent; border-bottom: 16px solid var(--accent); box-shadow: none; filter: drop-shadow(-26px 6px 0 var(--accent2)) drop-shadow(52px 0 0 var(--accent2)); }
+
+/* ───────────── 11. Неон ───────────── */
+.t_neon {
+  --bg: #12062b; --bg2: #05020f; --surface: rgba(255, 255, 255, .04);
+  --ink: #f4f0ff; --muted: #a99fc9; --accent: #ff3fb4; --accent2: #2de2ff; --line: rgba(45, 226, 255, .25);
+  --display: "Unbounded", sans-serif; --body: "Exo 2", system-ui, sans-serif;
+  --title-weight: 700; --title-case: uppercase; --title-size: clamp(30px, 9vw, 42px); --title-track: .03em; --photo-radius: 6px;
+}
+.t_neon .title { color: #fff; text-shadow: 0 0 6px #fff, 0 0 18px var(--accent), 0 0 42px var(--accent); }
+.live.t_neon .title { animation: flicker 4s linear infinite, rise .9s both; }
+@keyframes flicker { 0%, 92%, 100% { opacity: 1; } 93% { opacity: .55; } 95% { opacity: 1; } 97% { opacity: .7; } }
+.t_neon .kicker { font-family: var(--body); font-style: normal; text-transform: uppercase; letter-spacing: .3em; font-size: 12px; color: var(--accent2); text-shadow: 0 0 10px var(--accent2); }
+.t_neon .time { color: var(--accent2); text-shadow: 0 0 12px var(--accent2); font-family: var(--display); }
+.t_neon .message { font-family: var(--body); font-style: normal; font-size: 18px; }
+.t_neon .section h2 { font-size: 18px; text-transform: uppercase; letter-spacing: .1em; color: var(--accent2); text-shadow: 0 0 10px var(--accent2); }
+.t_neon .countCell { border-color: var(--accent2); box-shadow: 0 0 14px rgba(45, 226, 255, .3), inset 0 0 14px rgba(45, 226, 255, .15); }
+.t_neon .countCell strong { font-family: var(--display); color: var(--accent2); text-shadow: 0 0 10px var(--accent2); }
+.t_neon .button { background: transparent; color: var(--accent); border: 1px solid var(--accent); box-shadow: 0 0 14px rgba(255, 63, 180, .5); }
+.t_neon .photoMain { box-shadow: 0 0 0 1px var(--accent), 0 0 30px rgba(255, 63, 180, .45); }
+.t_neon .wait { font-family: var(--display); font-size: 22px; color: var(--accent); text-shadow: 0 0 14px var(--accent); }
+.horizon { position: absolute; left: 0; right: 0; top: 0; height: 520px; overflow: hidden; }
+.root :global(.neonSun) { position: absolute; left: 50%; top: 150px; width: 220px; height: 220px; margin-left: -110px; border-radius: 50%; background: linear-gradient(180deg, #ffd23f, #ff3fb4 60%, #7b2ff7); -webkit-mask: linear-gradient(180deg, #000 45%, transparent 45%), repeating-linear-gradient(180deg, #000 0 12px, transparent 12px 18px); mask: linear-gradient(180deg, #000 45%, transparent 45%), repeating-linear-gradient(180deg, #000 0 12px, transparent 12px 18px); opacity: .55; filter: blur(.3px); }
+.root :global(.neonGrid) { position: absolute; left: -50%; right: -50%; top: 300px; height: 260px; background: repeating-linear-gradient(90deg, rgba(45, 226, 255, .55) 0 1px, transparent 1px 44px), repeating-linear-gradient(180deg, rgba(45, 226, 255, .55) 0 1px, transparent 1px 34px); transform: perspective(260px) rotateX(62deg); transform-origin: top; mask: linear-gradient(180deg, #000, transparent 85%); animation: gridMove 3s linear infinite; }
+@keyframes gridMove { to { background-position: 0 34px, 0 34px; } }
+.neonLine { width: 140px; height: 2px; background: var(--accent); box-shadow: 0 0 10px var(--accent), 0 0 24px var(--accent); }
+
+/* ───────────── 12. Ретро-открытка ───────────── */
+.t_postcard {
+  --bg: #f1e6cf; --bg2: #e8d9ba; --surface: rgba(255, 252, 244, .55);
+  --ink: #2e2a24; --muted: #6b6152; --accent: #b23a3a; --accent2: #2f4c86; --line: rgba(46, 42, 36, .2);
+  --display: "Old Standard TT", Georgia, serif; --body: "Old Standard TT", Georgia, serif; --hand: "Bad Script", cursive;
+  --title-size: clamp(36px, 10.5vw, 48px); --photo-radius: 2px;
+  padding-top: 26px;
+  background-color: var(--bg);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .28 0 0 0 0 .18 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, var(--bg), var(--bg2));
+  border-top: 10px solid transparent;
+  border-image: repeating-linear-gradient(135deg, var(--accent) 0 14px, #f7efdc 14px 24px, var(--accent2) 24px 38px, #f7efdc 38px 48px) 10;
+}
+.stamp {
+  float: right;
+  width: 96px;
+  margin: 0 0 6px 10px;
+  padding: 6px;
+  background: #fbf6ea;
+  transform: rotate(4deg);
+  -webkit-mask: radial-gradient(circle 4px at 4px 4px, transparent 98%, #000) -4px -4px / 12px 12px;
+  mask: radial-gradient(circle 4px at 4px 4px, transparent 98%, #000) -4px -4px / 12px 12px;
+}
+.stamp svg { display: block; width: 100%; }
+.t_postcard :global(.stampInner) { fill: #9fc3d6; }
+.t_postcard :global(.stampMount) { fill: var(--accent2); }
+.t_postcard :global(.stampSnow) { fill: #fff; }
+.t_postcard :global(.stampSun) { fill: #f0b54b; }
+.t_postcard :global(.stampText) { font: 700 11px "Old Standard TT", serif; fill: var(--accent); }
+.postmark { display: block; width: 210px; margin: 18px 0 0 auto; transform: rotate(-8deg); opacity: .65; }
+.t_postcard :global(.pmRing) { fill: none; stroke: var(--accent2); stroke-width: 2; }
+.t_postcard :global(.pmText) { font: 700 9px "Old Standard TT", serif; fill: var(--accent2); letter-spacing: .12em; }
+.t_postcard :global(.pmWave) { fill: none; stroke: var(--accent2); stroke-width: 2; }
+.t_postcard .hero { text-align: left; padding-top: 14px; }
+.t_postcard .kicker { font-family: var(--hand); font-style: normal; font-size: 22px; color: var(--accent); }
+.t_postcard .titleStack { align-items: flex-start; }
+.t_postcard .date { justify-items: start; }
+.t_postcard .message { font-family: var(--hand); font-style: normal; font-size: 22px; text-align: left; max-width: none; border-left: 2px solid var(--line); padding-left: 16px; }
+.t_postcard .photoMain { width: 84%; aspect-ratio: 5 / 4; padding: 10px 10px 38px; background: #fffdf6; transform: rotate(-2deg); box-shadow: 0 8px 18px rgba(46, 42, 36, .18); }
+.t_postcard .photoMain img { height: 100%; }
+.t_postcard .wait { font-family: var(--hand); color: var(--accent); }
+.t_postcard .countCell { border-radius: 4px; background: #fbf6ea; }
+.airmail { width: 160px; height: 8px; background: repeating-linear-gradient(135deg, var(--accent) 0 10px, transparent 10px 16px, var(--accent2) 16px 26px, transparent 26px 32px); }
+
+/* ───────────── 13. Первые шаги ───────────── */
+.t_steps {
+  --bg: #e7f6ef; --bg2: #fff6d9; --surface: rgba(255, 255, 255, .75);
+  --ink: #2f3a36; --muted: #66756f; --accent: #3e9b7a; --accent2: #f2b84b; --line: rgba(47, 58, 54, .12);
+  --display: "Comfortaa", sans-serif; --body: "Comfortaa", system-ui, sans-serif; --hand: "Caveat", cursive;
+  --title-weight: 700; --title-size: clamp(34px, 10vw, 46px); --photo-radius: 50%;
+  font-size: 14.5px;
+}
+.footprints { display: block; width: 58%; margin: -20px 0 -16px auto; }
+.t_steps :global(.foot) { fill: var(--accent2); opacity: .85; }
+.live.t_steps :global(.foot) { animation: step .5s both; }
+.live.t_steps :global(.foot:nth-child(2)) { animation-delay: .25s; }
+.live.t_steps :global(.foot:nth-child(3)) { animation-delay: .5s; }
+.live.t_steps :global(.foot:nth-child(4)) { animation-delay: .75s; }
+.live.t_steps :global(.foot:nth-child(5)) { animation-delay: 1s; }
+.live.t_steps :global(.foot:nth-child(6)) { animation-delay: 1.25s; }
+@keyframes step { from { opacity: 0; } to { opacity: .85; } }
+.cord { width: 200px; height: 16px; }
+.t_steps :global(.cordDark) { fill: #2b2b2b; }
+.t_steps :global(.cordLight) { fill: #fafafa; stroke: #d5d5d5; stroke-width: .6; }
+.t_steps .kicker { font-family: var(--hand); font-style: normal; font-size: 26px; color: var(--accent); }
+.t_steps .message { font-family: var(--hand); font-style: normal; font-size: 25px; line-height: 1.3; }
+.t_steps .wait { font-family: var(--hand); font-size: 34px; color: var(--accent); }
+.t_steps .countCell { border-radius: 22px; border: 0; background: #fff; }
+.t_steps .countCell:nth-child(even) strong { color: var(--accent2); }
+.t_steps .countCell:nth-child(odd) strong { color: var(--accent); }
+.t_steps .photoMain { aspect-ratio: 1; width: 64%; box-shadow: 0 0 0 8px #fff, 0 0 0 10px var(--accent2); }
+
+/* Gallery previews stay still and light. */
+.still * { animation-play-state: paused !important; }
+.still .confetti i { animation-play-state: running !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .root *, .root *::before, .root *::after { animation: none !important; }
+}
