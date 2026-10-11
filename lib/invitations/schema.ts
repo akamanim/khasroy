@@ -171,6 +171,10 @@ export type Invitation = {
   photos: string[];
   rsvpEnabled: boolean;
   rsvpDeadline: string;
+  /** YouTube video id for background music, "" when none. */
+  musicVideoId: string;
+  /** Second of the video where the music starts. */
+  musicStart: number;
   notes: string;
 };
 
@@ -192,6 +196,8 @@ export function emptyInvitation(eventType: EventType = "wedding"): Invitation {
     photos: [],
     rsvpEnabled: true,
     rsvpDeadline: "",
+    musicVideoId: "",
+    musicStart: 0,
     notes: "",
   };
 }
@@ -242,6 +248,37 @@ function httpsUrl(value: unknown, allowedHosts?: RegExp): string | undefined {
 const MAP_HOSTS = /(^|\.)(google\.[a-z.]+|goo\.gl|2gis\.[a-z.]+|go\.2gis\.com|yandex\.[a-z.]+|maps\.apple\.com)$/iu;
 const PHOTO_HOSTS = /(^|\.)supabase\.co$/iu;
 
+const YT_ID = /^[A-Za-z0-9_-]{11}$/u;
+const YT_HOSTS = /^(www\.|m\.|music\.)?(youtube\.com|youtube-nocookie\.com)$/iu;
+
+function parseSeconds(value: string | null): number {
+  if (!value) return 0;
+  if (/^\d+$/u.test(value)) return Math.min(36_000, Number(value));
+  const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/u.exec(value);
+  if (!m) return 0;
+  return Math.min(36_000, (Number(m[1] || 0) * 3600) + (Number(m[2] || 0) * 60) + Number(m[3] || 0));
+}
+
+/** Extracts the video id and start second from any common YouTube link. */
+export function parseYouTube(raw: string): { id: string; start: number } | null {
+  let url: URL;
+  try {
+    url = new URL(raw.trim().startsWith("http") ? raw.trim() : `https://${raw.trim()}`);
+  } catch {
+    return null;
+  }
+  let id = "";
+  if (/^(www\.)?youtu\.be$/iu.test(url.hostname)) {
+    id = url.pathname.split("/")[1] ?? "";
+  } else if (YT_HOSTS.test(url.hostname)) {
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (url.pathname === "/watch") id = url.searchParams.get("v") ?? "";
+    else if (["shorts", "embed", "live", "v"].includes(parts[0] ?? "")) id = parts[1] ?? "";
+  }
+  if (!YT_ID.test(id)) return null;
+  return { id, start: parseSeconds(url.searchParams.get("t") ?? url.searchParams.get("start")) };
+}
+
 /**
  * Applies an untrusted patch (from the model or the client) to an invitation.
  * Every field is validated; anything malformed is ignored rather than stored.
@@ -269,6 +306,25 @@ export function applyInvitationPatch(base: Invitation, patch: unknown): Invitati
   next.dressCode = str(p.dressCode, LIMITS.short * 2) ?? next.dressCode;
   next.notes = str(p.notes, LIMITS.text) ?? next.notes;
   next.rsvpDeadline = isoDate(p.rsvpDeadline) ?? next.rsvpDeadline;
+  if (typeof p.musicUrl === "string") {
+    if (!p.musicUrl.trim()) {
+      next.musicVideoId = "";
+      next.musicStart = 0;
+    } else {
+      const music = parseYouTube(p.musicUrl);
+      if (music) {
+        next.musicVideoId = music.id;
+        next.musicStart = music.start;
+      }
+    }
+  }
+  // Stored rows carry the parsed fields directly.
+  if (typeof p.musicVideoId === "string" && (p.musicVideoId === "" || YT_ID.test(p.musicVideoId))) {
+    next.musicVideoId = p.musicVideoId;
+  }
+  if (typeof p.musicStart === "number" && Number.isFinite(p.musicStart)) {
+    next.musicStart = Math.max(0, Math.min(36_000, Math.floor(p.musicStart)));
+  }
   if (typeof p.rsvpEnabled === "boolean") next.rsvpEnabled = p.rsvpEnabled;
 
   if (Array.isArray(p.languages)) {

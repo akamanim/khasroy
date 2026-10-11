@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { BackgroundMusic, type MusicControl } from "./music";
 import styles from "./invitation.module.css";
 import {
   Balloons,
@@ -43,6 +44,7 @@ const UI: Record<Lang, Record<string, string>> = {
     days: "дней", hours: "часов", minutes: "минут", seconds: "секунд", rsvp: "Подтвердить участие",
     rsvpSoon: "Подтверждение откроется после публикации приглашения", deadline: "Просим ответить до",
     wait: "Ждём вас!", photos: "Фото",
+    open: "Открыть приглашение", invited: "Вы приглашены", musicOn: "Включить музыку", musicOff: "Выключить музыку",
   },
   ky: {
     program: "Программа", place: "Өтүүчү жер", map: "Картаны ачуу", calendar: "Календарга кошуу",
@@ -50,6 +52,7 @@ const UI: Record<Lang, Record<string, string>> = {
     days: "күн", hours: "саат", minutes: "мүнөт", seconds: "секунд", rsvp: "Катышууну тастыктоо",
     rsvpSoon: "Тастыктоо чакыруу жарыялангандан кийин ачылат", deadline: "Жообуңузду күтөбүз:",
     wait: "Сиздерди күтөбүз!", photos: "Сүрөттөр",
+    open: "Чакырууну ачуу", invited: "Сиз чакырылдыңыз", musicOn: "Музыканы күйгүзүү", musicOff: "Музыканы өчүрүү",
   },
   en: {
     program: "Programme", place: "Venue", map: "Open map", calendar: "Add to calendar",
@@ -57,6 +60,7 @@ const UI: Record<Lang, Record<string, string>> = {
     days: "days", hours: "hours", minutes: "minutes", seconds: "seconds", rsvp: "Confirm attendance",
     rsvpSoon: "RSVP opens once the invitation is published", deadline: "Please reply by",
     wait: "We look forward to seeing you!", photos: "Photos",
+    open: "Open invitation", invited: "You are invited", musicOn: "Play music", musicOff: "Mute music",
   },
 };
 
@@ -262,6 +266,17 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
   const calHref = calendarHref(invitation, title);
   const mono = initials(invitation);
 
+  const hasMusic = live && Boolean(invitation.musicVideoId);
+  const [opened, setOpened] = useState(!hasMusic);
+  const music = useRef<MusicControl | null>(null);
+  const onMusicControl = useCallback((control: MusicControl) => {
+    music.current = control;
+  }, []);
+  function openInvitation() {
+    music.current?.start();
+    setOpened(true);
+  }
+
   const classes = [
     styles.root,
     styles[`t_${id}`],
@@ -274,6 +289,27 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
       {live ? <link rel="stylesheet" href={fontsHref([id])} precedence="default" /> : null}
       {decor.backdrop ? <div className={styles.backdrop}>{decor.backdrop}</div> : null}
       {decor.frame ? <div className={styles.frameLayer}>{decor.frame}</div> : null}
+
+      {hasMusic ? (
+        <BackgroundMusic
+          videoId={invitation.musicVideoId}
+          start={invitation.musicStart}
+          onControl={onMusicControl}
+          labels={{ on: t.musicOn, off: t.musicOff }}
+        />
+      ) : null}
+      {hasMusic ? (
+        <div className={`${styles.cover} ${opened ? styles.coverOpen : ""}`} aria-hidden={opened}>
+          <div className={styles.coverInner}>
+            <p className={styles.kicker}>{t.invited}</p>
+            <Title inv={invitation} />
+            {invitation.date ? <p className={styles.date}><span>{formatDate(invitation, lang)}</span></p> : null}
+            <button type="button" className={styles.button} onClick={openInvitation} tabIndex={opened ? -1 : 0}>
+              {t.open}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {languages.length > 1 ? (
         <nav className={styles.langs} aria-label="Language">

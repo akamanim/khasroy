@@ -147,6 +147,23 @@
 .footMono { margin: 10px 0 0; font-family: var(--display); font-size: 22px; color: var(--accent); letter-spacing: .08em; }
 .footDate { margin: 2px 0 0; font-size: 12px; color: var(--muted); letter-spacing: .14em; }
 
+/* Opening cover: the guest's tap on it is what lets music start with sound. */
+.cover {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: linear-gradient(180deg, var(--bg), var(--bg2));
+  transition: opacity .7s ease, visibility .7s;
+}
+.coverInner { max-width: 420px; display: grid; justify-items: center; gap: 4px; }
+.cover .title { margin: 14px 0 12px; }
+.cover .button { margin-top: 26px; padding: 15px 30px; font-size: 15px; animation: breathe 2.4s ease-in-out infinite; }
+.coverOpen { opacity: 0; visibility: hidden; pointer-events: none; }
+@keyframes breathe { 50% { transform: scale(1.04); } }
+
 /* One orchestrated entrance on the live page only. */
 .live .hero > * { animation: rise .9s cubic-bezier(.2, .7, .2, 1) both; }
 .live .hero > *:nth-child(2) { animation-delay: .12s; }
