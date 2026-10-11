@@ -75,7 +75,7 @@ async function latestForSession(sessionHash: string) {
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 2 });
+  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 3 });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
@@ -130,6 +130,41 @@ Deno.serve(async (request) => {
         `khasroy_invitation_rsvps?invitation_slug=eq.${slug}&select=guest_name,answer,created_at&order=created_at.desc&limit=2000`,
       )).json();
       return json({ rsvps: rows });
+    }
+
+    if (action === "sales_lead") {
+      const session = hex64(body.sessionHash);
+      const clean = (v: unknown, max: number) =>
+        typeof v === "string" ? v.replace(/[\u0000-\u001f]/gu, " ").trim().slice(0, max) : "";
+      const phone = clean(body.phone, 40);
+      if (!session || phone.replace(/\D/gu, "").length < 7) return json({ error: "invalid_lead" }, 400);
+      const conversation = (Array.isArray(body.conversation) ? body.conversation.slice(-30) : [])
+        .map((t: unknown) => obj(t))
+        .filter((t: Record<string, unknown> | null): t is Record<string, unknown> =>
+          Boolean(t) && (t!.role === "user" || t!.role === "assistant") && typeof t!.content === "string")
+        .map((t: Record<string, unknown>) => ({ role: t.role, content: String(t.content).slice(0, 2000) }));
+      await db("khasroy_sales_leads?on_conflict=session_hash,phone", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        // Empty fields are left out so a later message never erases a name given earlier.
+        body: JSON.stringify(Object.fromEntries(Object.entries({
+          session_hash: session,
+          phone,
+          name: clean(body.name, 80),
+          request: clean(body.request, 300),
+          conversation,
+          updated_at: new Date().toISOString(),
+        }).filter(([, v]) => v !== ""))),
+      });
+      return json({ ok: true });
+    }
+
+    if (action === "sales_leads") {
+      const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 200);
+      const rows = await (await db(
+        `khasroy_sales_leads?select=id,name,phone,request,status,created_at,updated_at,conversation&order=updated_at.desc&limit=${limit}`,
+      )).json();
+      return json({ leads: rows });
     }
 
     const sessionHash = hex64(body.sessionHash);
