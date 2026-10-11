@@ -9,7 +9,8 @@ import {
 } from "@/lib/sales/catalog";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODELS = [process.env.KHASROY_SALES_MODEL || "openai/gpt-oss-120b", "llama-3.3-70b-versatile"];
+// /sales talks through Llama 3.3 70B (owner's choice, 2026-10-11); gpt-oss is the fallback.
+const DEFAULT_MODELS = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"];
 
 export type SalesTurn = { role: "user" | "assistant"; content: string };
 export type Lead = { name: string; phone: string; request: string };
@@ -30,6 +31,8 @@ export type AgentOptions = {
   temperature?: number;
   maxTokens?: number;
   reasoningEffort?: "low" | "medium" | "high";
+  /** Models to try in order; defaults to Llama first. */
+  models?: string[];
 };
 
 function systemPrompt(catalog: Catalog, products: Product[]): string {
@@ -157,7 +160,7 @@ export async function runSalesAgent(
   const problems: string[] = [];
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let parsed: ReturnType<typeof parse> = null;
-    for (const model of MODELS) {
+    for (const model of options.models ?? (process.env.KHASROY_SALES_MODEL ? [process.env.KHASROY_SALES_MODEL, ...DEFAULT_MODELS] : DEFAULT_MODELS)) {
       try {
         parsed = parse(await complete(apiKey, model, messages, options));
         if (parsed && typeof parsed.reply === "string" && parsed.reply.trim()) break;

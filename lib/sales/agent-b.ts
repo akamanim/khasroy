@@ -6,7 +6,14 @@ import { funnelPrompt, mergeData, nextStage, type FunnelData, type Stage } from 
 // short replies. His max_tokens=150 cannot be used literally: gpt-oss spends tokens on hidden
 // reasoning first, so 150 cuts the JSON off. We keep the short replies by instruction and run
 // the model with low reasoning effort instead.
-export const VARIANT_B = { historyLimit: 7, temperature: 0.6, maxTokens: 700, reasoningEffort: "low" as const };
+export const VARIANT_B = {
+  historyLimit: 7,
+  temperature: 0.6,
+  maxTokens: 700,
+  reasoningEffort: "low" as const,
+  // His example names openai/gpt-oss-120b; variant B keeps it so A (Llama) and B differ as proposed.
+  models: ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"],
+};
 
 function promptB(stage: Stage, data: FunnelData) {
   return (catalog: Catalog, products: Product[]) => {
