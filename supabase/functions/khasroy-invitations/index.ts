@@ -75,7 +75,7 @@ async function latestForSession(sessionHash: string) {
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 3 });
+  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 4 });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
@@ -165,6 +165,45 @@ Deno.serve(async (request) => {
         `khasroy_sales_leads?select=id,name,phone,request,status,created_at,updated_at,conversation&order=updated_at.desc&limit=${limit}`,
       )).json();
       return json({ leads: rows });
+    }
+
+    if (action === "sales_session_get" || action === "sales_session_save") {
+      const sid = typeof body.sessionId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(body.sessionId)
+        ? body.sessionId : "";
+      if (!sid) return json({ error: "invalid_session" }, 400);
+      const sessions = await (await db(`khasroy_sales_sessions?session_id=eq.${sid}&select=stage,data,message_count,last_message_at&limit=1`)).json();
+      const session = Array.isArray(sessions) && sessions[0] ? sessions[0] : null;
+
+      if (action === "sales_session_get") {
+        const limit = Math.min(Math.max(Number(body.limit) || 7, 1), 60);
+        const rows = session
+          ? await (await db(`khasroy_sales_messages?session_id=eq.${sid}&select=role,content&order=created_at.desc,id.desc&limit=${limit}`)).json()
+          : [];
+        return json({ session, messages: Array.isArray(rows) ? rows.reverse() : [] });
+      }
+
+      const user = typeof body.user === "string" ? body.user.slice(0, 4000) : "";
+      const assistant = typeof body.assistant === "string" ? body.assistant.slice(0, 4000) : "";
+      const stage = ["greeting", "qualification", "proposal", "closing", "finished"].includes(body.stage) ? body.stage : "greeting";
+      const data = obj(body.data) ?? {};
+      if (!user || !assistant) return json({ error: "invalid_messages" }, 400);
+      const count = Number(session?.message_count || 0);
+      if (count >= 400) return json({ error: "session_limit" }, 429);
+      const now = new Date().toISOString();
+      await db("khasroy_sales_sessions?on_conflict=session_id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ session_id: sid, stage, data, message_count: count + 2, last_message_at: now }),
+      });
+      await db("khasroy_sales_messages", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify([
+          { session_id: sid, role: "user", content: user },
+          { session_id: sid, role: "assistant", content: assistant },
+        ]),
+      });
+      return json({ ok: true });
     }
 
     const sessionHash = hex64(body.sessionHash);

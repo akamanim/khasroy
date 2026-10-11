@@ -43,4 +43,17 @@ assert.deepEqual(unsupportedNumbers("Пишите: 0700 123 456", [db]), [], "ph
 assert.deepEqual(unsupportedNumbers("Привезём за 350 сом", [db]), ["350"]);
 assert.deepEqual(unsupportedNumbers("Да, мой бюджет 7000 учтём", [db, "бюджет до 7000"]), [], "customer's own figures are fine");
 
+// Variant B funnel: stages only move forward (or back to qualification); finishing needs a contact.
+const { nextStage, mergeData, funnelPrompt } = await import("../lib/sales/funnel.ts");
+assert.equal(nextStage("greeting", "qualification", false), "qualification");
+assert.equal(nextStage("proposal", "greeting", false), "proposal", "no jumping back to greeting");
+assert.equal(nextStage("proposal", "qualification", false), "qualification", "customer changed their mind");
+assert.equal(nextStage("closing", "finished", false), "closing", "finished needs a real contact");
+assert.equal(nextStage("qualification", "nonsense", false), "qualification");
+assert.equal(nextStage("qualification", "proposal", true), "finished");
+const merged = mergeData({ budget: "5000" }, { budget: "", need: "подарок шефу", timeline: 3, junk: "x" });
+assert.deepEqual(merged, { budget: "5000", need: "подарок шефу", timeline: "3" });
+assert.match(funnelPrompt("qualification", { need: "подарок" }), /Какой бюджет/u);
+assert.doesNotMatch(funnelPrompt("qualification", { need: "подарок" }), /для кого/u, "known facts are not asked again");
+
 console.log("sales assistant: ok");

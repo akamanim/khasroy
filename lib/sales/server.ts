@@ -60,3 +60,23 @@ export async function listLeads(limit = 100): Promise<StoredLead[]> {
   const data = await call<{ leads?: StoredLead[] }>("sales_leads", { limit });
   return data.leads ?? [];
 }
+
+// ---------------------------------------------------------------- variant B sessions
+
+export type FunnelSession = {
+  stage: string;
+  data: Record<string, unknown>;
+  message_count: number;
+  last_message_at: string;
+};
+
+export async function loadFunnelSession(sessionId: string, limit = 7) {
+  return call<{ session: FunnelSession | null; messages: SalesTurn[] }>("sales_session_get", { sessionId, limit });
+}
+
+export async function saveFunnelTurn(
+  sessionId: string,
+  turn: { user: string; assistant: string; stage: string; data: Record<string, unknown> },
+) {
+  await call("sales_session_save", { sessionId, ...turn });
+}
