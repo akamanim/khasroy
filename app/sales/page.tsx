@@ -37,9 +37,6 @@ export default async function SalesPage() {
             <p><span className={styles.dot} />Консультант на связи{hours ? ` · ${hours}` : ""}</p>
           </div>
         </header>
-        {catalog?.source === "demo" && (
-          <p className={styles.notice}>Демо-данные: Google Таблица ещё не подключена, товары и магазин вымышленные.</p>
-        )}
         {catalog ? (
           <SalesChat shop={name} currency={currency} count={catalog.products.length} />
         ) : (

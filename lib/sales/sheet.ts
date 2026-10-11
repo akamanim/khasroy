@@ -1,5 +1,5 @@
 import { rowsToObjects, toCompany, toFaq, toProducts, type Catalog } from "@/lib/sales/catalog";
-import { DEMO_CATALOG } from "@/lib/sales/demo-catalog";
+import { BUILTIN_CATALOG } from "@/lib/sales/builtin-catalog";
 import { readWorkbook } from "@/lib/sales/xlsx";
 
 // The owner keeps the database in a Google Sheet with three tabs: «Товары», «Компания»,
@@ -22,10 +22,10 @@ function findTab(tabs: Map<string, string[][]>, name: string): string[][] {
   return [];
 }
 
-/** Loads the catalog; falls back to the labelled demo data only when no sheet is configured. */
+/** Loads the catalog; falls back to the built-in Graviti copy only when no sheet is configured. */
 export async function loadCatalog(): Promise<Catalog> {
   const sheetId = sheetIdFrom(process.env.KHASROY_SALES_SHEET);
-  if (!sheetId) return DEMO_CATALOG;
+  if (!sheetId) return BUILTIN_CATALOG;
   if (cache && cache.sheetId === sheetId && Date.now() - cache.at < CACHE_MS) return cache.catalog;
 
   const response = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`, {
