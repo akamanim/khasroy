@@ -8,6 +8,7 @@ on:
       - "app/studio-home.module.css"
       - "app/owner/**"
       - "app/i/**"
+      - "app/demo/**"
       - "app/api/invite/**"
       - "lib/invitations/**"
       - "components/invitations/**"

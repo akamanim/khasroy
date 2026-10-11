@@ -154,18 +154,36 @@
 .templates { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .template {
   display: grid;
+  gap: 6px;
+  justify-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.templatePick {
+  display: grid;
   gap: 8px;
+  width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: inherit;
   font: inherit;
-  font-size: 12px;
   cursor: pointer;
   text-align: center;
 }
 .template .phone { outline: 1px solid var(--line); transition: outline-color .2s, transform .2s; }
-.template:hover .phone { transform: translateY(-2px); }
+.templatePick:hover .phone { transform: translateY(-2px); }
+.templateDemo {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 11px;
+  text-decoration: none;
+  transition: border-color .2s, background .2s;
+}
+.templateDemo:hover { border-color: var(--accent); }
 .templateOn { color: var(--ink); }
 .templateOn .phone { outline: 2px solid var(--accent); }
 

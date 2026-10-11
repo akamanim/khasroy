@@ -10,6 +10,7 @@ import {
   missingFields,
   sampleInvitation,
   parseYouTube,
+  demoInvitation,
 } from "../lib/invitations/schema.ts";
 
 const base = emptyInvitation("wedding");
@@ -120,5 +121,17 @@ assert.equal(applyInvitationPatch(emptyInvitation(), withMusic).musicVideoId, ID
 // Dress-code colours.
 const colors = applyInvitationPatch(base, { dressColors: ["#1D1D1F", "#1d1d1f", "red", "#abc", "#9b2335", 5] });
 assert.deepEqual(colors.dressColors, ["#1d1d1f", "#9b2335"], "only #rrggbb, deduplicated, lower-case");
+
+// Demo pages: every template renders a complete bilingual example.
+for (const id of TEMPLATE_IDS) {
+  for (const event of TEMPLATE_META[id].events) {
+    const demo = demoInvitation(id, event);
+    assert.equal(demo.templateId, id);
+    assert.equal(demo.eventType, event);
+    assert.ok(demo.message.ru && demo.message.ky, `${id}/${event} demo has ru and ky text`);
+    assert.equal(demo.musicVideoId, "", "demo has no music unless a link is configured");
+  }
+}
+assert.equal(demoInvitation("golden", "wedding", `https://youtu.be/${ID}`).musicVideoId, ID);
 
 console.log("invitation schema: ok");

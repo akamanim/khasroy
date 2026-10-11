@@ -86,9 +86,23 @@ export default function Home() {
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("template");
     fetch("/api/invite/session")
       .then((r) => r.json() as Promise<StudioState>)
-      .then((data) => setState((s) => ({ ...s, ...data, history: data.history ?? [] })))
+      .then(async (data) => {
+        setState((s) => ({ ...s, ...data, history: data.history ?? [] }));
+        // Arriving from a demo page's "Создать такое" link preselects that template.
+        if (!wanted || !(TEMPLATE_IDS as readonly string[]).includes(wanted) || (data.status && data.status !== "draft")) return;
+        window.history.replaceState(null, "", window.location.pathname);
+        const response = await fetch("/api/invite/template", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ templateId: wanted }),
+        });
+        if (!response.ok) return;
+        const next = (await response.json()) as StudioState;
+        setState((s) => ({ ...s, ...next, history: next.history ?? s.history }));
+      })
       .catch(() => undefined);
   }, []);
 
@@ -276,17 +290,21 @@ export default function Home() {
           {templatesFor(eventType).map((id) => {
             const active = state.invitation?.templateId === id;
             return (
-              <button
-                key={id}
-                type="button"
-                className={`${styles.template} ${active ? styles.templateOn : ""}`}
-                onClick={() => chooseTemplate(id)}
-                aria-pressed={active}
-                title={TEMPLATE_LABELS[id].note}
-              >
-                <Phone invitation={sampleInvitation(id, eventType)} />
-                <span>{TEMPLATE_LABELS[id].name}</span>
-              </button>
+              <div key={id} className={`${styles.template} ${active ? styles.templateOn : ""}`}>
+                <button
+                  type="button"
+                  className={styles.templatePick}
+                  onClick={() => chooseTemplate(id)}
+                  aria-pressed={active}
+                  title={TEMPLATE_LABELS[id].note}
+                >
+                  <Phone invitation={sampleInvitation(id, eventType)} />
+                  <span>{TEMPLATE_LABELS[id].name}</span>
+                </button>
+                <a className={styles.templateDemo} href={`/demo/${id}?event=${eventType}`} target="_blank" rel="noopener noreferrer">
+                  Посмотреть пример
+                </a>
+              </div>
             );
           })}
         </div>
