@@ -234,3 +234,14 @@ export async function listWishes(slug: string): Promise<Wish[]> {
 export async function hideWish(slug: string, token: string, id: string, hidden: boolean): Promise<void> {
   await call("wish_hide", { slug, token, id, hidden });
 }
+
+// ---------------------------------------------------------------- owner console
+
+export type DashboardStats = {
+  invitations: { orders7: number; ordersPrev: number; started7: number; startedPrev: number; waiting: number; live: number; rsvp7: number; rsvpPrev: number; wishes7: number };
+  sales: { leads7: number; leadsPrev: number; chats7: number; chatsPrev: number };
+};
+
+export async function dashboardStats(): Promise<DashboardStats> {
+  return call<DashboardStats>("dashboard", {});
+}

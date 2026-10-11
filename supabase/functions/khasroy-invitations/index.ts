@@ -93,7 +93,7 @@ async function latestForSession(sessionHash: string) {
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 6 });
+  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 7 });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
@@ -120,6 +120,38 @@ Deno.serve(async (request) => {
         `khasroy_invitations?status=in.(${statuses.join(",")})&select=${ROW_PRIVATE}&order=updated_at.desc&limit=${limit}`,
       )).json();
       return json({ invitations: rows });
+    }
+
+    if (action === "dashboard") {
+      // Counts for the owner console. HEAD + count=exact returns only the number, no rows.
+      const count = async (path: string, column = "id") => {
+        const res = await db(`${path}${path.includes("?") ? "&" : "?"}select=${column}`, { method: "HEAD", headers: { Prefer: "count=exact" } });
+        return Number((res.headers.get("content-range") || "").split("/")[1] || 0);
+      };
+      const now = Date.now();
+      const iso = (ms: number) => new Date(now - ms).toISOString();
+      const day = 86_400_000;
+      const [d7, d14, d1] = [iso(7 * day), iso(14 * day), iso(day)];
+      const ordered = "status=in.(submitted,approved,published)";
+      const [orders7, ordersPrev, started7, startedPrev, waiting, live, rsvp7, rsvpPrev, wishes7, leads7, leadsPrev, chats7, chatsPrev] = await Promise.all([
+        count(`khasroy_invitations?${ordered}&created_at=gte.${d7}`),
+        count(`khasroy_invitations?${ordered}&created_at=gte.${d14}&created_at=lt.${d7}`),
+        count(`khasroy_invitations?status=eq.draft&message_count=gt.0&created_at=gte.${d7}`),
+        count(`khasroy_invitations?status=eq.draft&message_count=gt.0&created_at=gte.${d14}&created_at=lt.${d7}`),
+        count(`khasroy_invitations?status=eq.submitted&updated_at=lt.${d1}`),
+        count(`khasroy_invitations?status=eq.published`),
+        count(`khasroy_invitation_rsvps?created_at=gte.${d7}`),
+        count(`khasroy_invitation_rsvps?created_at=gte.${d14}&created_at=lt.${d7}`),
+        count(`khasroy_invitation_wishes?created_at=gte.${d7}`),
+        count(`khasroy_sales_leads?created_at=gte.${d7}`),
+        count(`khasroy_sales_leads?created_at=gte.${d14}&created_at=lt.${d7}`),
+        count(`khasroy_sales_sessions?created_at=gte.${d7}`, "session_id"),
+        count(`khasroy_sales_sessions?created_at=gte.${d14}&created_at=lt.${d7}`, "session_id"),
+      ]);
+      return json({
+        invitations: { orders7, ordersPrev, started7, startedPrev, waiting, live, rsvp7, rsvpPrev, wishes7 },
+        sales: { leads7, leadsPrev, chats7, chatsPrev },
+      });
     }
 
     if (action === "set_status") {
