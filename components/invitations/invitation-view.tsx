@@ -16,6 +16,7 @@ import {
   HornDivider,
   MoonConstellation,
   Mountains,
+  Particles,
   NeonHorizon,
   PeonyCluster,
   Postmark,
@@ -137,12 +138,12 @@ function Countdown({ target, lang, live }: { target: Date; lang: Lang; live: boo
     [Math.floor((diff % 60_000) / 1000), t.seconds],
   ];
   return (
-    <section className={styles.countdown} aria-label={t.left}>
+    <section className={styles.countdown} aria-label={t.left} data-reveal="">
       <p className={styles.countLabel}>{t.left}</p>
       <div className={styles.countRow}>
         {cells.map(([value, label]) => (
           <div key={label} className={styles.countCell}>
-            <strong>{String(value).padStart(2, "0")}</strong>
+            <strong key={value} className={styles.tick}>{String(value).padStart(2, "0")}</strong>
             <span>{label}</span>
           </div>
         ))}
@@ -166,12 +167,14 @@ function decorFor(id: TemplateId, inv: Invitation): Decor {
       return { divider: <span className={styles.dot} />, monogram: true };
     case "floral":
       return {
+        backdrop: <Particles className={styles.petals} count={14} />,
         heroTop: <PeonyCluster className={styles.peonyTop} />,
         heroBottom: <PeonyCluster className={styles.peonyBottom} flip />,
         divider: <PeonyCluster className={styles.peonyDivider} />,
       };
     case "ornament":
       return {
+        backdrop: <Particles className={styles.sparks} count={22} />,
         frame: <HornCorners className={styles.frame} />,
         heroTop: <HornBand className={styles.band} />,
         divider: <HornDivider className={styles.hornDivider} />,
@@ -186,12 +189,18 @@ function decorFor(id: TemplateId, inv: Invitation): Decor {
       return { heroTop: <Tunduk className={styles.tunduk} />, divider: <Tunduk className={styles.tundukSmall} /> };
     case "celestial":
       return {
-        backdrop: <StarField className={styles.stars} />,
+        backdrop: (
+          <>
+            <StarField className={styles.stars} />
+            <Particles className={styles.shooting} count={3} />
+          </>
+        ),
         heroTop: <MoonConstellation className={styles.moon} />,
         divider: <span className={styles.sparkle}>✦</span>,
       };
     case "deco":
       return {
+        backdrop: <Particles className={styles.glints} count={12} />,
         frame: <DecoCorners className={styles.frame} />,
         heroTop: <Sunburst className={styles.sunburst} />,
         divider: <DecoDivider className={styles.decoDivider} />,
@@ -205,12 +214,25 @@ function decorFor(id: TemplateId, inv: Invitation): Decor {
       };
     case "reveal":
       return {
-        backdrop: <Clouds className={styles.clouds} />,
+        backdrop: (
+          <>
+            <Clouds className={styles.clouds} />
+            <Particles className={styles.hearts} count={12} />
+          </>
+        ),
         heroTop: <Balloons className={styles.balloons} colors={REVEAL} />,
         divider: <span className={styles.question}>?</span>,
       };
     case "tianshan":
-      return { heroBottom: <Mountains className={styles.mountains} />, divider: <span className={styles.peak} /> };
+      return {
+        heroBottom: (
+          <div className={styles.range}>
+            <Mountains className={styles.mountains} />
+            <span className={styles.mist} />
+          </div>
+        ),
+        divider: <span className={styles.peak} />,
+      };
     case "neon":
       return { backdrop: <NeonHorizon className={styles.horizon} />, divider: <span className={styles.neonLine} /> };
     case "postcard":
@@ -221,7 +243,12 @@ function decorFor(id: TemplateId, inv: Invitation): Decor {
       };
     case "steps":
       return {
-        backdrop: <Clouds className={styles.clouds} />,
+        backdrop: (
+          <>
+            <Clouds className={styles.clouds} />
+            <Particles className={styles.bubbles} count={10} />
+          </>
+        ),
         heroTop: <Footprints className={styles.footprints} />,
         divider: <Cord className={styles.cord} />,
       };
@@ -277,6 +304,30 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
     setOpened(true);
   }
 
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const root = card.current;
+    if (!live || !root) return;
+    const items = Array.from(root.querySelectorAll<HTMLElement>("[data-reveal]"));
+    if (!("IntersectionObserver" in window)) {
+      items.forEach((el) => el.setAttribute("data-shown", ""));
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.setAttribute("data-shown", "");
+            io.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.15, rootMargin: "0px 0px -6% 0px" },
+    );
+    items.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [live, invitation]);
+
   const classes = [
     styles.root,
     styles[`t_${id}`],
@@ -285,7 +336,7 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
   ].join(" ");
 
   return (
-    <article className={classes} lang={lang}>
+    <article ref={card} className={classes} lang={lang}>
       {live ? <link rel="stylesheet" href={fontsHref([id])} precedence="default" /> : null}
       {decor.backdrop ? <div className={styles.backdrop}>{decor.backdrop}</div> : null}
       {decor.frame ? <div className={styles.frameLayer}>{decor.frame}</div> : null}
@@ -342,20 +393,20 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
 
       <div className={styles.body}>
         {invitation.photos[0] ? (
-          <figure className={styles.photoMain}>
+          <figure className={styles.photoMain} data-reveal="">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={invitation.photos[0]} alt="" loading={live ? "eager" : "lazy"} />
           </figure>
         ) : null}
 
-        {message ? <p className={styles.message}>{message}</p> : null}
+        {message ? <p className={styles.message} data-reveal="">{message}</p> : null}
 
-        <div className={styles.divider}>{decor.divider}</div>
+        <div className={styles.divider} data-reveal="">{decor.divider}</div>
 
         {target && target.getTime() > Date.now() - 86_400_000 ? <Countdown target={target} lang={lang} live={live} /> : null}
 
         {invitation.program.length ? (
-          <section className={styles.section}>
+          <section className={styles.section} data-reveal="">
             <h2>{t.program}</h2>
             <ol className={styles.timeline}>
               {invitation.program.map((item, i) => (
@@ -369,7 +420,7 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
         ) : null}
 
         {invitation.venue.name || invitation.venue.address ? (
-          <section className={`${styles.section} ${styles.venue}`}>
+          <section className={`${styles.section} ${styles.venue}`} data-reveal="">
             <h2>{t.place}</h2>
             {invitation.venue.name ? <p className={styles.venueName}>{invitation.venue.name}</p> : null}
             {invitation.venue.address ? <p className={styles.muted}>{invitation.venue.address}</p> : null}
@@ -385,7 +436,7 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
         ) : null}
 
         {invitation.photos.length > 1 ? (
-          <section className={styles.section}>
+          <section className={styles.section} data-reveal="">
             <h2>{t.photos}</h2>
             <div className={styles.gallery}>
               {invitation.photos.slice(1).map((src) => (
@@ -397,14 +448,14 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
         ) : null}
 
         {invitation.dressCode ? (
-          <section className={styles.section}>
+          <section className={styles.section} data-reveal="">
             <h2>{t.dress}</h2>
             <p className={styles.muted}>{invitation.dressCode}</p>
           </section>
         ) : null}
 
         {invitation.rsvpEnabled ? (
-          <section className={`${styles.section} ${styles.rsvp}`}>
+          <section className={`${styles.section} ${styles.rsvp}`} data-reveal="">
             <h2>{t.rsvp}</h2>
             {invitation.rsvpDeadline ? (
               <p className={styles.muted}>
@@ -417,7 +468,7 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
         ) : null}
 
         {invitation.contacts.length ? (
-          <section className={styles.section}>
+          <section className={styles.section} data-reveal="">
             <h2>{t.contacts}</h2>
             <ul className={styles.contacts}>
               {invitation.contacts.map((c) => (
@@ -431,7 +482,7 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
         ) : null}
       </div>
 
-      <footer className={styles.footer}>
+      <footer className={styles.footer} data-reveal="">
         <div className={styles.divider}>{decor.divider}</div>
         <p className={styles.wait}>{t.wait}</p>
         {mono.length ? <p className={styles.footMono}>{mono.join(" & ")}</p> : null}
