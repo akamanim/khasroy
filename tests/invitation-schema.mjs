@@ -9,6 +9,7 @@ import {
   emptyInvitation,
   missingFields,
   sampleInvitation,
+  parseYouTube,
 } from "../lib/invitations/schema.ts";
 
 const base = emptyInvitation("wedding");
@@ -91,5 +92,29 @@ for (const e of EVENT_TYPES) {
   assert.equal(order.length, TEMPLATE_IDS.length, "gallery lists every template");
   assert.ok(TEMPLATE_META[order[0]].events.includes(e), `first template fits ${e}`);
 }
+
+// YouTube links for background music.
+const ID = "dQw4w9WgXcQ";
+for (const link of [
+  `https://www.youtube.com/watch?v=${ID}`,
+  `https://youtu.be/${ID}`,
+  `youtube.com/watch?v=${ID}&list=RD`,
+  `https://m.youtube.com/watch?v=${ID}`,
+  `https://music.youtube.com/watch?v=${ID}&si=abc`,
+  `https://www.youtube.com/shorts/${ID}`,
+  `https://www.youtube.com/embed/${ID}`,
+]) assert.equal(parseYouTube(link)?.id, ID, link);
+assert.equal(parseYouTube(`https://youtu.be/${ID}?t=95`)?.start, 95);
+assert.equal(parseYouTube(`https://www.youtube.com/watch?v=${ID}&t=1m30s`)?.start, 90);
+assert.equal(parseYouTube("https://vimeo.com/12345"), null);
+assert.equal(parseYouTube("https://youtube.com.evil.com/watch?v=dQw4w9WgXcQ"), null);
+assert.equal(parseYouTube("https://www.youtube.com/watch?v=short"), null);
+const withMusic = applyInvitationPatch(base, { musicUrl: `https://youtu.be/${ID}?t=30` });
+assert.equal(withMusic.musicVideoId, ID);
+assert.equal(withMusic.musicStart, 30);
+assert.equal(applyInvitationPatch(withMusic, { musicUrl: "https://example.com/song.mp3" }).musicVideoId, ID, "bad link keeps music");
+assert.equal(applyInvitationPatch(withMusic, { musicUrl: "" }).musicVideoId, "", "empty link removes music");
+assert.equal(applyInvitationPatch(base, { musicVideoId: "<script>" }).musicVideoId, "", "stored id is validated");
+assert.equal(applyInvitationPatch(emptyInvitation(), withMusic).musicVideoId, ID, "stored row round-trips");
 
 console.log("invitation schema: ok");
