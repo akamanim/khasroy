@@ -464,3 +464,31 @@ export function Particles({ className, count }: { className?: string; count: num
     </div>
   );
 }
+
+/* Evening steppe: low sun, rolling hills, yurts with smoke from the tunduk. */
+function Yurt({ x, y, s }: { x: number; y: number; s: number }) {
+  return (
+    <g transform={`translate(${x} ${y}) scale(${s})`} className="yurt">
+      <path d="M-30 0 V-14 Q-30 -20 -24 -22 L0 -34 L24 -22 Q30 -20 30 -14 V0 Z" className="yurtBody" />
+      <path d="M-24 -22 L0 -34 L24 -22" className="yurtTrim" />
+      <path d="M-30 -11 H30" className="yurtBand" />
+      <rect x="-5" y="-11" width="10" height="11" className="yurtDoor" />
+      <path d="M0 -36 C -3 -46 4 -52 0 -62 C -4 -72 3 -78 0 -88" className="smoke" />
+    </g>
+  );
+}
+
+export function SteppeSunset({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 400 260" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+      <circle cx="270" cy="150" r="54" className="steppeSun" />
+      <circle cx="270" cy="150" r="80" className="steppeSunHalo" />
+      <path d="M70 70 q6 -6 12 0 q6 -6 12 0 M104 56 q5 -5 10 0 q5 -5 10 0 M330 60 q5 -5 10 0 q5 -5 10 0" className="steppeBird" />
+      <path d="M0 176 C 70 150, 130 168, 200 158 C 270 148, 330 170, 400 156 V260 H0 Z" className="hill3" />
+      <path d="M0 198 C 80 178, 150 196, 230 186 C 300 178, 350 196, 400 188 V260 H0 Z" className="hill2" />
+      <Yurt x={118} y={196} s={0.9} />
+      <Yurt x={162} y={200} s={0.62} />
+      <path d="M0 222 C 90 208, 170 228, 250 216 C 320 206, 360 224, 400 216 V260 H0 Z" className="hill1" />
+    </svg>
+  );
+}

@@ -514,6 +514,55 @@
 .t_steps .photoMain { aspect-ratio: 1; width: 64%; box-shadow: 0 0 0 8px #fff, 0 0 0 10px var(--accent2); }
 
 
+/* ───────────── Calendar and hosts (all templates) ───────────── */
+.calMonth { margin: -6px 0 12px; color: var(--muted); font-size: 14px; letter-spacing: .04em; }
+.calGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; max-width: 300px; margin: 0 auto; font-size: 13px; font-variant-numeric: tabular-nums; }
+.calGrid span { display: grid; place-items: center; aspect-ratio: 1; border-radius: 50%; }
+.calHead { font-size: 11px; color: var(--muted); aspect-ratio: auto !important; padding-bottom: 4px; }
+.calDay { position: relative; background: var(--accent); color: var(--bg); font-weight: 700; }
+.calDay::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid var(--accent); animation: calPulse 2.4s ease-out infinite; }
+@keyframes calPulse { from { transform: scale(.85); opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
+.inviters p { margin: 0 auto; max-width: 30ch; font-family: var(--display); font-size: 21px; line-height: 1.4; }
+
+/* ───────────── 14. Кечки талаа ───────────── */
+.t_steppe {
+  --bg: #f7e6d3; --bg2: #f3dcc6; --surface: rgba(255, 250, 244, .6);
+  --ink: #3b2234; --muted: #77586a; --accent: #a8456a; --accent2: #e9a15b; --line: rgba(59, 34, 52, .15);
+  --display: "Kurale", Georgia, serif; --body: "Manrope", system-ui, sans-serif;
+  --title-size: clamp(42px, 12vw, 58px); --photo-radius: 999px 999px 20px 20px;
+  background: linear-gradient(180deg, #4b3566 0, #8e5a7e 170px, #e48a6c 320px, #f6c89a 420px, #f7e6d3 520px, #f7e6d3 100%);
+}
+.steppe { position: absolute; top: 0; left: 0; width: 100%; height: 540px; }
+.t_steppe .hero { min-height: 470px; color: #fff6ea; }
+.t_steppe .hero .kicker { color: #ffd9a0; }
+.t_steppe .hero .date { color: rgba(255, 246, 234, .85); }
+.t_steppe .hero .time { color: #fff6ea; }
+.t_steppe .amp { color: #ffd9a0; }
+.t_steppe .title { text-shadow: 0 2px 18px rgba(75, 53, 102, .45); }
+.t_steppe :global(.steppeSun) { fill: #ffd9a0; }
+.t_steppe :global(.steppeSunHalo) { fill: #ffd9a0; opacity: .22; }
+.t_steppe :global(.hill3) { fill: #b9787c; }
+.t_steppe :global(.hill2) { fill: #8f5466; }
+.t_steppe :global(.hill1) { fill: #f7e6d3; }
+.t_steppe :global(.yurtBody) { fill: #f4e2c8; }
+.t_steppe :global(.yurtTrim) { fill: none; stroke: #8f3b3b; stroke-width: 3; }
+.t_steppe :global(.yurtBand) { stroke: #8f3b3b; stroke-width: 2.4; }
+.t_steppe :global(.yurtDoor) { fill: #8f3b3b; }
+.t_steppe :global(.smoke) { fill: none; stroke: #fff6ea; stroke-width: 2.2; stroke-linecap: round; opacity: .5; stroke-dasharray: 8 10; }
+.t_steppe :global(.steppeBird) { fill: none; stroke: #4b3566; stroke-width: 1.4; stroke-linecap: round; }
+.t_steppe .countCell { background: #fffaf4; }
+.t_steppe .button { background: var(--accent); color: #fff6ea; }
+.sunDot { width: 34px; height: 17px; border-radius: 34px 34px 0 0; background: var(--accent2); box-shadow: 0 6px 0 -4px var(--accent); }
+/* Steppe motion: the sun sinks slowly, smoke rises, birds cross the sky. */
+.t_steppe :global(.steppeSun), .t_steppe :global(.steppeSunHalo) { transform-box: fill-box; transform-origin: center; animation: sunset 26s ease-in-out infinite alternate; }
+.t_steppe :global(.steppeSunHalo) { animation-name: sunsetHalo; }
+@keyframes sunset { from { transform: translateY(-6px); } to { transform: translateY(14px); } }
+@keyframes sunsetHalo { from { transform: translateY(-6px) scale(1); opacity: .28; } to { transform: translateY(14px) scale(1.08); opacity: .14; } }
+.t_steppe :global(.smoke) { animation: smokeRise 3.6s linear infinite; }
+@keyframes smokeRise { from { stroke-dashoffset: 0; opacity: .55; } to { stroke-dashoffset: 36; opacity: .3; } }
+.t_steppe :global(.steppeBird) { animation: fly 24s linear infinite; }
+.t_steppe { --reveal-from: translateY(26px); --reveal-filter: blur(3px); }
+
 /* ───────────── Motion ───────────── */
 
 /* Sections arrive as the guest scrolls (live page only). */

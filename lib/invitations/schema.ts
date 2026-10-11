@@ -25,6 +25,7 @@ export const TEMPLATE_IDS = [
   "neon",
   "postcard",
   "steps",
+  "steppe",
 ] as const;
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
 
@@ -133,6 +134,12 @@ export const TEMPLATE_META: Record<TemplateId, TemplateMeta> = {
     events: ["tushoo_toi", "birthday", "gender_party"],
     fonts: ["Comfortaa:wght@400;700", "Caveat:wght@500;700"],
   },
+  steppe: {
+    name: "Кечки талаа", note: "Закат над степью, юрты с дымком и тёплое небо",
+    paletteable: false, defaultPalette: "gold", pageBg: "#3b2234",
+    events: ["wedding", "kyz_uzatuu", "tushoo_toi", "birthday"],
+    fonts: ["Kurale", "Manrope:wght@400;600"],
+  },
 };
 
 export const TEMPLATE_LABELS: Record<TemplateId, { name: string; note: string }> = Object.fromEntries(
@@ -167,6 +174,8 @@ export type Invitation = {
   message: Partial<Record<Lang, string>>;
   program: ProgramItem[];
   dressCode: string;
+  /** Who hosts the celebration, e.g. the parents (той ээлери). */
+  inviters: string;
   contacts: Contact[];
   photos: string[];
   rsvpEnabled: boolean;
@@ -192,6 +201,7 @@ export function emptyInvitation(eventType: EventType = "wedding"): Invitation {
     message: {},
     program: [],
     dressCode: "",
+    inviters: "",
     contacts: [],
     photos: [],
     rsvpEnabled: true,
@@ -304,6 +314,7 @@ export function applyInvitationPatch(base: Invitation, patch: unknown): Invitati
   next.date = isoDate(p.date) ?? next.date;
   next.time = clock(p.time) ?? next.time;
   next.dressCode = str(p.dressCode, LIMITS.short * 2) ?? next.dressCode;
+  next.inviters = str(p.inviters, LIMITS.short * 2) ?? next.inviters;
   next.notes = str(p.notes, LIMITS.text) ?? next.notes;
   next.rsvpDeadline = isoDate(p.rsvpDeadline) ?? next.rsvpDeadline;
   if (typeof p.musicUrl === "string") {
@@ -436,5 +447,6 @@ export function sampleInvitation(templateId: TemplateId, eventType: EventType = 
     time: "17:00",
     venue: { name: "Ресторан «Ала-Тоо»", address: "Бишкек, проспект Чуй", mapUrl: "" },
     dressCode: "Нарядно, в светлых тонах",
+    inviters: "Родители: Асан и Айгуль",
   };
 }
