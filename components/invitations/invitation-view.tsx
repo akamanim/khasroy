@@ -24,6 +24,7 @@ import {
   ShyrdakBorder,
   ShyrdakMedallion,
   Stamp,
+  SteppeSunset,
   StarField,
   Sunburst,
   Tunduk,
@@ -45,6 +46,7 @@ const UI: Record<Lang, Record<string, string>> = {
     days: "дней", hours: "часов", minutes: "минут", seconds: "секунд", rsvp: "Подтвердить участие",
     rsvpSoon: "Подтверждение откроется после публикации приглашения", deadline: "Просим ответить до",
     wait: "Ждём вас!", photos: "Фото",
+    hosts: "Хозяева торжества", calendar_title: "Сохраните дату",
     open: "Открыть приглашение", invited: "Вы приглашены", musicOn: "Включить музыку", musicOff: "Выключить музыку",
   },
   ky: {
@@ -53,6 +55,7 @@ const UI: Record<Lang, Record<string, string>> = {
     days: "күн", hours: "саат", minutes: "мүнөт", seconds: "секунд", rsvp: "Катышууну тастыктоо",
     rsvpSoon: "Тастыктоо чакыруу жарыялангандан кийин ачылат", deadline: "Жообуңузду күтөбүз:",
     wait: "Сиздерди күтөбүз!", photos: "Сүрөттөр",
+    hosts: "Той ээлери", calendar_title: "Датаны белгилеп алыңыз",
     open: "Чакырууну ачуу", invited: "Сиз чакырылдыңыз", musicOn: "Музыканы күйгүзүү", musicOff: "Музыканы өчүрүү",
   },
   en: {
@@ -61,6 +64,7 @@ const UI: Record<Lang, Record<string, string>> = {
     days: "days", hours: "hours", minutes: "minutes", seconds: "seconds", rsvp: "Confirm attendance",
     rsvpSoon: "RSVP opens once the invitation is published", deadline: "Please reply by",
     wait: "We look forward to seeing you!", photos: "Photos",
+    hosts: "Hosted by", calendar_title: "Save the date",
     open: "Open invitation", invited: "You are invited", musicOn: "Play music", musicOff: "Mute music",
   },
 };
@@ -118,6 +122,44 @@ function calendarHref(inv: Invitation, title: string) {
     ctz: "Asia/Bishkek",
   });
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+const WEEKDAYS: Record<Lang, string[]> = {
+  ru: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"],
+  ky: ["Дш", "Шш", "Шр", "Бш", "Жм", "Иш", "Жк"],
+  en: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
+};
+const MONTHS: Record<Lang, string[]> = {
+  ru: ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"],
+  ky: ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"],
+  en: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+};
+
+function MonthCalendar({ date, lang, title }: { date: string; lang: Lang; title: string }) {
+  const [y, m, d] = date.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  const first = new Date(Date.UTC(y, m - 1, 1));
+  const offset = (first.getUTCDay() + 6) % 7;
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const cells: Array<number | null> = [...Array(offset).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
+  return (
+    <section className={`${styles.section} ${styles.calendar}`} data-reveal="">
+      <h2>{title}</h2>
+      <p className={styles.calMonth}>{MONTHS[lang][m - 1]} {y}</p>
+      <div className={styles.calGrid} role="grid">
+        {WEEKDAYS[lang].map((w) => (
+          <span key={w} className={styles.calHead}>{w}</span>
+        ))}
+        {cells.map((n, i) =>
+          n === null ? <span key={`e${i}`} /> : (
+            <span key={n} className={n === d ? styles.calDay : undefined} aria-current={n === d ? "date" : undefined}>
+              {n}
+            </span>
+          ),
+        )}
+      </div>
+    </section>
+  );
 }
 
 function Countdown({ target, lang, live }: { target: Date; lang: Lang; live: boolean }) {
@@ -252,6 +294,11 @@ function decorFor(id: TemplateId, inv: Invitation): Decor {
         ),
         heroTop: <Footprints className={styles.footprints} />,
         divider: <Cord className={styles.cord} />,
+      };
+    case "steppe":
+      return {
+        backdrop: <SteppeSunset className={styles.steppe} />,
+        divider: <span className={styles.sunDot} />,
       };
     default:
       return { divider: <span className={styles.dot} /> };
@@ -402,9 +449,18 @@ export function InvitationView({ invitation, live = true }: { invitation: Invita
 
         {message ? <p className={styles.message} data-reveal="">{message}</p> : null}
 
+        {invitation.inviters ? (
+          <section className={`${styles.section} ${styles.inviters}`} data-reveal="">
+            <h2>{t.hosts}</h2>
+            <p>{invitation.inviters}</p>
+          </section>
+        ) : null}
+
         <div className={styles.divider} data-reveal="">{decor.divider}</div>
 
         {target && target.getTime() > Date.now() - 86_400_000 ? <Countdown target={target} lang={lang} live={live} /> : null}
+
+        {invitation.date ? <MonthCalendar date={invitation.date} lang={lang} title={t.calendar_title} /> : null}
 
         {invitation.program.length ? (
           <section className={styles.section} data-reveal="">
