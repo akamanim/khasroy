@@ -1,9 +1,11 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { ArrowUp, Plus, Activity, Sparkles, ShieldCheck } from "lucide-react";
-import { Core, type CoreEvolution } from "@/components/khasroy/core";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, PanelLeft, PanelRight, Plus, ShieldCheck } from "lucide-react";
+import { Core } from "@/components/khasroy/core";
 import { MarkdownMessage } from "@/components/khasroy/markdown-message";
+import { LeftBoard, RightBoard, useOwnerDashboard } from "./console-boards";
+import styles from "./console.module.css";
 import {
   authenticateOwner,
   chat,
@@ -16,59 +18,7 @@ const welcome: Message = {
   id: "welcome",
   role: "assistant",
   content:
-    "Все системы готовы. Я Хасрой — ваш универсальный AI-союзник. Мои подтверждённые способности хранятся в памяти и напрямую меняют ядро. С чего начнём?",
-};
-
-const FALLBACK_EVOLUTION: CoreEvolution = {
-  level: 4,
-  skills: 4,
-  knowledge: 0,
-  testsPassed: 2,
-  capabilities: {
-    intelligence: 1,
-    security: 1,
-    code: 1,
-    memory: 1,
-    internet: 0,
-    vision: 0,
-    voice: 0,
-    agents: 0,
-    images: 0,
-  },
-};
-
-type ModuleState =
-  | "VERIFIED"
-  | "LOCKED"
-  | "WAITING"
-  | "READY"
-  | "ONLINE"
-  | "OFFLINE";
-
-type StatusResponse = {
-  level: number;
-  skills: number;
-  testsPassed: number;
-  capabilities: CoreEvolution["capabilities"];
-  modules: {
-    memory: ModuleState;
-    github: ModuleState;
-    internet: ModuleState;
-    sandbox: ModuleState;
-    critic: ModuleState;
-    selfHosted: ModuleState;
-    autonomy: ModuleState;
-  };
-};
-
-const FALLBACK_MODULES: StatusResponse["modules"] = {
-  memory: "VERIFIED",
-  github: "VERIFIED",
-  internet: "LOCKED",
-  sandbox: "LOCKED",
-  critic: "LOCKED",
-  selfHosted: "WAITING",
-  autonomy: "WAITING",
+    "Я на связи. Слева — ваши инструменты и их цифры, справа — моё состояние. С чего начнём?",
 };
 
 export default function Home() {
@@ -85,37 +35,23 @@ export default function Home() {
   const [ownerKey, setOwnerKey] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
-  const [evolution, setEvolution] = useState<CoreEvolution>(FALLBACK_EVOLUTION);
-  const [modules, setModules] = useState(FALLBACK_MODULES);
   const pendingMessages = useRef<Message[] | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+  // On narrow screens the side boards are drawers over the chat, so they start closed.
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 1100px)").matches) {
+      setLeftOpen(false);
+      setRightOpen(false);
+    }
+  }, []);
+  const dashboard = useOwnerDashboard();
   const field = useRef<HTMLTextAreaElement>(null);
 
-  const levelLabel = String(evolution.level).padStart(2, "0");
-
-  async function refreshStatus() {
-    try {
-      const response = await fetch("/api/status", {
-        credentials: "include",
-        cache: "no-store",
-      });
-      if (!response.ok) return;
-      const data = (await response.json()) as StatusResponse;
-      if (!data || typeof data.level !== "number" || !data.capabilities) return;
-      setEvolution({
-        level: data.level,
-        skills: data.skills,
-        knowledge: 0,
-        testsPassed: data.testsPassed,
-        capabilities: data.capabilities,
-      });
-      if (data.modules) setModules(data.modules);
-    } catch {
-      // The visual core keeps its last verified state if status is temporarily unavailable.
-    }
-  }
 
   // Follow the conversation only while the reader is at the bottom. The answer types itself
   // out and grows every few milliseconds, so we pin scrollTop on each resize instead of
@@ -125,6 +61,7 @@ export default function Home() {
     if (!el) return;
     const onScroll = () => {
       stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      setAtBottom(stickToBottom.current);
     };
     const follow = () => {
       if (stickToBottom.current) el.scrollTop = el.scrollHeight;
@@ -152,10 +89,6 @@ export default function Home() {
     const el = log.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages, busy, progressLog]);
-
-  useEffect(() => {
-    void refreshStatus();
-  }, []);
 
   async function finishChat(next: Message[]) {
     const assistantId = crypto.randomUUID();
@@ -187,7 +120,7 @@ export default function Home() {
       setResponding(true);
       if (responseTimer.current) clearTimeout(responseTimer.current);
       responseTimer.current = setTimeout(() => setResponding(false), 3600);
-      void refreshStatus();
+      dashboard.refresh();
     } catch (err) {
       setMessages(next);
       setProgressLog([]);
@@ -249,7 +182,7 @@ export default function Home() {
 
       setAuthOpen(false);
       setOwnerKey("");
-      await refreshStatus();
+      dashboard.refresh();
       const queued = pendingMessages.current;
       pendingMessages.current = null;
 
@@ -276,198 +209,150 @@ export default function Home() {
   }
 
   const latestProgress = progressLog[progressLog.length - 1];
+  const coreState = responding ? "responding" : busy ? "thinking" : focused ? "listening" : "idle";
+  const typing = busy || responding;
+
+  function jumpToLatest() {
+    const el = log.current;
+    stickToBottom.current = true;
+    setAtBottom(true);
+    if (el) el.scrollTop = el.scrollHeight;
+  }
+
+  function newDialog() {
+    setMessages([welcome]);
+    setResponding(false);
+    setProgressLog([]);
+    if (responseTimer.current) clearTimeout(responseTimer.current);
+    setInput("");
+    setError("");
+    field.current?.focus();
+  }
 
   return (
-    <main>
-      <header className="topbar">
-        <a href="/owner" className="brand">
-          <span className="brand-symbol">Х</span>
-          <span>
-            Хасрой<span className="version">v0.4</span>
-          </span>
-        </a>
-        <div className="online">
-          <span />Хасрой ONLINE
-        </div>
-        <span className="header-meta">EVOLVING CODE INTELLIGENCE</span>
-      </header>
-
-      <section className="stage" aria-label="AI-ядро">
-        <aside className="system">
-          <div className="eyebrow">
-            <Activity size={14} /> SYSTEM STATUS
+    // Global CSS turns every <main> into the old console grid; this page lays itself out.
+    <main className={styles.page} style={{ display: "block", maxWidth: "none", padding: 0 }}>
+      <div
+        className={styles.layout}
+        data-left={leftOpen ? "open" : "closed"}
+        data-right={rightOpen ? "open" : "closed"}
+      >
+        <aside className={`${styles.side} ${styles.left}`} aria-label="Инструменты">
+          <div className={styles.sideHead}>
+            <a href="/owner" className={styles.brand}>ХАСРОЙ</a>
+            <span className={styles.sideHint}>инструменты</span>
+            <button type="button" className={styles.iconButton} onClick={() => setLeftOpen(false)} aria-label="Свернуть инструменты">
+              <ChevronLeft size={15} />
+            </button>
           </div>
-          <dl>
-            <div><dt>Ядро</dt><dd>Активно</dd></div>
-            <div><dt>Режим</dt><dd>Brain Router</dd></div>
-            <div><dt>Память</dt><dd>{modules.memory}</dd></div>
-            <div><dt>GitHub</dt><dd>{modules.github}</dd></div>
-            <div><dt>Интернет</dt><dd>{modules.internet}</dd></div>
-            <div><dt>Sandbox</dt><dd>{modules.sandbox}</dd></div>
-            <div><dt>Critic</dt><dd>{modules.critic}</dd></div>
-            <div><dt>Self‑Hosted</dt><dd>{modules.selfHosted}</dd></div>
-            <div><dt>Автономия</dt><dd>{modules.autonomy}</dd></div>
-            <div><dt>Эволюция</dt><dd>LEVEL {levelLabel}</dd></div>
-          </dl>
-          <div className="signal">
-            {Array.from({ length: 24 }, (_, i) => <i key={i} />)}
-          </div>
-          <p>{evolution.skills} VERIFIED CAPABILITIES</p>
+          <LeftBoard data={dashboard.data} loading={dashboard.loading} unauthorized={dashboard.unauthorized} onLogin={() => setAuthOpen(true)} />
         </aside>
 
-        <div className="core-wrap">
-          <Core
-            state={responding ? "responding" : busy ? "thinking" : focused ? "listening" : "idle"}
-          />
-          <span className="core-coordinate coord-left">
-            STORM CORE<br />{responding ? "VOICE" : busy ? "STORM" : focused ? "LISTENING" : "CALM"}
-          </span>
-          <span className="core-coordinate coord-right">
-            {responding ? "RESPONDING" : busy ? "PROCESSING" : "STANDBY"}<br />● ACTIVE
-          </span>
-        </div>
-
-        <div className="stage-index">ХАСРОЙ / STORM CORE</div>
-      </section>
-
-      <section className="chat" aria-label="Чат с «Хасрой»">
-        <div className="chat-heading">
-          <div>
-            <span className="chat-indicator" />
-            Диалог <span className="demo">LIVE</span>
-          </div>
-          <button
-            className="new-chat"
-            disabled={busy}
-            onClick={() => {
-              setMessages([welcome]);
-              setResponding(false);
-              setProgressLog([]);
-              if (responseTimer.current) clearTimeout(responseTimer.current);
-              setInput("");
-              setError("");
-              field.current?.focus();
-            }}
-          >
-            <Plus size={16} />Новый диалог
-          </button>
-        </div>
-
-        <div
-          ref={log}
-          className="messages"
-          role="log"
-          aria-live="polite"
-          aria-label="История сообщений"
-        >
-          {messages.filter((m) => m.role === "user" || m.content).map((m) => (
-            <article className={`message ${m.role}`} key={m.id}>
-              <div className="avatar">
-                {m.role === "assistant" ? <Sparkles size={16} /> : "ВЫ"}
-              </div>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div className="message-label">
-                  {m.role === "assistant" ? "Хасрой" : "ВЫ"}
-                  {m.role === "assistant" && <span>AI RESPONSE</span>}
-                </div>
-                {m.role === "assistant" ? (
-                  <MarkdownMessage content={m.content} />
-                ) : (
-                  <p>{m.content}</p>
-                )}
-              </div>
-            </article>
-          ))}
-
-          {busy && (
-            <div
-              role="status"
-              aria-live="polite"
-              style={{
-                margin: "4px 0 14px 43px",
-                border: "1px solid #213744",
-                borderRadius: 12,
-                background: "#0c171f",
-                padding: "11px 13px",
-                color: "#9eb8c5",
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 9, color: "#c5e8f2" }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#82d9d0", boxShadow: "0 0 10px #82d9d077", flex: "none" }} />
-                <strong style={{ fontWeight: 600 }}>{latestProgress?.message || "Хасрой начинает задачу…"}</strong>
-              </div>
-              {progressLog.length > 1 && (
-                <div style={{ marginTop: 8, paddingLeft: 15, borderLeft: "1px solid #24404d", color: "#718d9a" }}>
-                  {progressLog.slice(-5, -1).reverse().map((item, index) => (
-                    <div key={`${item.stage || "step"}-${index}`} style={{ margin: "3px 0" }}>✓ {item.message}</div>
-                  ))}
-                </div>
-              )}
+        <section className={styles.center} aria-label="Чат с Хасроем">
+          <div className={styles.topBar}>
+            {!leftOpen ? (
+              <button type="button" className={styles.iconButton} onClick={() => setLeftOpen(true)} aria-label="Показать инструменты">
+                <PanelLeft size={15} />
+              </button>
+            ) : <span />}
+            <div className={styles.attention}>
+              {(dashboard.data?.attention ?? []).slice(0, 3).map((item) => (
+                <span key={item} className={styles.alert}>{item}</span>
+              ))}
             </div>
-          )}
-          <div ref={bottom} />
-        </div>
-
-        {messages.length === 1 && !busy && (
-          <div className="suggestions">
-            {["Найди свежие новости об ИИ", "Изучи свой собственный код", "Запусти Python и вычисли √101"].map(
-              (text) => (
-                <button key={text} onClick={() => send(text)}>
-                  {text}<span>↗</span>
+            <div className={styles.topActions}>
+              <button type="button" className={styles.pillButton} disabled={busy} onClick={newDialog}>
+                <Plus size={14} /> Новый диалог
+              </button>
+              {!rightOpen ? (
+                <button type="button" className={styles.iconButton} onClick={() => setRightOpen(true)} aria-label="Показать состояние Хасроя">
+                  <PanelRight size={15} />
                 </button>
-              ),
-            )}
+              ) : null}
+            </div>
           </div>
-        )}
 
-        {error && <p role="alert" className="error">{error}</p>}
+          <div className={styles.cloud} data-state={coreState}>
+            <Core state={coreState} />
+          </div>
 
-        <form
-          className="composer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            send();
-          }}
-        >
-          <textarea
-            ref={field}
-            value={input}
-            maxLength={4000}
-            rows={1}
-            placeholder="Напишите «Хасрой»…"
-            aria-label="Сообщение для «Хасрой»"
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                send();
-              }
+          <div ref={log} className={styles.messages} role="log" aria-live="polite" aria-label="История сообщений">
+            <div className={styles.spacer} />
+            {messages.filter((m) => m.role === "user" || m.content).map((m) => (
+              <article key={m.id} className={m.role === "user" ? styles.me : styles.ai}>
+                {m.role === "assistant" ? <MarkdownMessage content={m.content} /> : <p>{m.content}</p>}
+              </article>
+            ))}
+            {busy ? (
+              <div className={styles.progress} role="status" aria-live="polite">
+                <strong><span className={styles.pulse} />{latestProgress?.message || "Хасрой начинает задачу…"}</strong>
+                {progressLog.length > 1 ? (
+                  <div className={styles.steps}>
+                    {progressLog.slice(-5, -1).map((item, index) => (
+                      <span key={`${item.stage || "step"}-${index}`}>✓ {item.message}</span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            <div ref={bottom} />
+          </div>
+
+          {!atBottom ? (
+            <button type="button" className={styles.jump} onClick={jumpToLatest}>
+              <ArrowDown size={14} /> {typing ? "Хасрой печатает — к новому" : "К последнему сообщению"}
+            </button>
+          ) : null}
+
+          {messages.length === 1 && !busy ? (
+            <div className={styles.suggestions}>
+              {["Что изменилось в коде за сегодня?", "Найди слабые места в Хасрое", "Найди свежие новости об ИИ"].map((text) => (
+                <button key={text} type="button" onClick={() => send(text)}>{text}</button>
+              ))}
+            </div>
+          ) : null}
+
+          {error ? <p role="alert" className={styles.error}>{error}</p> : null}
+
+          <form
+            className={styles.composer}
+            onSubmit={(event) => {
+              event.preventDefault();
+              send();
             }}
-          />
-          <button
-            type="submit"
-            className="send"
-            aria-label="Отправить сообщение"
-            disabled={!input.trim() || busy}
           >
-            <ArrowUp size={21} />
-          </button>
-        </form>
+            <textarea
+              ref={field}
+              value={input}
+              maxLength={4000}
+              rows={1}
+              placeholder="Спросите Хасроя или дайте задачу…"
+              aria-label="Сообщение для Хасроя"
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  send();
+                }
+              }}
+            />
+            <button type="submit" className={styles.send} aria-label="Отправить сообщение" disabled={!input.trim() || busy}>
+              <ArrowUp size={19} />
+            </button>
+          </form>
+        </section>
 
-        <div className="chat-footer">
-          <span>LIVE AI · ACTION TRACE · DYNAMIC VERIFIED CORE · Доступ владельца</span>
-          <span>Enter — отправить ↵</span>
-        </div>
-      </section>
-
-      <footer className="page-footer">
-        <span>Хасрой LAB / v0.4</span>
-        <span>CORE EVOLUTION / LEVEL {levelLabel}</span>
-      </footer>
+        <aside className={`${styles.side} ${styles.right}`} aria-label="Состояние Хасроя">
+          <div className={styles.sideHead}>
+            <button type="button" className={styles.iconButton} onClick={() => setRightOpen(false)} aria-label="Свернуть состояние">
+              <ChevronRight size={15} />
+            </button>
+          </div>
+          <RightBoard data={dashboard.data} loading={dashboard.loading} unauthorized={dashboard.unauthorized} coreState={coreState} onLogin={() => setAuthOpen(true)} />
+        </aside>
+      </div>
 
       {authOpen && (
         <div
