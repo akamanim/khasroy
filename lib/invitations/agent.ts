@@ -57,7 +57,7 @@ ${JSON.stringify(current)}
 Ответ строго в формате JSON без пояснений вокруг:
 {"reply": "твой ответ клиенту", "patch": { ...только изменённые поля... }}
 
-Поля patch (все необязательные): eventType, templateId, palette, languages (массив кодов), title, hosts (массив имён), date ("YYYY-MM-DD"), time ("HH:MM"), venue {name, address, mapUrl}, message {ru, ky, en}, program ([{time, title}]), dressCode, inviters (кто приглашает, той ээлери: например «Родители жениха: Асан и Айгуль»), contacts ([{name, phone}]), rsvpEnabled, rsvpDeadline ("YYYY-MM-DD"), notes (особые пожелания клиента), musicUrl (ссылка YouTube на фоновую музыку; "" — убрать музыку).
+Поля patch (все необязательные): eventType, templateId, palette, languages (массив кодов), title, hosts (массив имён), date ("YYYY-MM-DD"), time ("HH:MM"), venue {name, address, mapUrl}, message {ru, ky, en}, program ([{time, title}]), dressCode, dressColors (цвета дресс-кода как ["#rrggbb", ...], до 6, переведи названия цветов клиента в hex), inviters (кто приглашает, той ээлери: например «Родители жениха: Асан и Айгуль»), contacts ([{name, phone}]), rsvpEnabled, rsvpDeadline ("YYYY-MM-DD"), notes (особые пожелания клиента), musicUrl (ссылка YouTube на фоновую музыку; "" — убрать музыку).
 Массивы в patch заменяют прежние целиком. Если ничего менять не нужно, верни "patch": {}.`;
 }
 

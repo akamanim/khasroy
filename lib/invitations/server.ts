@@ -124,3 +124,16 @@ export async function uploadSessionPhoto(
   const result = await call<{ url: string }>("upload_photo", { sessionHash: hash, contentType, base64 });
   return result.url;
 }
+
+export type RsvpAnswer = "yes" | "family" | "no";
+
+export async function addRsvp(slug: string, name: string, answer: RsvpAnswer): Promise<void> {
+  if (!/^[a-z0-9]{6,24}$/u.test(slug)) throw new Error("invalid slug");
+  await call<{ ok: boolean }>("rsvp", { slug, name, answer });
+}
+
+export async function listRsvps(slug: string): Promise<Array<{ guest_name: string; answer: RsvpAnswer; created_at: string }>> {
+  if (!/^[a-z0-9]{6,24}$/u.test(slug)) return [];
+  const result = await call<{ rsvps: Array<{ guest_name: string; answer: RsvpAnswer; created_at: string }> }>("rsvps", { slug });
+  return result.rsvps ?? [];
+}
