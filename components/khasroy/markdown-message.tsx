@@ -175,13 +175,15 @@ export function MarkdownMessage({ content }: { content: string }) {
       return;
     }
 
-    if (
-      indexRef.current > content.length ||
-      !content.startsWith(displayedRef.current)
-    ) {
-      indexRef.current = 0;
-      displayedRef.current = "";
-      setDisplayedContent("");
+    if (!content.startsWith(displayedRef.current)) {
+      // The final answer can differ from the streamed draft (normalised or revised by the
+      // critic). Keep what already matches instead of wiping the text and retyping it.
+      const shown = displayedRef.current;
+      let common = 0;
+      while (common < shown.length && common < content.length && shown[common] === content[common]) common += 1;
+      indexRef.current = common;
+      displayedRef.current = content.slice(0, common);
+      setDisplayedContent(displayedRef.current);
     }
 
     if (!content) {
