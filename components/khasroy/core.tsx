@@ -119,7 +119,9 @@ function Plane() {
       const dx = -Math.sin(angle) * direction;
       const dy = Math.cos(angle) * direction * (72 / 178);
       const left = dx < 0;
-      const tilt = (Math.atan2(dy, Math.abs(dx)) * 180) / Math.PI;
+      // Bank at most 30°: at the ends of the loop the heading turns vertical, and a plane
+      // diving nose-down there looks broken.
+      const tilt = Math.max(-30, Math.min(30, (Math.atan2(dy, Math.abs(dx)) * 180) / Math.PI));
       const near = 0.75 + 0.25 * Math.sin(angle); // lower half of the loop is closer to us
       const size = (0.55 + 0.45 * out) * (0.8 + 0.3 * near);
       g.setAttribute(
