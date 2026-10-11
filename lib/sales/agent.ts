@@ -9,8 +9,9 @@ import {
 } from "@/lib/sales/catalog";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-// /sales talks through Llama 3.3 70B (owner's choice, 2026-10-11); gpt-oss is the fallback.
-const DEFAULT_MODELS = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"];
+// Llama 3.3 70B is listed on Groq as "contact sales" and answers 404 for this account, so it
+// cannot be used. Fallbacks are other models with their own rate limits on the same key.
+const DEFAULT_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
 
 export type SalesTurn = { role: "user" | "assistant"; content: string };
 export type Lead = { name: string; phone: string; request: string };
@@ -105,6 +106,8 @@ async function complete(
       response_format: { type: "json_object" },
       // Only gpt-oss models accept reasoning_effort.
       ...(options.reasoningEffort && model.startsWith("openai/gpt-oss") ? { reasoning_effort: options.reasoningEffort } : {}),
+      // Qwen 3 thinks out loud by default; keep the thinking out of the JSON answer.
+      ...(model.startsWith("qwen/") ? { reasoning_format: "hidden" } : {}),
     }),
     signal: AbortSignal.timeout(40_000),
   });

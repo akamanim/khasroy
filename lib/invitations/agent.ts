@@ -14,7 +14,8 @@ import type { ChatTurn } from "@/lib/invitations/server";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const PRIMARY_MODEL = process.env.KHASROY_INVITE_MODEL || "openai/gpt-oss-120b";
-const FALLBACK_MODEL = "llama-3.3-70b-versatile";
+// llama-3.3-70b-versatile answers 404 for this Groq account (contact-sales model).
+const FALLBACK_MODEL = "openai/gpt-oss-20b";
 
 export type AgentResult = { reply: string; invitation: Invitation; changed: boolean };
 

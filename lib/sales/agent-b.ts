@@ -12,7 +12,7 @@ export const VARIANT_B = {
   maxTokens: 700,
   reasoningEffort: "low" as const,
   // His example names openai/gpt-oss-120b; variant B keeps it so A (Llama) and B differ as proposed.
-  models: ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"],
+  models: ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"],
 };
 
 function promptB(stage: Stage, data: FunnelData) {
