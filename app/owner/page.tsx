@@ -89,6 +89,8 @@ export default function Home() {
   const [modules, setModules] = useState(FALLBACK_MODULES);
   const pendingMessages = useRef<Message[] | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const log = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
   const field = useRef<HTMLTextAreaElement>(null);
 
   const levelLabel = String(evolution.level).padStart(2, "0");
@@ -115,8 +117,40 @@ export default function Home() {
     }
   }
 
+  // Follow the conversation only while the reader is at the bottom. The answer types itself
+  // out and grows every few milliseconds, so we pin scrollTop on each resize instead of
+  // restarting a smooth scrollIntoView (which also dragged the whole page) on every update.
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    const el = log.current;
+    if (!el) return;
+    const onScroll = () => {
+      stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    };
+    const follow = () => {
+      if (stickToBottom.current) el.scrollTop = el.scrollHeight;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    const observer = new ResizeObserver(follow);
+    for (const child of Array.from(el.children)) observer.observe(child);
+    const mutations = new MutationObserver(() => {
+      for (const child of Array.from(el.children)) observer.observe(child);
+      follow();
+    });
+    mutations.observe(el, { childList: true });
+    follow();
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      observer.disconnect();
+      mutations.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    // A new message from the owner always brings the view back down.
+    const last = messages[messages.length - 1];
+    if (last?.role === "user") stickToBottom.current = true;
+    const el = log.current;
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages, busy, progressLog]);
 
   useEffect(() => {
@@ -320,6 +354,7 @@ export default function Home() {
         </div>
 
         <div
+          ref={log}
           className="messages"
           role="log"
           aria-live="polite"
