@@ -38,10 +38,10 @@ const resolveAll = async (host: string) => (await lookup(host, { all: true })).m
 
 export async function launch(): Promise<Browser> {
   const executablePath = await chromium.executablePath();
-  // Newer @sparticuz/chromium versions expose args as a promise; older ones as an array.
+  // puppeteer 25 builds default args asynchronously; await both in case either is a promise.
   const chromiumArgs = await Promise.resolve(chromium.args as string[] | Promise<string[]>);
   return puppeteer.launch({
-    args: puppeteer.defaultArgs({ args: chromiumArgs, headless: "shell" }),
+    args: await puppeteer.defaultArgs({ args: chromiumArgs, headless: "shell" }),
     defaultViewport: { ...VIEWPORT, deviceScaleFactor: 1 },
     executablePath,
     headless: "shell",
