@@ -93,8 +93,9 @@ function Plane() {
   const group = useRef<SVGGElement>(null);
 
   useEffect(() => {
-    const g = group.current;
-    if (!g) return;
+    const node = group.current;
+    if (!node) return;
+    const g: SVGGElement = node;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     const FLIGHT_MS = 7000;
