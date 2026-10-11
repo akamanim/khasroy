@@ -7,7 +7,7 @@ function uid(raw: string) {
   return raw.replace(/[^a-zA-Z0-9_-]/gu, "");
 }
 
-const PETAL = "M0 0 C -15 -9 -17 -33 0 -46 C 17 -33 15 -9 0 0Z";
+const PETAL = "M0 0 C -19 -6 -26 -30 -14 -42 C -8 -48 -3 -44 0 -47 C 3 -44 8 -48 14 -42 C 26 -30 19 -6 0 0Z";
 const LEAF = "M0 0 C 12 -18 32 -25 50 -22 C 37 -8 19 1 0 0Z";
 
 function Peony({ x, y, r, rot = 0 }: { x: number; y: number; r: number; rot?: number }) {
@@ -64,21 +64,20 @@ export function HornPair({ size = 1 }: { size?: number }) {
 }
 
 export function HornCorners({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden="true">
-      <rect x="14" y="14" width="372" height="572" rx="2" className="frameLine" />
-      <rect x="24" y="24" width="352" height="552" rx="2" className="frameLineThin" />
-      {[
-        [24, 24, 135],
-        [376, 24, -135],
-        [24, 576, 45],
-        [376, 576, -45],
-      ].map(([x, y, r], i) => (
-        <g key={i} transform={`translate(${x} ${y}) rotate(${r}) translate(0 -6)`}>
-          <HornPair size={0.9} />
-        </g>
-      ))}
+  const corner = (
+    <svg viewBox="-10 -10 80 80" aria-hidden="true">
+      <g transform="translate(36 36) rotate(-45)">
+        <HornPair size={0.8} />
+      </g>
     </svg>
+  );
+  return (
+    <div className={className} aria-hidden="true">
+      <span className="hcTL">{corner}</span>
+      <span className="hcTR">{corner}</span>
+      <span className="hcBL">{corner}</span>
+      <span className="hcBR">{corner}</span>
+    </div>
   );
 }
 
@@ -224,7 +223,7 @@ export function MoonConstellation({ className }: { className?: string }) {
       ))}
       <g transform="translate(270 56)">
         <circle r="30" className="moonGlow" />
-        <path d="M0 -24 A24 24 0 1 0 0 24 A18 18 0 1 1 0 -24Z" className="moon" />
+        <path d="M0 -24 A24 24 0 1 0 0 24 A30 30 0 0 1 0 -24Z" className="moon" />
       </g>
     </svg>
   );
@@ -247,19 +246,18 @@ export function Sunburst({ className }: { className?: string }) {
 }
 
 export function DecoCorners({ className }: { className?: string }) {
-  const corner = "M0 70 V0 H70 M10 70 V10 H70 M20 40 V20 H40 M0 0 L20 20";
-  return (
-    <svg className={className} viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden="true">
-      <rect x="16" y="16" width="368" height="568" className="decoFrame" />
-      {[
-        "translate(16 16)",
-        "translate(384 16) scale(-1,1)",
-        "translate(16 584) scale(1,-1)",
-        "translate(384 584) scale(-1,-1)",
-      ].map((t) => (
-        <path key={t} d={corner} transform={t} className="decoCorner" />
-      ))}
+  const corner = (
+    <svg viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M1 72 V1 H72 M11 72 V11 H72 M21 46 V21 H46 M1 1 L21 21" className="decoCorner" />
     </svg>
+  );
+  return (
+    <div className={className} aria-hidden="true">
+      <span className="hcTL">{corner}</span>
+      <span className="hcTR">{corner}</span>
+      <span className="hcBL">{corner}</span>
+      <span className="hcBR">{corner}</span>
+    </div>
   );
 }
 
@@ -283,11 +281,13 @@ export function Balloons({ className, colors }: { className?: string; colors: st
   return (
     <svg className={className} viewBox="0 0 260 260" aria-hidden="true">
       {spots.map(([x, y, r], i) => (
-        <g key={i} transform={`rotate(${r} ${x} ${y})`} className="balloon" style={{ animationDelay: `${i * 0.7}s` } as CSSProperties}>
+        <g key={i} transform={`rotate(${r} ${x} ${y})`}>
+          <g className="balloon" style={{ animationDelay: `${i * 0.7}s` } as CSSProperties}>
           <path d={`M ${x} ${y + 44} C ${x - 6} ${y + 80}, ${x + 10} ${y + 110}, ${x - 2} ${y + 150}`} className="string" />
           <ellipse cx={x} cy={y} rx="34" ry="42" fill={colors[i % colors.length]} />
           <ellipse cx={x - 12} cy={y - 16} rx="7" ry="12" fill="#fff" opacity=".35" />
           <path d={`M ${x - 5} ${y + 45} L ${x + 5} ${y + 45} L ${x} ${y + 39} Z`} fill={colors[i % colors.length]} />
+          </g>
         </g>
       ))}
     </svg>
@@ -408,14 +408,16 @@ export function Footprints({ className }: { className?: string }) {
 export function Cord({ className }: { className?: string }) {
   const id = `cd-${uid(useId())}`;
   return (
-    <svg className={className} viewBox="0 0 240 16" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <svg className={className} viewBox="0 0 240 18" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
       <defs>
-        <pattern id={id} width="12" height="16" patternUnits="userSpaceOnUse">
-          <ellipse cx="3" cy="8" rx="4" ry="6.5" transform="rotate(35 3 8)" className="cordDark" />
-          <ellipse cx="9" cy="8" rx="4" ry="6.5" transform="rotate(35 9 8)" className="cordLight" />
+        <pattern id={id} width="10" height="18" patternUnits="userSpaceOnUse">
+          <path d="M-2 16 L5 2 L10 2 L3 16 Z" className="cordDark" />
+          <path d="M8 16 L15 2 L20 2 L13 16 Z" className="cordDark" />
         </pattern>
       </defs>
-      <rect y="2" width="240" height="12" rx="6" fill={`url(#${id})`} />
+      <rect x="1" y="2" width="238" height="14" rx="7" className="cordLight" />
+      <rect x="1" y="2" width="238" height="14" rx="7" fill={`url(#${id})`} />
+      <rect x="1" y="2" width="238" height="14" rx="7" className="cordEdge" />
     </svg>
   );
 }

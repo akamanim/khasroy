@@ -1,4 +1,4 @@
-import { applyInvitationPatch, emptyInvitation } from "@/lib/invitations/schema";
+import { TEMPLATE_META, applyInvitationPatch, emptyInvitation, type TemplateId } from "@/lib/invitations/schema";
 import { loadSessionInvitation, saveSessionInvitation, sessionHash } from "@/lib/invitations/server";
 import { studioError, studioPayload } from "@/lib/invitations/respond";
 
@@ -18,7 +18,12 @@ export async function POST(request: Request) {
     if (!hash) return studioError("Сессия не создана.", 400);
     const record = await loadSessionInvitation(hash);
     if (record && record.status !== "draft") return studioError("Заказ уже оформлен.", 409);
-    const next = applyInvitationPatch(record?.data ?? emptyInvitation(), patch);
+    const current = record?.data ?? emptyInvitation();
+    let next = applyInvitationPatch(current, patch);
+    // A new template starts in its own designed colours unless a palette was sent too.
+    if (next.templateId !== current.templateId && body.palette === undefined) {
+      next = { ...next, palette: TEMPLATE_META[next.templateId as TemplateId].defaultPalette };
+    }
     const saved = await saveSessionInvitation(hash, next, record?.history ?? [], false);
     return studioPayload(saved);
   } catch (error) {
