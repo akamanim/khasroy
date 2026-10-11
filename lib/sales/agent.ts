@@ -13,7 +13,7 @@ const MODELS = [process.env.KHASROY_SALES_MODEL || "openai/gpt-oss-120b", "llama
 
 export type SalesTurn = { role: "user" | "assistant"; content: string };
 export type Lead = { name: string; phone: string; request: string };
-export type SalesResult = { reply: string; products: Product[]; lead: Lead | null; checked: boolean };
+export type SalesResult = { reply: string; products: Product[]; lead: Lead | null; checked: boolean; diagnostic?: string };
 
 function systemPrompt(catalog: Catalog, products: Product[]): string {
   const shop = companyValue(catalog, "Название", "Компания") || "магазин";
@@ -102,14 +102,18 @@ export async function runSalesAgent(catalog: Catalog, history: SalesTurn[], mess
     { role: "user", content: message },
   ];
 
+  // Why the honest fallback was used, returned to the API so failures are visible, not silent.
+  const problems: string[] = [];
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let parsed: ReturnType<typeof parse> = null;
     for (const model of MODELS) {
       try {
         parsed = parse(await complete(apiKey, model, messages));
         if (parsed && typeof parsed.reply === "string" && parsed.reply.trim()) break;
+        problems.push(`${model}: unparseable answer`);
       } catch (error) {
         console.error("Sales agent model failed", model, error);
+        problems.push(error instanceof Error ? error.message : String(error));
       }
     }
     if (!parsed || typeof parsed.reply !== "string" || !parsed.reply.trim()) break;
@@ -117,6 +121,7 @@ export async function runSalesAgent(catalog: Catalog, history: SalesTurn[], mess
     const reply = parsed.reply.trim().slice(0, 1500);
     const invented = unsupportedNumbers(reply, sources);
     if (invented.length) {
+      problems.push(`unsupported figures: ${invented.join(", ")}`);
       // Give the model one chance to correct itself before falling back.
       messages.push(
         { role: "assistant", content: JSON.stringify(parsed) },
@@ -133,5 +138,5 @@ export async function runSalesAgent(catalog: Catalog, history: SalesTurn[], mess
     return { reply, products: shown, lead: leadFrom(parsed.lead, customerText), checked: true };
   }
 
-  return { reply: FALLBACK, products: [], lead: null, checked: false };
+  return { reply: FALLBACK, products: [], lead: null, checked: false, diagnostic: problems.join("; ").slice(0, 500) };
 }
