@@ -22,7 +22,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
     ["Итого придут", "", summary.people, ""],
   ];
   const file = buildXlsx("Гости", rows, [34, 20, 10, 22]);
-  return new Response(file, {
+  return new Response(Buffer.from(file), {
     headers: {
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "content-disposition": `attachment; filename="guests-${slug}.xlsx"`,
