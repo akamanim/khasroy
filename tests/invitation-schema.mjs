@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import {
   TEMPLATE_IDS,
+  TEMPLATE_META,
   EVENT_TYPES,
+  templatesFor,
   applyInvitationPatch,
   displayTitle,
   emptyInvitation,
@@ -35,7 +37,7 @@ assert.deepEqual(missingFields(inv), []);
 const kept = applyInvitationPatch(inv, {
   date: "2027-02-30",
   time: "25:00",
-  templateId: "neon",
+  templateId: "vaporwave",
   eventType: "funeral",
   palette: "red",
   venue: { mapUrl: "javascript:alert(1)" },
@@ -77,6 +79,17 @@ for (const t of TEMPLATE_IDS) for (const e of EVENT_TYPES) {
   const s = sampleInvitation(t, e);
   assert.equal(s.templateId, t);
   assert.ok(displayTitle(s).length > 0);
+}
+
+// Template metadata is complete and every event has designed-for templates first.
+for (const t of TEMPLATE_IDS) {
+  const m = TEMPLATE_META[t];
+  assert.ok(m && m.name && m.fonts.length && m.events.length && /^#[0-9a-f]{6}$/iu.test(m.pageBg), `meta for ${t}`);
+}
+for (const e of EVENT_TYPES) {
+  const order = templatesFor(e);
+  assert.equal(order.length, TEMPLATE_IDS.length, "gallery lists every template");
+  assert.ok(TEMPLATE_META[order[0]].events.includes(e), `first template fits ${e}`);
 }
 
 console.log("invitation schema: ok");
