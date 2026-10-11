@@ -90,8 +90,26 @@ function parse(text: string): { reply?: unknown; products?: unknown; lead?: unkn
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_PREFIX = "openrouter:";
-/** Free Llama 3.3 70B on OpenRouter; used first when OPENROUTER_API_KEY is configured. */
-export const OPENROUTER_LLAMA = `${OPENROUTER_PREFIX}meta-llama/llama-3.3-70b-instruct:free`;
+// Llama 3.3 70B on Cloudflare Workers AI: the free plan gives 10,000 neurons a day, roughly
+// 50 sales replies with the Graviti catalog. Used first when its account id and token are set.
+const CLOUDFLARE_PREFIX = "cloudflare:";
+export const CLOUDFLARE_LLAMA = `${CLOUDFLARE_PREFIX}@cf/meta/llama-3.3-70b-instruct-fp8-fast`;
+
+function endpointFor(model: string, groqKey: string) {
+  if (model.startsWith(OPENROUTER_PREFIX)) {
+    return { provider: "openrouter", id: model.slice(OPENROUTER_PREFIX.length), url: OPENROUTER_URL, key: process.env.OPENROUTER_API_KEY?.trim() ?? "" };
+  }
+  if (model.startsWith(CLOUDFLARE_PREFIX)) {
+    const account = process.env.CLOUDFLARE_ACCOUNT_ID?.trim() ?? "";
+    return {
+      provider: "cloudflare",
+      id: model.slice(CLOUDFLARE_PREFIX.length),
+      url: `https://api.cloudflare.com/client/v4/accounts/${account}/ai/v1/chat/completions`,
+      key: account ? process.env.CLOUDFLARE_AI_TOKEN?.trim() ?? "" : "",
+    };
+  }
+  return { provider: "groq", id: model, url: GROQ_URL, key: groqKey };
+}
 
 async function complete(
   apiKey: string,
@@ -100,29 +118,28 @@ async function complete(
   options: AgentOptions = {},
   retry = true,
 ): Promise<string> {
-  const viaOpenRouter = model.startsWith(OPENROUTER_PREFIX);
-  const id = viaOpenRouter ? model.slice(OPENROUTER_PREFIX.length) : model;
-  const key = viaOpenRouter ? process.env.OPENROUTER_API_KEY?.trim() ?? "" : apiKey;
+  const { provider, id, url, key } = endpointFor(model, apiKey);
   if (!key) throw new Error(`${model}: no API key`);
-  const response = await fetch(viaOpenRouter ? OPENROUTER_URL : GROQ_URL, {
+  const groq = provider === "groq";
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       authorization: `Bearer ${key}`,
       "content-type": "application/json",
-      ...(viaOpenRouter ? { "x-title": "Khasroy sales assistant" } : {}),
+      ...(provider === "openrouter" ? { "x-title": "Khasroy sales assistant" } : {}),
     },
     body: JSON.stringify({
       model: id,
       messages,
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens ?? 1200,
-      // Free OpenRouter endpoints do not all support JSON mode; the prompt asks for JSON and
-      // parse() extracts it either way.
-      ...(viaOpenRouter ? {} : { response_format: { type: "json_object" } }),
+      // Only Groq is guaranteed to support JSON mode here; the prompt asks for JSON and parse()
+      // extracts it either way.
+      ...(groq ? { response_format: { type: "json_object" } } : {}),
       // Only gpt-oss models accept reasoning_effort.
       ...(options.reasoningEffort && id.startsWith("openai/gpt-oss") ? { reasoning_effort: options.reasoningEffort } : {}),
       // Qwen 3 thinks out loud by default; keep the thinking out of the JSON answer.
-      ...(!viaOpenRouter && id.startsWith("qwen/") ? { reasoning_format: "hidden" } : {}),
+      ...(groq && id.startsWith("qwen/") ? { reasoning_format: "hidden" } : {}),
     }),
     signal: AbortSignal.timeout(40_000),
   });
@@ -134,17 +151,17 @@ async function complete(
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`${viaOpenRouter ? "openrouter" : "groq"} ${id} ${response.status}${viaOpenRouter ? ` ${detail.slice(0, 160)}` : ""}`);
+    throw new Error(`${provider} ${id} ${response.status}${groq ? "" : ` ${detail.slice(0, 160)}`}`);
   }
   const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return data.choices?.[0]?.message?.content ?? "";
 }
 
-/** Llama via OpenRouter first when its key is set, then the Groq models. */
+/** Llama via Cloudflare first when its credentials are set, then the Groq models. */
 function modelOrder(options: AgentOptions): string[] {
   const base = options.models ?? DEFAULT_MODELS;
   const preferred = process.env.KHASROY_SALES_MODEL?.trim();
-  const llama = process.env.OPENROUTER_API_KEY?.trim() && !options.models ? [OPENROUTER_LLAMA] : [];
+  const llama = process.env.CLOUDFLARE_ACCOUNT_ID?.trim() && process.env.CLOUDFLARE_AI_TOKEN?.trim() && !options.models ? [CLOUDFLARE_LLAMA] : [];
   return [...new Set([...(preferred ? [preferred] : []), ...llama, ...base])];
 }
 
