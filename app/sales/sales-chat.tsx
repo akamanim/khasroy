@@ -123,6 +123,7 @@ export function SalesChat({
         leadSaved?: boolean;
         error?: string;
         model?: string;
+        diagnostic?: string;
         stage?: string;
         data?: Record<string, string>;
       };
@@ -135,7 +136,7 @@ export function SalesChat({
           content: data.reply as string,
           products: data.products ?? [],
           note: data.leadSaved ? "Контакт передан менеджеру" : undefined,
-          model: data.model || "без модели (запасной ответ)",
+          model: data.model || `без модели (запасной ответ)${data.diagnostic ? `: ${data.diagnostic}` : ""}`,
         },
       ]);
     } catch (e) {
