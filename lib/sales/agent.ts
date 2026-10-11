@@ -222,7 +222,7 @@ export async function runSalesAgent(
       .map((id) => catalog.products.find((p) => p.id === id))
       .filter((p): p is Product => Boolean(p))
       .slice(0, 3);
-    return { reply, products: shown, lead: leadFrom(parsed.lead, customerText), checked: true, model: usedModel, raw: parsed as Record<string, unknown> };
+    return { reply, products: shown, lead: leadFrom(parsed.lead, customerText), checked: true, model: usedModel, raw: parsed as Record<string, unknown>, ...(problems.length ? { diagnostic: problems.join("; ").slice(0, 500) } : {}) };
   }
 
   return { reply: FALLBACK, products: [], lead: null, checked: false, model: "", diagnostic: problems.join("; ").slice(0, 500) };
