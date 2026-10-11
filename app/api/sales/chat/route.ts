@@ -46,6 +46,7 @@ export async function POST(request: Request) {
       reply: result.reply,
       products: result.products.map(({ id, name, price, photo, link, stock }) => ({ id, name, price, photo, link, stock })),
       leadSaved,
+      model: result.model ?? "",
       source: catalog.source,
       ...(result.diagnostic ? { diagnostic: result.diagnostic } : {}),
     });
