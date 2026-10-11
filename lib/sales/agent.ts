@@ -244,3 +244,29 @@ export async function runSalesAgent(
 
   return { reply: FALLBACK, products: [], lead: null, checked: false, model: "", diagnostic: problems.join("; ").slice(0, 500) };
 }
+
+/**
+ * One JSON answer from the first model that responds: the Groq models, then Llama on
+ * Cloudflare when it is configured. Used by tools other than the sales assistant.
+ */
+export async function jsonCompletion(
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  options: AgentOptions = {},
+): Promise<{ data: Record<string, unknown>; model: string }> {
+  const ownerKey = process.env.KHASROY_OWNER_KEY?.trim() ?? "";
+  const apiKey = await resolveSecret(ownerKey, "groq", [process.env.GROQ_API_KEY]).catch(() => process.env.GROQ_API_KEY?.trim() ?? "");
+  const llama = process.env.CLOUDFLARE_ACCOUNT_ID?.trim() && process.env.CLOUDFLARE_AI_TOKEN?.trim() ? [CLOUDFLARE_LLAMA] : [];
+  const models = [...new Set([...(options.models ?? DEFAULT_MODELS), ...llama])];
+  const failures: string[] = [];
+  for (const model of models) {
+    try {
+      const text = await complete(apiKey, model, messages, options);
+      const data = parse(text);
+      if (data) return { data, model };
+      failures.push(`${model}: not JSON`);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  throw new Error(`Все модели недоступны: ${failures.join("; ").slice(0, 400)}`);
+}

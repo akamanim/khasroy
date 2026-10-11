@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { OwnerDashboard, ProviderStatus } from "@/lib/owner-dashboard";
+import { CloudBrowser } from "./cloud-browser";
 import styles from "./console.module.css";
 
 /** Loads /api/owner/dashboard and refreshes it every minute. */
@@ -208,16 +209,7 @@ export function RightBoard({
         )}
       </section>
 
-      <section className={`${styles.panel} ${styles.soon} ${styles.browser}`}>
-        <header className={styles.panelHead}>
-          <span className={styles.label}>Облачный браузер</span>
-          <span className={styles.muted}>следующий шаг</span>
-        </header>
-        <div className={styles.browserBar}><i /><i /><i /><span>адрес сайта</span></div>
-        <div className={styles.browserView}>
-          <p>Здесь будет видно, как Хасрой открывает сайты и выполняет задачи: «посмотри kelshi.kz и выпиши цены».</p>
-        </div>
-      </section>
+      <CloudBrowser unauthorized={unauthorized} onLogin={onLogin} />
     </div>
   );
 }

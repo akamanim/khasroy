@@ -102,32 +102,140 @@
 .listRow b.muted { color: #6f7f92; font-size: 13px; }
 .dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: currentColor; display: inline-block; }
 
-.browser { flex: 1; min-height: 210px; }
-.browserBar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border-radius: 10px;
-  background: #0b111b;
-  border: 1px solid #172031;
-  font-size: 12px;
-  color: #56657a;
-}
-.browserBar i { width: 8px; height: 8px; border-radius: 50%; background: #1f2b3d; }
-.browserBar span { margin-left: 6px; }
-.browserView {
+.browser { flex: none; }
+.browser .panelHead > :nth-child(2) { margin-left: auto; }
+.browserBody { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.browserMain,
+.browserSide { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+
+.browserBar { display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 10px; background: #0b111b; border: 1px solid #172031; }
+.browserBar input,
+.browserTools input {
   flex: 1;
-  min-height: 120px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #e6edf5;
+  font: inherit;
+  font-size: 12.5px;
+}
+.browserBar button,
+.browserTools button {
+  width: 26px;
+  height: 26px;
+  flex: none;
   display: grid;
   place-items: center;
-  padding: 16px;
-  border-radius: 12px;
-  border: 1px dashed #1f2b3d;
-  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.012) 0 10px, transparent 10px 20px);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #9fb0c3;
+  cursor: pointer;
+}
+.browserBar button:hover:not(:disabled),
+.browserTools button:hover:not(:disabled) { background: #172031; color: #fff; }
+.browserBar button:disabled,
+.browserTools button:disabled { opacity: 0.35; cursor: default; }
+
+.browserView {
+  position: relative;
+  aspect-ratio: 1280 / 800;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid #1f2b3d;
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.012) 0 10px, transparent 10px 20px), #0b111b;
   text-align: center;
 }
-.browserView p { margin: 0; font-size: 12.5px; line-height: 1.5; color: #6f7f92; }
+.browserView img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; cursor: crosshair; }
+.browserView[data-busy] img { opacity: 0.55; cursor: progress; }
+.browserView p { margin: 0; padding: 14px; font-size: 12px; line-height: 1.5; color: #6f7f92; }
+.browserBusy {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(6, 9, 15, 0.85);
+  border: 1px solid #2a3a52;
+  color: #9fd0ff;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.browserTools { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 10px; background: #0b111b; border: 1px solid #172031; }
+.browserTools form { flex: 1; display: flex; min-width: 0; }
+.browserTools input:disabled { opacity: 0.5; }
+
+.browserTask { display: flex; align-items: flex-end; gap: 6px; padding: 6px 6px 6px 10px; border-radius: 12px; background: #0b111b; border: 1px solid #22314a; }
+.browserTask:focus-within { border-color: #3a5a82; }
+.browserTask textarea {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: #e6edf5;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.browserTask button {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: #9fd0ff;
+  color: #06090f;
+  cursor: pointer;
+}
+.browserTask button:disabled { opacity: 0.35; cursor: default; }
+
+.browserSteps { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 6px; max-height: 190px; overflow-y: auto; font-size: 12px; scrollbar-width: thin; }
+.browserSteps li { color: #6f7f92; }
+.browserSteps li::marker { color: #56657a; }
+.browserSteps b { display: block; font-weight: 600; color: #c9d6e4; }
+.browserSteps span { display: block; line-height: 1.4; }
+
+.browserConfirm { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255, 210, 122, 0.4); background: rgba(255, 210, 122, 0.07); }
+.browserConfirm p { margin: 0; font-size: 13px; font-weight: 600; color: #ffd27a; }
+.browserConfirm span { font-size: 12px; color: #b7a37a; line-height: 1.4; }
+.browserConfirm div { display: flex; gap: 8px; }
+
+.browserAnswer {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(127, 224, 176, 0.3);
+  background: rgba(127, 224, 176, 0.06);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* Expanded: the browser takes the screen, steps and answer sit beside the page. */
+.browserLarge {
+  position: fixed;
+  z-index: 60;
+  inset: 20px;
+  background: rgba(8, 12, 19, 0.98);
+  box-shadow: 0 30px 120px rgba(0, 0, 0, 0.7);
+}
+.browserLarge .browserBody { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
+.browserLarge .browserView { width: min(100%, calc((100vh - 170px) * 1.6)); }
+.browserLarge .browserSteps { max-height: 40vh; }
+.browserLarge .browserAnswer { max-height: none; }
 
 /* Centre: chat over the cloud */
 .center {
@@ -348,6 +456,8 @@
   .right { right: 0; }
   .center { grid-column: 1; grid-row: 1; max-width: none; }
   .jump { bottom: 84px; }
+  .browserLarge { inset: 0; border-radius: 0; overflow-y: auto; }
+  .browserLarge .browserBody { display: flex; }
 }
 
 @media (max-width: 640px) {
