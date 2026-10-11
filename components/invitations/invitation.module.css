@@ -158,6 +158,21 @@
   background: linear-gradient(180deg, var(--bg), var(--bg2));
   transition: opacity .7s ease, visibility .7s;
 }
+.guestGreeting {
+  position: relative;
+  z-index: 3;
+  margin: 0;
+  padding: 18px 24px 0;
+  text-align: center;
+  font-size: 15px;
+  letter-spacing: .02em;
+  color: var(--accent, currentColor);
+}
+.rsvpParty { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
+.rsvpParty input {
+  width: 72px; padding: 8px 10px; border-radius: 10px; border: 1px solid currentColor;
+  background: transparent; color: inherit; font: inherit; text-align: center;
+}
 .coverInner { max-width: 420px; display: grid; justify-items: center; gap: 4px; }
 .cover .title { margin: 14px 0 12px; }
 .cover .button { margin-top: 26px; padding: 15px 30px; font-size: 15px; animation: breathe 2.4s ease-in-out infinite; }
