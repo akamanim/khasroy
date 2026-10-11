@@ -57,12 +57,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
       >
         {photo ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={photo} alt="" width={1200} height={630} style={{ position: "absolute", inset: 0, width: 1200, height: 630, objectFit: "cover" }} />
+          <img src={photo} alt="" width={1200} height={630} style={{ position: "absolute", top: 0, left: 0, width: 1200, height: 630, objectFit: "cover" }} />
         ) : null}
         <div
           style={{
+            // satori ignores the inset shorthand: size the overlay explicitly.
             position: "absolute",
-            inset: 0,
+            top: 0,
+            left: 0,
+            width: 1200,
+            height: 630,
             display: "flex",
             flexDirection: "column",
             justifyContent: "flex-end",
