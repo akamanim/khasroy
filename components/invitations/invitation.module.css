@@ -360,7 +360,7 @@
 .t_confetti .countCell:nth-child(3) strong { color: var(--accent2); }
 .t_confetti .countCell:nth-child(4) strong { color: #06d6a0; }
 .t_confetti .countCell strong { font-family: var(--display); font-size: 24px; }
-.t_confetti .photoMain { transform: rotate(-3deg); border: 8px solid #fff; box-shadow: 0 10px 0 rgba(31, 26, 61, .08); }
+.t_confetti .photoMain { rotate: -3deg; border: 8px solid #fff; box-shadow: 0 10px 0 rgba(31, 26, 61, .08); }
 .t_confetti .rsvp { border: 0; background: #fff; box-shadow: 0 6px 0 rgba(31, 26, 61, .08); }
 .balloons { display: block; width: 62%; margin: -34px auto -10px; }
 .root :global(.balloon) { animation: bob 4s ease-in-out infinite; }
@@ -402,7 +402,8 @@
   background: linear-gradient(180deg, #fbd7bd 0%, #fde9d7 22%, #e7eef4 46%, #f4f7fa 100%);
 }
 .t_tianshan .hero { padding-top: 76px; padding-bottom: 0; }
-.mountains { display: block; width: calc(100% + 60px); margin: 18px -30px 30px; }
+.range { position: relative; margin: 18px -30px 30px; overflow: hidden; }
+.mountains { display: block; width: 100%; }
 .t_tianshan :global(.sun) { fill: #f6b38c; opacity: .9; }
 .t_tianshan :global(.ridge4) { fill: #a9bfd3; }
 .t_tianshan :global(.snow) { fill: #fff; }
@@ -479,7 +480,7 @@
 .t_postcard .titleStack { align-items: flex-start; }
 .t_postcard .date { justify-items: start; }
 .t_postcard .message { font-family: var(--hand); font-style: normal; font-size: 22px; text-align: left; max-width: none; border-left: 2px solid var(--line); padding-left: 16px; }
-.t_postcard .photoMain { width: 84%; aspect-ratio: 5 / 4; padding: 10px 10px 38px; background: #fffdf6; transform: rotate(-2deg); box-shadow: 0 8px 18px rgba(46, 42, 36, .18); }
+.t_postcard .photoMain { width: 84%; aspect-ratio: 5 / 4; padding: 10px 10px 38px; background: #fffdf6; rotate: -2deg; box-shadow: 0 8px 18px rgba(46, 42, 36, .18); }
 .t_postcard .photoMain img { height: 100%; }
 .t_postcard .wait { font-family: var(--hand); color: var(--accent); }
 .t_postcard .countCell { border-radius: 4px; background: #fbf6ea; }
@@ -495,13 +496,11 @@
 }
 .footprints { display: block; width: 58%; margin: -20px 0 -16px auto; }
 .t_steps :global(.foot) { fill: var(--accent2); opacity: .85; }
-.live.t_steps :global(.foot) { animation: step .5s both; }
 .live.t_steps :global(.foot:nth-child(2)) { animation-delay: .25s; }
 .live.t_steps :global(.foot:nth-child(3)) { animation-delay: .5s; }
 .live.t_steps :global(.foot:nth-child(4)) { animation-delay: .75s; }
 .live.t_steps :global(.foot:nth-child(5)) { animation-delay: 1s; }
 .live.t_steps :global(.foot:nth-child(6)) { animation-delay: 1.25s; }
-@keyframes step { from { opacity: 0; } to { opacity: .85; } }
 .cord { width: 210px; height: 18px; }
 .t_steps :global(.cordDark) { fill: #262626; }
 .t_steps :global(.cordLight) { fill: #fbfbfb; }
@@ -514,10 +513,194 @@
 .t_steps .countCell:nth-child(odd) strong { color: var(--accent); }
 .t_steps .photoMain { aspect-ratio: 1; width: 64%; box-shadow: 0 0 0 8px #fff, 0 0 0 10px var(--accent2); }
 
-/* Gallery previews stay still and light. */
-.still * { animation-play-state: paused !important; }
-.still .confetti i { animation-play-state: running !important; }
+
+/* ───────────── Motion ───────────── */
+
+/* Sections arrive as the guest scrolls (live page only). */
+.live [data-reveal] {
+  opacity: 0;
+  transform: var(--reveal-from, translateY(26px));
+  filter: var(--reveal-filter, none);
+  transition: opacity .9s ease, transform 1s var(--reveal-ease, cubic-bezier(.2, .7, .2, 1)), filter .9s ease, clip-path 1.1s cubic-bezier(.2, .7, .2, 1);
+}
+.live [data-reveal][data-shown] { opacity: 1; transform: none; filter: none; }
+.live .tick { display: inline-block; animation: tick .5s cubic-bezier(.2, .7, .2, 1); }
+@keyframes tick { from { opacity: 0; transform: translateY(-45%); } to { opacity: 1; transform: none; } }
+
+.backdrop > div { position: absolute; inset: 0; overflow: hidden; }
+.backdrop :global(i) { position: absolute; display: block; }
+@keyframes floatUp {
+  0% { opacity: 0; transform: translate(0, 0) scale(var(--s, 1)); }
+  10% { opacity: .9; }
+  90% { opacity: .7; }
+  100% { opacity: 0; transform: translate(40px, -1300px) scale(var(--s, 1)); }
+}
+@keyframes sheen { 0%, 25% { background-position: 120% 0; } 75%, 100% { background-position: -20% 0; } }
+@keyframes draw { from { stroke-dashoffset: var(--len, 180); } to { stroke-dashoffset: 0; } }
+@keyframes drift { from { transform: translateX(-20px); } to { transform: translateX(40px); } }
+
+/* 1. Белый шёлк: monogram rings draw themselves. */
+.live.t_minimal :global(.ring) { --len: 352; stroke-dasharray: 352; animation: draw 2.4s cubic-bezier(.6, 0, .2, 1) .4s both; }
+.live.t_minimal :global(.ringThin) { --len: 315; stroke-dasharray: 315; animation: draw 2.4s cubic-bezier(.6, 0, .2, 1) .8s both; }
+.t_minimal { --reveal-from: translateY(18px); }
+
+/* 2. Пионы: falling petals, swaying branches. */
+.petals :global(i) {
+  left: var(--x); top: -30px;
+  width: calc(15px * var(--s)); height: calc(11px * var(--s));
+  border-radius: 80% 0 80% 0;
+  background: var(--accent2);
+  opacity: .75;
+  animation: petalFall var(--t) linear var(--d) infinite;
+}
+.petals :global(i:nth-child(3n)) { background: color-mix(in srgb, var(--accent2) 60%, var(--accent)); }
+@keyframes petalFall {
+  0% { transform: translate(0, -30px) rotate(var(--r)); }
+  50% { transform: translate(34px, 620px) rotate(calc(var(--r) + 200deg)); }
+  100% { transform: translate(-14px, 1320px) rotate(calc(var(--r) + 400deg)); }
+}
+.t_floral .peonyTop, .t_floral .peonyBottom { animation: sway 9s ease-in-out infinite; transform-origin: 10% 10%; }
+.live.t_floral .peonyTop { animation: bloom 1.6s cubic-bezier(.2, .7, .2, 1) both, sway 9s ease-in-out 1.6s infinite; }
+@keyframes sway { 0%, 100% { rotate: 0deg; } 50% { rotate: 1.8deg; } }
+.t_floral { --reveal-filter: blur(4px); }
+
+/* 3. Ою: gold sheen on the names, rising sparks, horns drawn in. */
+.t_ornament .title {
+  background: linear-gradient(110deg, var(--ink) 38%, #fff1c4 50%, var(--ink) 62%) 0 0 / 260% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: sheen 7s ease-in-out infinite;
+}
+.live.t_ornament .title { animation: rise .9s cubic-bezier(.2, .7, .2, 1) .24s both, sheen 7s ease-in-out 1.4s infinite; }
+.live.t_ornament :global(.horn) { --len: 170; stroke-dasharray: 170; animation: draw 2.6s ease .3s both; }
+.sparks :global(i) {
+  left: var(--x); bottom: -10px; width: 3px; height: 3px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent);
+  animation: floatUp var(--t) linear var(--d) infinite;
+}
+.t_ornament { --reveal-from: translateY(14px); --reveal-filter: blur(6px); }
+
+/* 4. Шырдак: the medallion turns, stitches run. */
+.t_shyrdak .medallion { animation: turn 70s linear infinite; }
+.live.t_shyrdak .medallion { animation: spinIn 1.4s cubic-bezier(.2, .7, .2, 1) .3s both, turn 70s linear 1.7s infinite; }
+.t_shyrdak :global(.stitch) { animation: march 1.8s linear infinite; }
+@keyframes march { to { stroke-dashoffset: -14; } }
+.t_shyrdak { --reveal-from: scale(.92); --reveal-ease: cubic-bezier(.34, 1.4, .64, 1); }
+
+/* 5. Тундук: warm light through the crown. */
+.t_tunduk .hero::before {
+  content: ""; position: absolute; left: 50%; top: 20px; width: 320px; height: 320px; margin-left: -160px;
+  border-radius: 50%; background: radial-gradient(circle, rgba(255, 210, 140, .55), transparent 65%);
+  z-index: -2; animation: glow 5s ease-in-out infinite;
+}
+@keyframes glow { 0%, 100% { opacity: .55; transform: scale(1); } 50% { opacity: 1; transform: scale(1.08); } }
+
+/* 6. Звёздная ночь: shooting stars. */
+.shooting :global(i) {
+  left: var(--x); top: calc(var(--y) * .45);
+  width: 120px; height: 1.5px;
+  background: linear-gradient(90deg, transparent, #fffbe8);
+  opacity: 0;
+  animation: shoot calc(var(--t) * 1.3) linear var(--d) infinite;
+}
+@keyframes shoot {
+  0% { opacity: 0; transform: translate(0, 0) rotate(-26deg); }
+  2% { opacity: 1; }
+  9% { opacity: 0; transform: translate(-260px, 128px) rotate(-26deg); }
+  100% { opacity: 0; transform: translate(-260px, 128px) rotate(-26deg); }
+}
+.t_celestial { --reveal-filter: blur(8px); --reveal-from: none; }
+
+/* 7. Ар-деко: gold sheen, pulsing rays, glints, curtain reveals. */
+.t_deco .title {
+  background: linear-gradient(110deg, var(--ink) 38%, #ffe6a1 50%, var(--ink) 62%) 0 0 / 260% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: sheen 8s ease-in-out infinite;
+}
+.live.t_deco .title { animation: rise .9s cubic-bezier(.2, .7, .2, 1) .36s both, sheen 8s ease-in-out 1.6s infinite; }
+.t_deco :global(.ray) { animation: rayPulse 4s ease-in-out infinite; }
+.t_deco :global(.ray:nth-child(3n+1)) { animation-delay: -1.3s; }
+.t_deco :global(.ray:nth-child(3n+2)) { animation-delay: -2.6s; }
+@keyframes rayPulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+.glints :global(i) {
+  left: var(--x); top: var(--y); width: 12px; height: 12px;
+  background: #ffe6a1;
+  clip-path: polygon(50% 0, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0 50%, 40% 40%);
+  opacity: 0;
+  animation: glint var(--t) ease-in-out var(--d) infinite;
+}
+@keyframes glint { 0%, 12%, 100% { opacity: 0; transform: scale(0) rotate(0); } 6% { opacity: 1; transform: scale(var(--s)) rotate(45deg); } }
+.t_deco [data-reveal] { clip-path: inset(0); }
+.live.t_deco [data-reveal]:not([data-shown]) { clip-path: inset(0 0 100% 0); }
+.t_deco { --reveal-from: none; }
+
+/* 8. Конфетти: jelly title, bouncy sections. */
+.live.t_confetti .title { animation: rise .9s cubic-bezier(.2, .7, .2, 1) .24s both, jelly 3.6s ease-in-out 1.6s infinite; }
+@keyframes jelly { 0%, 78%, 100% { transform: none; } 84% { transform: scale(1.06, .94); } 90% { transform: scale(.97, 1.03); } 95% { transform: scale(1.01, .99); } }
+.t_confetti .kicker { animation: pillPulse 2.8s ease-in-out infinite; }
+@keyframes pillPulse { 50% { transform: scale(1.06); } }
+.t_confetti { --reveal-from: translateY(30px) scale(.9); --reveal-ease: cubic-bezier(.34, 1.56, .64, 1); }
+
+/* 9. Он или она?: drifting clouds, rising hearts. */
+.t_reveal :global(.cloud), .t_steps :global(.cloud) { animation: drift 26s ease-in-out infinite alternate; }
+.t_reveal :global(.cloudFar), .t_steps :global(.cloudFar) { animation-duration: 38s; animation-direction: alternate-reverse; }
+.hearts :global(i) {
+  left: var(--x); bottom: -24px; width: 16px; height: 16px;
+  background: var(--accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z'/%3E%3C/svg%3E") center / contain no-repeat;
+  animation: floatUp var(--t) ease-in var(--d) infinite;
+}
+.hearts :global(i:nth-child(even)) { background: var(--accent2); }
+.t_reveal { --reveal-from: translateY(24px) scale(.95); --reveal-ease: cubic-bezier(.34, 1.4, .64, 1); }
+
+/* 10. Тянь-Шань: birds, breathing sun, mist across the ridges. */
+.t_tianshan :global(.bird) { animation: fly 20s linear infinite; }
+@keyframes fly { from { transform: translate(-140px, 14px); } to { transform: translate(420px, -24px); } }
+.t_tianshan :global(.sun) { transform-box: fill-box; transform-origin: center; animation: sunBreathe 7s ease-in-out infinite; }
+@keyframes sunBreathe { 0%, 100% { transform: scale(1); opacity: .85; } 50% { transform: scale(1.07); opacity: 1; } }
+.mist {
+  position: absolute; left: -40%; width: 180%; bottom: 34px; height: 44px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55) 30%, rgba(255, 255, 255, .2) 60%, transparent);
+  filter: blur(8px);
+  animation: mistMove 16s ease-in-out infinite alternate;
+}
+@keyframes mistMove { from { transform: translateX(-18%); } to { transform: translateX(18%); } }
+.t_tianshan { --reveal-from: translateY(36px); }
+
+/* 11. Неон: sections switch on like tubes, frames pulse. */
+.t_neon .countCell { animation: neonPulse 2.6s ease-in-out infinite; }
+.t_neon .countCell:nth-child(2) { animation-delay: -.65s; }
+.t_neon .countCell:nth-child(3) { animation-delay: -1.3s; }
+.t_neon .countCell:nth-child(4) { animation-delay: -1.95s; }
+@keyframes neonPulse { 50% { box-shadow: 0 0 24px rgba(45, 226, 255, .6), inset 0 0 18px rgba(45, 226, 255, .3); } }
+.live.t_neon [data-reveal][data-shown] { animation: neonOn .9s steps(1) both; }
+@keyframes neonOn { 0% { opacity: 0; } 10% { opacity: 1; } 20% { opacity: .2; } 30% { opacity: 1; } 45% { opacity: .4; } 55%, 100% { opacity: 1; } }
+.t_neon { --reveal-from: none; }
+
+/* 12. Ретро-открытка: the stamp lands, the postmark slams. */
+.live.t_postcard .stamp { animation: stampIn .9s cubic-bezier(.2, .9, .3, 1.3) .5s both; }
+@keyframes stampIn { from { opacity: 0; transform: translateY(-40px) rotate(24deg); } to { opacity: 1; transform: rotate(4deg); } }
+.live.t_postcard .postmark { animation: slam .45s cubic-bezier(.2, .9, .3, 1.5) 1.3s both; }
+@keyframes slam { from { opacity: 0; transform: scale(1.7) rotate(-22deg); } to { opacity: .65; transform: scale(1) rotate(-8deg); } }
+.t_postcard { --reveal-from: translateY(30px) rotate(-2.5deg); }
+
+/* 13. Первые шаги: footprints walk on a loop, bubbles float. */
+.t_steps :global(.foot) { animation: walk 6s ease-in-out infinite; opacity: 0; }
+.t_steps :global(.foot:nth-child(2)) { animation-delay: .5s; }
+.t_steps :global(.foot:nth-child(3)) { animation-delay: 1s; }
+.t_steps :global(.foot:nth-child(4)) { animation-delay: 1.5s; }
+.t_steps :global(.foot:nth-child(5)) { animation-delay: 2s; }
+.t_steps :global(.foot:nth-child(6)) { animation-delay: 2.5s; }
+@keyframes walk { 0% { opacity: 0; } 6%, 62% { opacity: .85; } 78%, 100% { opacity: 0; } }
+.bubbles :global(i) {
+  left: var(--x); bottom: -30px; width: 20px; height: 20px; border-radius: 50%;
+  border: 1.5px solid rgba(62, 155, 122, .35);
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, .95), rgba(255, 255, 255, .15) 60%);
+  animation: floatUp var(--t) ease-in var(--d) infinite;
+}
+.t_steps { --reveal-from: translateY(28px) scale(.94); --reveal-ease: cubic-bezier(.34, 1.4, .64, 1); }
 
 @media (prefers-reduced-motion: reduce) {
+  .live [data-reveal] { opacity: 1 !important; transform: none !important; filter: none !important; clip-path: none !important; }
   .root *, .root *::before, .root *::after { animation: none !important; }
 }

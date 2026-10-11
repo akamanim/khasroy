@@ -440,3 +440,27 @@ export function NeonHorizon({ className }: { className?: string }) {
     </div>
   );
 }
+
+/* Generic drifting particles: position and timing come from CSS variables,
+   the look and the motion from each template's stylesheet. */
+export function Particles({ className, count }: { className?: string; count: number }) {
+  return (
+    <div className={className} aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
+        <i
+          key={i}
+          style={
+            {
+              "--x": `${(seeded(i, 21) * 100).toFixed(1)}%`,
+              "--y": `${(seeded(i, 22) * 100).toFixed(1)}%`,
+              "--d": `${(seeded(i, 23) * -14).toFixed(2)}s`,
+              "--t": `${(7 + seeded(i, 24) * 8).toFixed(2)}s`,
+              "--s": (0.6 + seeded(i, 25) * 0.8).toFixed(2),
+              "--r": `${Math.round(seeded(i, 26) * 360)}deg`,
+            } as CSSProperties
+          }
+        />
+      ))}
+    </div>
+  );
+}
