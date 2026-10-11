@@ -32,7 +32,13 @@
 
 .backdrop, .frameLayer { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
 .frameLayer { z-index: 0; }
-.frame { width: 100%; height: 100%; }
+.frame { position: absolute; inset: 14px; }
+.frame :global(span) { position: absolute; width: 64px; height: 64px; }
+.frame :global(span svg) { display: block; width: 100%; height: 100%; overflow: visible; }
+.frame :global(.hcTL) { top: 0; left: 0; }
+.frame :global(.hcTR) { top: 0; right: 0; transform: scaleX(-1); }
+.frame :global(.hcBL) { bottom: 0; left: 0; transform: scaleY(-1); }
+.frame :global(.hcBR) { bottom: 0; right: 0; transform: scale(-1, -1); }
 .hero, .body, .footer { position: relative; z-index: 1; }
 
 .langs { position: absolute; top: 14px; right: 14px; display: flex; gap: 4px; z-index: 5; }
@@ -216,8 +222,7 @@
 .t_ornament :global(.horn), .t_ornament :global(.hornThin) { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; }
 .t_ornament :global(.hornThin) { stroke-width: 1; opacity: .7; }
 .t_ornament :global(.hornFill) { fill: var(--accent); }
-.t_ornament :global(.frameLine) { fill: none; stroke: var(--accent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
-.t_ornament :global(.frameLineThin) { fill: none; stroke: var(--accent); stroke-width: .6; opacity: .6; vector-effect: non-scaling-stroke; }
+.t_ornament .frame { border: 1px solid var(--line); box-shadow: inset 0 0 0 6px transparent, inset 0 0 0 7px rgba(217, 181, 106, .18); }
 .t_ornament .photoMain { outline: 1px solid var(--accent); outline-offset: 7px; }
 .t_ornament .section h2 { text-transform: uppercase; letter-spacing: .08em; font-size: 22px; color: var(--accent); }
 .t_ornament .countCell { border-radius: 2px; }
@@ -285,7 +290,7 @@
 .t_celestial :global(.constLine) { fill: none; stroke: var(--accent); stroke-width: .8; opacity: .55; stroke-dasharray: 3 4; }
 .t_celestial :global(.constStar) { fill: var(--accent); }
 .t_celestial :global(.moon) { fill: var(--accent); }
-.t_celestial :global(.moonGlow) { fill: var(--accent); opacity: .12; }
+.t_celestial :global(.moonGlow) { fill: var(--accent); opacity: .07; }
 .t_celestial .title { text-shadow: 0 0 30px rgba(232, 207, 138, .35); }
 .t_celestial .photoMain { aspect-ratio: 1; width: 66%; box-shadow: 0 0 0 1px var(--accent), 0 0 40px rgba(232, 207, 138, .25); }
 .sparkle { font-size: 22px; color: var(--accent); text-shadow: 0 0 12px var(--accent); }
@@ -304,8 +309,8 @@
 .t_deco :global(.ray) { stroke: var(--accent); stroke-width: 1; }
 .t_deco :global(.arc) { fill: none; stroke: var(--accent); stroke-width: 1.2; }
 .t_deco :global(.decoGem) { fill: var(--accent); }
-.t_deco :global(.decoFrame) { fill: none; stroke: var(--accent); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.t_deco :global(.decoCorner) { fill: none; stroke: var(--accent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.t_deco .frame { border: 1px solid rgba(201, 162, 75, .55); }
+.t_deco :global(.decoCorner) { fill: none; stroke: var(--accent); stroke-width: 1.4; }
 .decoDivider { width: 200px; height: 28px; }
 .t_deco .kicker { font-family: var(--body); font-size: 20px; }
 .t_deco .monogram span { font-family: var(--body); font-style: italic; }
@@ -341,9 +346,9 @@
 .t_confetti .photoMain { transform: rotate(-3deg); border: 8px solid #fff; box-shadow: 0 10px 0 rgba(31, 26, 61, .08); }
 .t_confetti .rsvp { border: 0; background: #fff; box-shadow: 0 6px 0 rgba(31, 26, 61, .08); }
 .balloons { display: block; width: 62%; margin: -34px auto -10px; }
-.root :global(.balloon) { animation: bob 4s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
+.root :global(.balloon) { animation: bob 4s ease-in-out infinite; }
 .root :global(.string) { fill: none; stroke: rgba(31, 26, 61, .35); stroke-width: 1.2; }
-@keyframes bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -8px; } }
+@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 .confetti { position: absolute; inset: 0; overflow: hidden; }
 .confetti i { position: absolute; top: -20px; opacity: .85; animation: fall linear infinite; }
 @keyframes fall { from { transform: translateY(-20px) rotate(0); } to { transform: translateY(1400px) rotate(720deg); } }
@@ -433,13 +438,14 @@
 }
 .stamp {
   float: right;
-  width: 96px;
+  width: 104px;
   margin: 0 0 6px 10px;
-  padding: 6px;
+  padding: 7px;
   background: #fbf6ea;
   transform: rotate(4deg);
-  -webkit-mask: radial-gradient(circle 4px at 4px 4px, transparent 98%, #000) -4px -4px / 12px 12px;
-  mask: radial-gradient(circle 4px at 4px 4px, transparent 98%, #000) -4px -4px / 12px 12px;
+  filter: drop-shadow(0 3px 4px rgba(46, 42, 36, .18));
+  -webkit-mask: radial-gradient(circle at 50% 50%, transparent 3px, #000 3.5px) -5px -5px / 10px 10px, linear-gradient(#000 0 0) content-box;
+  mask: radial-gradient(circle at 50% 50%, transparent 3px, #000 3.5px) -5px -5px / 10px 10px, linear-gradient(#000 0 0) content-box;
 }
 .stamp svg { display: block; width: 100%; }
 .t_postcard :global(.stampInner) { fill: #9fc3d6; }
@@ -479,9 +485,10 @@
 .live.t_steps :global(.foot:nth-child(5)) { animation-delay: 1s; }
 .live.t_steps :global(.foot:nth-child(6)) { animation-delay: 1.25s; }
 @keyframes step { from { opacity: 0; } to { opacity: .85; } }
-.cord { width: 200px; height: 16px; }
-.t_steps :global(.cordDark) { fill: #2b2b2b; }
-.t_steps :global(.cordLight) { fill: #fafafa; stroke: #d5d5d5; stroke-width: .6; }
+.cord { width: 210px; height: 18px; }
+.t_steps :global(.cordDark) { fill: #262626; }
+.t_steps :global(.cordLight) { fill: #fbfbfb; }
+.t_steps :global(.cordEdge) { fill: none; stroke: rgba(0, 0, 0, .25); stroke-width: 1; }
 .t_steps .kicker { font-family: var(--hand); font-style: normal; font-size: 26px; color: var(--accent); }
 .t_steps .message { font-family: var(--hand); font-style: normal; font-size: 25px; line-height: 1.3; }
 .t_steps .wait { font-family: var(--hand); font-size: 34px; color: var(--accent); }
