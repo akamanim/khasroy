@@ -9,6 +9,9 @@ const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const PHOTO_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const ACTIVE = "status=in.(draft,submitted,approved,published)";
 const ROW = "id,slug,status,event_type,template_id,data,history,message_count,contact,created_at,updated_at";
+// The guest-list token goes only to the organizer (their own session, owner panel), never to guests.
+const ROW_PRIVATE = `${ROW},manage_token`;
+const STATUSES = ["draft", "submitted", "approved", "published", "archived"];
 
 const knownOwners = new Set<string>();
 
@@ -69,13 +72,13 @@ function obj(value: unknown) {
 
 async function latestForSession(sessionHash: string) {
   const rows = await (await db(
-    `khasroy_invitations?session_hash=eq.${sessionHash}&${ACTIVE}&select=${ROW}&order=updated_at.desc&limit=1`,
+    `khasroy_invitations?session_hash=eq.${sessionHash}&${ACTIVE}&select=${ROW_PRIVATE}&order=updated_at.desc&limit=1`,
   )).json();
   return Array.isArray(rows) && rows[0] ? rows[0] : null;
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 4 });
+  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 5 });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
@@ -94,18 +97,45 @@ Deno.serve(async (request) => {
     }
 
     if (action === "list") {
-      const status = typeof body.status === "string" && /^[a-z]{4,12}$/u.test(body.status) ? body.status : "submitted";
-      const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 100);
+      const wanted = (typeof body.status === "string" ? body.status : "submitted").split(",").filter((s: string) => STATUSES.includes(s));
+      const statuses = wanted.length ? wanted : ["submitted"];
+      const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 200);
       const rows = await (await db(
-        `khasroy_invitations?status=eq.${status}&select=${ROW}&order=updated_at.desc&limit=${limit}`,
+        `khasroy_invitations?status=in.(${statuses.join(",")})&select=${ROW_PRIVATE}&order=updated_at.desc&limit=${limit}`,
       )).json();
       return json({ invitations: rows });
+    }
+
+    if (action === "set_status") {
+      const slug = slugValue(body.slug);
+      const status = STATUSES.includes(body.status) ? body.status : "";
+      if (!slug || !status) return json({ error: "invalid" }, 400);
+      const rows = await (await db(`khasroy_invitations?slug=eq.${slug}&select=${ROW_PRIVATE}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ status, updated_at: new Date().toISOString() }),
+      })).json();
+      return json({ invitation: Array.isArray(rows) && rows[0] ? rows[0] : null });
+    }
+
+    if (action === "manage") {
+      // The organizer's secret link: slug + token must match; returns the invitation and every answer.
+      const slug = slugValue(body.slug);
+      const token = typeof body.token === "string" && /^[a-f0-9]{32}$/u.test(body.token) ? body.token : "";
+      if (!slug || !token) return json({ error: "not_found" }, 404);
+      const rows = await (await db(`khasroy_invitations?slug=eq.${slug}&manage_token=eq.${token}&${ACTIVE}&select=${ROW}&limit=1`)).json();
+      if (!Array.isArray(rows) || !rows[0]) return json({ error: "not_found" }, 404);
+      const rsvps = await (await db(
+        `khasroy_invitation_rsvps?invitation_slug=eq.${slug}&select=guest_name,answer,party_size,created_at&order=created_at.desc&limit=2000`,
+      )).json();
+      return json({ invitation: rows[0], rsvps });
     }
 
     if (action === "rsvp") {
       const slug = slugValue(body.slug);
       const name = typeof body.name === "string" ? body.name.replace(/[\u0000-\u001f]/gu, "").trim().slice(0, 80) : "";
       const answer = ["yes", "family", "no"].includes(body.answer) ? body.answer : "";
+      const party = answer === "no" ? 0 : answer === "yes" ? 1 : Math.min(Math.max(Math.round(Number(body.partySize) || 2), 2), 30);
       if (!slug || !name || !answer) return json({ error: "invalid_rsvp" }, 400);
       const rows = await (await db(`khasroy_invitations?slug=eq.${slug}&${ACTIVE}&select=slug&limit=1`)).json();
       if (!Array.isArray(rows) || !rows[0]) return json({ error: "not_found" }, 404);
@@ -118,7 +148,7 @@ Deno.serve(async (request) => {
       await db("khasroy_invitation_rsvps", {
         method: "POST",
         headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({ invitation_slug: slug, guest_name: name, answer }),
+        body: JSON.stringify({ invitation_slug: slug, guest_name: name, answer, party_size: party }),
       });
       return json({ ok: true });
     }
@@ -127,7 +157,7 @@ Deno.serve(async (request) => {
       const slug = slugValue(body.slug);
       if (!slug) return json({ error: "invalid_slug" }, 400);
       const rows = await (await db(
-        `khasroy_invitation_rsvps?invitation_slug=eq.${slug}&select=guest_name,answer,created_at&order=created_at.desc&limit=2000`,
+        `khasroy_invitation_rsvps?invitation_slug=eq.${slug}&select=guest_name,answer,party_size,created_at&order=created_at.desc&limit=2000`,
       )).json();
       return json({ rsvps: rows });
     }
@@ -227,14 +257,14 @@ Deno.serve(async (request) => {
       const existing = await latestForSession(sessionHash);
       if (existing) {
         const count = Number(existing.message_count || 0) + (body.countMessage ? 1 : 0);
-        const rows = await (await db(`khasroy_invitations?id=eq.${existing.id}&select=${ROW}`, {
+        const rows = await (await db(`khasroy_invitations?id=eq.${existing.id}&select=${ROW_PRIVATE}`, {
           method: "PATCH",
           headers: { Prefer: "return=representation" },
           body: JSON.stringify({ ...patch, message_count: count }),
         })).json();
         return json({ invitation: rows[0] });
       }
-      const rows = await (await db(`khasroy_invitations?select=${ROW}`, {
+      const rows = await (await db(`khasroy_invitations?select=${ROW_PRIVATE}`, {
         method: "POST",
         headers: { Prefer: "return=representation" },
         body: JSON.stringify({
@@ -258,7 +288,7 @@ Deno.serve(async (request) => {
         phone: typeof contact.phone === "string" ? contact.phone.replace(/[^\d+()\-\s]/gu, "").slice(0, 24) : "",
       };
       if (!clean.phone) return json({ error: "phone_required" }, 400);
-      const rows = await (await db(`khasroy_invitations?id=eq.${existing.id}&select=${ROW}`, {
+      const rows = await (await db(`khasroy_invitations?id=eq.${existing.id}&select=${ROW_PRIVATE}`, {
         method: "PATCH",
         headers: { Prefer: "return=representation" },
         body: JSON.stringify({ status: "submitted", contact: clean, updated_at: new Date().toISOString() }),

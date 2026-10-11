@@ -12,6 +12,8 @@ export function studioPayload(record: InvitationRecord | null, extra: Record<str
     invitation: (record?.data ?? null) as Invitation | null,
     history: (record?.history ?? []) as ChatTurn[],
     missing: record ? missingFields(record.data) : [],
+    // After ordering, the organizer gets their secret guest-list link.
+    guestsLink: record && record.status !== "draft" && record.manageToken ? `/i/${record.slug}/guests?k=${record.manageToken}` : null,
     ...extra,
   });
 }

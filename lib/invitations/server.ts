@@ -14,6 +14,11 @@ export type InvitationRecord = {
   data: Invitation;
   history: ChatTurn[];
   messageCount: number;
+  /** Secret for the organizer's guest-list link; present only on the organizer's own rows. */
+  manageToken?: string;
+  contact?: { name: string; phone: string };
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 type RawRow = {
@@ -22,6 +27,10 @@ type RawRow = {
   data: unknown;
   history: unknown;
   message_count: number;
+  manage_token?: string;
+  contact?: unknown;
+  created_at?: string;
+  updated_at?: string;
 };
 
 function ownerKey(): string {
@@ -46,6 +55,17 @@ function normalize(row: RawRow | null | undefined): InvitationRecord | null {
     data: applyInvitationPatch(emptyInvitation(), row.data),
     history,
     messageCount: Number(row.message_count) || 0,
+    ...(typeof row.manage_token === "string" ? { manageToken: row.manage_token } : {}),
+    ...(row.contact && typeof row.contact === "object"
+      ? {
+          contact: {
+            name: String((row.contact as Record<string, unknown>).name ?? ""),
+            phone: String((row.contact as Record<string, unknown>).phone ?? ""),
+          },
+        }
+      : {}),
+    ...(row.created_at ? { createdAt: row.created_at } : {}),
+    ...(row.updated_at ? { updatedAt: row.updated_at } : {}),
   };
 }
 
@@ -127,13 +147,44 @@ export async function uploadSessionPhoto(
 
 export type RsvpAnswer = "yes" | "family" | "no";
 
-export async function addRsvp(slug: string, name: string, answer: RsvpAnswer): Promise<void> {
-  if (!/^[a-z0-9]{6,24}$/u.test(slug)) throw new Error("invalid slug");
-  await call<{ ok: boolean }>("rsvp", { slug, name, answer });
+export type Rsvp = { guest_name: string; answer: RsvpAnswer; party_size: number; created_at: string };
+
+export class NotFoundError extends Error {}
+
+export async function addRsvp(slug: string, name: string, answer: RsvpAnswer, partySize = 1): Promise<void> {
+  if (!/^[a-z0-9]{6,24}$/u.test(slug)) throw new NotFoundError("invalid slug");
+  try {
+    await call<{ ok: boolean }>("rsvp", { slug, name, answer, partySize });
+  } catch (error) {
+    if (error instanceof Error && / 404 /u.test(error.message)) throw new NotFoundError("invitation not found");
+    throw error;
+  }
 }
 
-export async function listRsvps(slug: string): Promise<Array<{ guest_name: string; answer: RsvpAnswer; created_at: string }>> {
+export async function listRsvps(slug: string): Promise<Rsvp[]> {
   if (!/^[a-z0-9]{6,24}$/u.test(slug)) return [];
-  const result = await call<{ rsvps: Array<{ guest_name: string; answer: RsvpAnswer; created_at: string }> }>("rsvps", { slug });
+  const result = await call<{ rsvps: Rsvp[] }>("rsvps", { slug });
   return result.rsvps ?? [];
+}
+
+/** The organizer's view: invitation + all answers, only with the matching secret token. */
+export async function loadManagedInvitation(slug: string, token: string): Promise<{ record: InvitationRecord; rsvps: Rsvp[] } | null> {
+  if (!/^[a-z0-9]{6,24}$/u.test(slug) || !/^[a-f0-9]{32}$/u.test(token)) return null;
+  try {
+    const result = await call<{ invitation: RawRow | null; rsvps: Rsvp[] }>("manage", { slug, token });
+    const record = normalize(result.invitation);
+    return record ? { record, rsvps: result.rsvps ?? [] } : null;
+  } catch (error) {
+    if (error instanceof Error && / 404 /u.test(error.message)) return null;
+    throw error;
+  }
+}
+
+export async function listOrders(): Promise<InvitationRecord[]> {
+  const result = await call<{ invitations: RawRow[] }>("list", { status: "submitted,approved,published", limit: 200 });
+  return (result.invitations ?? []).map((row) => normalize(row)).filter((r): r is InvitationRecord => Boolean(r));
+}
+
+export async function setOrderStatus(slug: string, status: "submitted" | "approved" | "published" | "archived") {
+  await call("set_status", { slug, status });
 }

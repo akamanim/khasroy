@@ -25,6 +25,7 @@ type StudioState = {
   invitation: Invitation | null;
   history: Turn[];
   missing: string[];
+  guestsLink?: string | null;
 };
 
 
@@ -205,7 +206,14 @@ export default function Home() {
           ) : null}
           {busy ? <p className={`${styles.assistant} ${styles.typing}`}><span /><span /><span /></p> : null}
           {submitted ? (
-            <p className={styles.assistant}>Спасибо! Заказ принят. Мы проверим приглашение и свяжемся с вами по указанному номеру.</p>
+            <p className={styles.assistant}>
+              Спасибо! Заказ принят. Мы проверим приглашение и свяжемся с вами по указанному номеру.
+              {state.guestsLink ? (
+                <>
+                  {" "}Ответы гостей и именные ссылки — на <a href={state.guestsLink} target="_blank" rel="noopener noreferrer">вашей странице гостей</a>. Сохраните эту ссылку.
+                </>
+              ) : null}
+            </p>
           ) : null}
         </div>
 
@@ -267,6 +275,9 @@ export default function Home() {
               <a href={`/i/${state.slug}`} target="_blank" rel="noopener noreferrer">
                 <ExternalLink size={14} /> Открыть
               </a>
+              {state.guestsLink ? (
+                <a href={state.guestsLink} target="_blank" rel="noopener noreferrer">Гости</a>
+              ) : null}
               {!submitted ? (
                 <button type="button" disabled={state.missing.length > 0} onClick={() => setOrdering((v) => !v)}>
                   Оформить заказ

@@ -134,4 +134,34 @@ for (const id of TEMPLATE_IDS) {
 }
 assert.equal(demoInvitation("golden", "wedding", `https://youtu.be/${ID}`).musicVideoId, ID);
 
+// Sharing: guest names from links, guest lists, preview text.
+const { guestName, parseGuestList, personalLink, shareTitle, shareDescription } = await import("../lib/invitations/share.ts");
+assert.equal(guestName("  Асан   байке "), "Асан байке");
+assert.equal(guestName("<script>alert(1)</script>"), "scriptalert(1)/script");
+assert.equal(guestName(["Айгуль", "x"]), "Айгуль");
+assert.equal(guestName(undefined), "");
+assert.equal(guestName("а".repeat(80)).length, 60);
+assert.deepEqual(parseGuestList("Асан байке\nАйгуль эже; асан байке\n\n  Нурлан  "), ["Асан байке", "Айгуль эже", "Нурлан"]);
+assert.equal(personalLink("abc123", "Асан байке"), "https://khasroy.vercel.app/i/abc123?to=%D0%90%D1%81%D0%B0%D0%BD%20%D0%B1%D0%B0%D0%B9%D0%BA%D0%B5");
+const shareInv = sampleInvitation("golden", "wedding");
+assert.equal(shareTitle(shareInv), "Айбек & Айпери");
+assert.equal(shareTitle({ ...shareInv, languages: ["ky", "ru"] }, "Асан байке"), "Урматтуу Асан байке! Айбек & Айпери");
+assert.match(shareDescription(shareInv), /Свадьба · 12 июня 2027, 17:00 · Ресторан «Ала-Тоо»/u);
+
+// Organizer guest list: latest answer per guest, headcount with families.
+const { summarizeGuests } = await import("../lib/invitations/guests.ts");
+const summary = summarizeGuests([
+  { guest_name: "Асан", answer: "family", party_size: 4, created_at: "2026-10-11T10:00:00Z" },
+  { guest_name: "асан ", answer: "yes", party_size: 1, created_at: "2026-10-10T10:00:00Z" },
+  { guest_name: "Айгуль", answer: "yes", party_size: 1, created_at: "2026-10-09T10:00:00Z" },
+  { guest_name: "Нурлан", answer: "no", party_size: 0, created_at: "2026-10-09T11:00:00Z" },
+  { guest_name: "Старый", answer: "family", created_at: "2026-10-01T11:00:00Z" },
+]);
+assert.equal(summary.guests.length, 4);
+assert.equal(summary.guests[0].name, "Асан");
+assert.equal(summary.guests[0].changes, 1, "earlier answer is folded in");
+assert.equal(summary.people, 4 + 1 + 0 + 2, "families without a size count as two");
+assert.equal(summary.coming, 3);
+assert.equal(summary.declined, 1);
+
 console.log("invitation schema: ok");

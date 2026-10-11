@@ -51,6 +51,7 @@ const UI: Record<Lang, Record<string, string>> = {
     hosts: "Хозяева торжества", calendar_title: "Сохраните дату",
     rsvpAsk: "Пожалуйста, подтвердите ваше присутствие", yourName: "Ваше имя", ansYes: "Приду", ansFamily: "Приду с семьёй", ansNo: "К сожалению, не смогу прийти", send: "Отправить ответ", sending: "Отправляем…", thanks: "Спасибо! Ваш ответ получен.", nameErr: "Напишите ваше имя", choiceErr: "Выберите вариант ответа", sendErr: "Не удалось отправить. Попробуйте ещё раз.", previewNote: "Форма заработает в опубликованном приглашении",
     open: "Открыть приглашение", invited: "Вы приглашены", musicOn: "Включить музыку", musicOff: "Выключить музыку",
+    greet: "{name}, приглашаем вас!", partySize: "Сколько вас будет?",
   },
   ky: {
     program: "Программа", place: "Өтүүчү жер", map: "Картаны ачуу", calendar: "Календарга кошуу",
@@ -61,6 +62,7 @@ const UI: Record<Lang, Record<string, string>> = {
     hosts: "Той ээлери", calendar_title: "Датаны белгилеп алыңыз",
     rsvpAsk: "Сураныч, келериңизди тастыктаңыз", yourName: "Атыңыз", ansYes: "Барам", ansFamily: "Үй-бүлөм менен барам", ansNo: "Тилекке каршы, бара албайм", send: "Жоопту жөнөтүү", sending: "Жөнөтүлүүдө…", thanks: "Рахмат! Жообуңуз кабыл алынды.", nameErr: "Атыңызды жазыңыз", choiceErr: "Жооп вариантын тандаңыз", sendErr: "Жөнөтүлгөн жок. Кайра аракет кылыңыз.", previewNote: "Форма жарыяланган чакырууда иштейт",
     open: "Чакырууну ачуу", invited: "Сиз чакырылдыңыз", musicOn: "Музыканы күйгүзүү", musicOff: "Музыканы өчүрүү",
+    greet: "Урматтуу {name}!", partySize: "Канча адам болосуздар?",
   },
   en: {
     program: "Programme", place: "Venue", map: "Open map", calendar: "Add to calendar",
@@ -71,6 +73,7 @@ const UI: Record<Lang, Record<string, string>> = {
     hosts: "Hosted by", calendar_title: "Save the date",
     rsvpAsk: "Please confirm your attendance", yourName: "Your name", ansYes: "I will come", ansFamily: "Coming with family", ansNo: "Sorry, I can't make it", send: "Send answer", sending: "Sending…", thanks: "Thank you! Your answer has been received.", nameErr: "Enter your name", choiceErr: "Choose an answer", sendErr: "Could not send. Please try again.", previewNote: "The form works in the published invitation",
     open: "Open invitation", invited: "You are invited", musicOn: "Play music", musicOff: "Mute music",
+    greet: "Dear {name},", partySize: "How many of you?",
   },
 };
 
@@ -325,8 +328,21 @@ function Title({ inv }: { inv: Invitation }) {
 
 type RsvpAnswer = "yes" | "family" | "no";
 
-function RsvpForm({ slug, live, demo = false, t }: { slug?: string; live: boolean; demo?: boolean; t: Record<string, string> }) {
-  const [name, setName] = useState("");
+function RsvpForm({
+  slug,
+  live,
+  demo = false,
+  guest = "",
+  t,
+}: {
+  slug?: string;
+  live: boolean;
+  demo?: boolean;
+  guest?: string;
+  t: Record<string, string>;
+}) {
+  const [name, setName] = useState(guest);
+  const [party, setParty] = useState(2);
   const [answer, setAnswer] = useState<RsvpAnswer | null>(null);
   const [state, setState] = useState<"idle" | "sending" | "done">("idle");
   const [error, setError] = useState("");
@@ -347,7 +363,7 @@ function RsvpForm({ slug, live, demo = false, t }: { slug?: string; live: boolea
       const response = await fetch("/api/invite/rsvp", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ slug, name: name.trim(), answer }),
+        body: JSON.stringify({ slug, name: name.trim(), answer, partySize: party }),
       });
       if (!response.ok) throw new Error(String(response.status));
       setState("done");
@@ -391,6 +407,20 @@ function RsvpForm({ slug, live, demo = false, t }: { slug?: string; live: boolea
           </button>
         ))}
       </div>
+      {answer === "family" ? (
+        <label className={styles.rsvpParty}>
+          <span>{t.partySize}</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={2}
+            max={30}
+            value={party}
+            onChange={(e) => setParty(Math.min(Math.max(Number(e.target.value) || 2, 2), 30))}
+            disabled={!enabled}
+          />
+        </label>
+      ) : null}
       {error ? <p className={styles.rsvpError} role="alert">{error}</p> : null}
       <button type="submit" className={styles.rsvpSend} disabled={!enabled || state === "sending"}>
         {state === "sending" ? t.sending : t.send}
@@ -416,11 +446,14 @@ export function InvitationView({
   live = true,
   slug,
   demo = false,
+  guest = "",
 }: {
   invitation: Invitation;
   live?: boolean;
   slug?: string;
   demo?: boolean;
+  /** Personal invitations: the guest's name from ?to=, shown as a greeting and prefilled in RSVP. */
+  guest?: string;
 }) {
   const languages = invitation.languages.length ? invitation.languages : (["ru"] as Lang[]);
   const [lang, setLang] = useState<Lang>(languages[0]);
@@ -442,6 +475,7 @@ export function InvitationView({
       ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${invitation.venue.name} ${invitation.venue.address}`.trim())}`
       : "");
   const calHref = calendarHref(invitation, title);
+  const greeting = guest ? t.greet.replace("{name}", guest) : "";
   const mono = initials(invitation);
 
   const hasMusic = live && Boolean(invitation.musicVideoId);
@@ -503,7 +537,7 @@ export function InvitationView({
       {hasMusic ? (
         <div className={`${styles.cover} ${opened ? styles.coverOpen : ""}`} aria-hidden={opened}>
           <div className={styles.coverInner}>
-            <p className={styles.kicker}>{t.invited}</p>
+            <p className={styles.kicker}>{greeting || t.invited}</p>
             <Title inv={invitation} />
             {invitation.date ? <p className={styles.date}><span>{formatDate(invitation, lang)}</span></p> : null}
             <button type="button" className={styles.button} onClick={openInvitation} tabIndex={opened ? -1 : 0}>
@@ -512,6 +546,8 @@ export function InvitationView({
           </div>
         </div>
       ) : null}
+
+      {greeting ? <p className={styles.guestGreeting}>{greeting}</p> : null}
 
       {languages.length > 1 ? (
         <nav className={styles.langs} aria-label="Language">
@@ -625,7 +661,7 @@ export function InvitationView({
                     {new Date(`${invitation.rsvpDeadline}T12:00:00+06:00`).toLocaleDateString(LOCALE[lang], { day: "numeric", month: "long", timeZone: "Asia/Bishkek" })}
                   </p>
                 ) : null}
-                <RsvpForm slug={slug} live={live} demo={demo} t={t} />
+                <RsvpForm slug={slug} live={live} demo={demo} guest={guest} t={t} />
               </div>
               <ScallopCap className={`${styles.gCap} ${styles.gCapBottom}`} />
             </section>
@@ -751,7 +787,7 @@ export function InvitationView({
                 {new Date(`${invitation.rsvpDeadline}T12:00:00+06:00`).toLocaleDateString(LOCALE[lang], { day: "numeric", month: "long", timeZone: "Asia/Bishkek" })}
               </p>
             ) : null}
-            <RsvpForm slug={slug} live={live} demo={demo} t={t} />
+            <RsvpForm slug={slug} live={live} demo={demo} guest={guest} t={t} />
           </section>
         ) : null}
 

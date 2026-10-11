@@ -1,0 +1,45 @@
+.page {
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow-y: auto;
+  background: #f6f3ee;
+  color: #1f1b17;
+  font: 15px/1.5 Manrope, system-ui, -apple-system, sans-serif;
+}
+.shell { max-width: 760px; margin: 0 auto; padding: 28px 16px 60px; display: grid; gap: 18px; }
+.header h1 { margin: 2px 0 4px; font-size: 26px; letter-spacing: 0; }
+.kicker { margin: 0; color: #8a6d45; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+.muted { margin: 2px 0; color: #756c63; font-size: 14px; }
+.muted a { color: inherit; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.stats div { background: #fff; border: 1px solid #e7e0d6; border-radius: 14px; padding: 14px; display: grid; gap: 2px; }
+.stats b { font-size: 28px; }
+.stats span { color: #756c63; font-size: 13px; }
+.card { background: #fff; border: 1px solid #e7e0d6; border-radius: 16px; padding: 16px; display: grid; gap: 10px; }
+.card h2 { margin: 0; font-size: 17px; }
+.cardHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.button {
+  justify-self: start; padding: 8px 14px; border-radius: 999px; border: 0; cursor: pointer;
+  background: #1f6f5c; color: #fff; font: inherit; font-size: 14px; text-decoration: none;
+}
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th { text-align: left; color: #756c63; font-weight: 500; padding: 6px 8px; border-bottom: 1px solid #e7e0d6; }
+.table td { padding: 8px; border-bottom: 1px solid #f0ebe3; vertical-align: top; }
+.table small { color: #a0968b; }
+.no td { color: #a0968b; }
+.links { display: grid; gap: 10px; }
+.links textarea {
+  width: 100%; box-sizing: border-box; border: 1px solid #e0d8cc; border-radius: 12px; padding: 10px 12px;
+  font: inherit; resize: vertical; background: #fcfaf7;
+}
+.links ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.links li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f0ebe3; }
+.links li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.links li button, .links li a {
+  padding: 5px 10px; border-radius: 999px; border: 1px solid #d9cfc1; background: #fff;
+  color: inherit; font: inherit; font-size: 13px; cursor: pointer; text-decoration: none;
+}
+@media (max-width: 520px) {
+  .stats b { font-size: 22px; }
+  .table th:nth-child(4), .table td:nth-child(4) { display: none; }
+}
