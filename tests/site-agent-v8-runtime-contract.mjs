@@ -11,7 +11,7 @@ assert.match(route, /resolveAISecrets\(ownerKey\)/, "Site Agent must resolve pro
 assert.match(route, /installProviderFailover\(\)/, "active Site Agent must install provider failover");
 assert.match(route, /installPersistentProviderGate\(\)/, "active Site Agent must install persistent provider health gate");
 assert.match(runtime, /openaiApiKey\?: string/, "resilient runtime must accept a Vault OpenAI key");
-assert.match(runtime, /provider: "openai"/, "resilient runtime must expose OpenAI fallback");
+assert.doesNotMatch(runtime, /api\.openai\.com/, "OpenAI (ChatGPT) is switched off by the owner");
 assert.match(runtime, /provider: "groq"/, "resilient runtime must keep Groq as primary");
 assert.match(v8, /async function calibratedAudit/, "v8 calibrated audit stage must remain present");
 assert.match(v8Provider, /siteAgentJson/, "v8 provider boundary must delegate to shared resilient runtime");

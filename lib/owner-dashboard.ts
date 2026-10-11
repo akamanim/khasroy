@@ -6,7 +6,7 @@ import { dashboardStats, type DashboardStats } from "@/lib/invitations/server";
 // marked as unknown — the console never shows a status it did not check.
 
 export type ProviderStatus = {
-  id: "groq" | "cloudflare" | "openai";
+  id: "groq" | "cloudflare";
   name: string;
   state: "ok" | "limited" | "error" | "missing" | "unchecked";
   detail: string;
@@ -40,23 +40,13 @@ async function checkProviders(ownerKey: string): Promise<ProviderStatus[]> {
   const groqKey = await resolveSecret(ownerKey, "groq", [process.env.GROQ_API_KEY]).catch(() => "");
   const cfAccount = process.env.CLOUDFLARE_ACCOUNT_ID?.trim() ?? "";
   const cfToken = process.env.CLOUDFLARE_AI_TOKEN?.trim() ?? "";
-  const openaiKey = await resolveSecret(ownerKey, "openai", [process.env.OPENAI_API_KEY]).catch(() => "");
 
-  const [groq, cf, openai] = await Promise.all([
+  const [groq, cf] = await Promise.all([
     groqKey
       ? probe("https://api.groq.com/openai/v1/models", { headers: { authorization: `Bearer ${groqKey}` } })
       : Promise.resolve(null),
     cfAccount && cfToken
       ? probe("https://api.cloudflare.com/client/v4/user/tokens/verify", { headers: { authorization: `Bearer ${cfToken}` } })
-      : Promise.resolve(null),
-    // The cheapest real check of OpenAI billing: a one-token completion. A key without billing
-    // answers 429 insufficient_quota.
-    openaiKey
-      ? probe("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { authorization: `Bearer ${openaiKey}`, "content-type": "application/json" },
-          body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: "ok" }], max_tokens: 1 }),
-        })
       : Promise.resolve(null),
   ]);
 
@@ -73,15 +63,6 @@ async function checkProviders(ownerKey: string): Promise<ProviderStatus[]> {
       : cf.status === 200
         ? { id: "cloudflare", name: "Cloudflare · Llama", state: "ok", detail: "токен работает" }
         : { id: "cloudflare", name: "Cloudflare · Llama", state: "error", detail: `ошибка ${cf.status || "сети"}` },
-    !openai
-      ? { id: "openai", name: "OpenAI", state: "missing", detail: "нет ключа" }
-      : openai.status === 200
-        ? { id: "openai", name: "OpenAI", state: "ok", detail: "ключ работает" }
-        : /insufficient_quota|billing/iu.test(openai.body)
-          ? { id: "openai", name: "OpenAI", state: "error", detail: "нет оплаты" }
-          : openai.status === 429
-            ? { id: "openai", name: "OpenAI", state: "limited", detail: "лимит" }
-            : { id: "openai", name: "OpenAI", state: "error", detail: `ошибка ${openai.status || "сети"}` },
   ];
   providerCache = { at: Date.now(), value };
   return value;

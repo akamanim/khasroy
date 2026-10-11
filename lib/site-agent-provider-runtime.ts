@@ -48,19 +48,13 @@ const PROVIDER_PRIORITY: Record<SiteAgentProvider, number> = { groq: 96, openai:
 function providers(groqApiKey?: string, openaiApiKey?: string): ProviderConfig[] {
   const result: ProviderConfig[] = [];
   const groqKey = groqApiKey || process.env.GROQ_API_KEY;
-  const openaiKey = openaiApiKey || process.env.OPENAI_API_KEY;
   if (groqKey) result.push({
     provider: "groq",
     apiKey: groqKey,
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
     model: process.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b",
   });
-  if (openaiKey) result.push({
-    provider: "openai",
-    apiKey: openaiKey,
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    model: process.env.OPENAI_SITE_AGENT_MODEL || "gpt-5-mini",
-  });
+  void openaiApiKey; // OpenAI (ChatGPT) is switched off by the owner.
   return result;
 }
 

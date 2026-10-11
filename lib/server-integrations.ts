@@ -103,9 +103,8 @@ export async function resolveAISecrets(ownerKey: string): Promise<ResolvedAISecr
     resolveSecret(ownerKey, "groq", [process.env.GROQ_API_KEY]).catch(
       () => process.env.GROQ_API_KEY?.trim() || "",
     ),
-    resolveSecret(ownerKey, "openai", [process.env.OPENAI_API_KEY]).catch(
-      () => process.env.OPENAI_API_KEY?.trim() || "",
-    ),
+    // OpenAI (ChatGPT) is switched off by the owner: Khasroy never calls it.
+    Promise.resolve(""),
     resolveSecret(ownerKey, "gemini", [process.env.GEMINI_API_KEY]).catch(
       () => process.env.GEMINI_API_KEY?.trim() || "",
     ),
