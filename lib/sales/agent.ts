@@ -20,6 +20,8 @@ export type SalesResult = {
   lead: Lead | null;
   checked: boolean;
   diagnostic?: string;
+  /** Which model wrote the reply ("" when the honest fallback text was used). */
+  model?: string;
   /** The model's full JSON answer, for variants that ask for extra fields (stage, data). */
   raw?: Record<string, unknown>;
 };
@@ -160,9 +162,11 @@ export async function runSalesAgent(
   const problems: string[] = [];
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let parsed: ReturnType<typeof parse> = null;
+    let usedModel = "";
     for (const model of options.models ?? (process.env.KHASROY_SALES_MODEL ? [process.env.KHASROY_SALES_MODEL, ...DEFAULT_MODELS] : DEFAULT_MODELS)) {
       try {
         parsed = parse(await complete(apiKey, model, messages, options));
+        usedModel = model;
         if (parsed && typeof parsed.reply === "string" && parsed.reply.trim()) break;
         problems.push(`${model}: unparseable answer`);
       } catch (error) {
@@ -189,8 +193,8 @@ export async function runSalesAgent(
       .map((id) => catalog.products.find((p) => p.id === id))
       .filter((p): p is Product => Boolean(p))
       .slice(0, 3);
-    return { reply, products: shown, lead: leadFrom(parsed.lead, customerText), checked: true, raw: parsed as Record<string, unknown> };
+    return { reply, products: shown, lead: leadFrom(parsed.lead, customerText), checked: true, model: usedModel, raw: parsed as Record<string, unknown> };
   }
 
-  return { reply: FALLBACK, products: [], lead: null, checked: false, diagnostic: problems.join("; ").slice(0, 500) };
+  return { reply: FALLBACK, products: [], lead: null, checked: false, model: "", diagnostic: problems.join("; ").slice(0, 500) };
 }

@@ -5,11 +5,17 @@ import { ArrowUp } from "lucide-react";
 import styles from "./sales.module.css";
 
 type Card = { id: string; name: string; price: string; photo: string; link: string; stock: string };
-type Turn = { role: "user" | "assistant"; content: string; products?: Card[]; note?: string };
+type Turn = { role: "user" | "assistant"; content: string; products?: Card[]; note?: string; model?: string };
 
 function priceLabel(price: string, currency: string) {
   if (!price) return "";
   return /^\d[\d\s.,]*$/u.test(price) && currency ? `${price.replace(/\B(?=(\d{3})+(?!\d))/gu, " ")} ${currency}` : price;
+}
+
+function modelLabel(model: string) {
+  if (model.startsWith("llama")) return `Llama 3.3 · ${model}`;
+  if (model.startsWith("openai/gpt-oss")) return `GPT-OSS · ${model}`;
+  return model;
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -116,6 +122,7 @@ export function SalesChat({
         products?: Card[];
         leadSaved?: boolean;
         error?: string;
+        model?: string;
         stage?: string;
         data?: Record<string, string>;
       };
@@ -128,6 +135,7 @@ export function SalesChat({
           content: data.reply as string,
           products: data.products ?? [],
           note: data.leadSaved ? "Контакт передан менеджеру" : undefined,
+          model: data.model || "без модели (запасной ответ)",
         },
       ]);
     } catch (e) {
@@ -176,6 +184,7 @@ export function SalesChat({
               </div>
             )}
             {turn.note && <span className={styles.note}>✓ {turn.note}</span>}
+            {turn.model && <span className={styles.model}>{modelLabel(turn.model)}</span>}
           </div>
         ))}
         {busy && (
