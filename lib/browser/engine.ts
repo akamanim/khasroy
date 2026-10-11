@@ -38,8 +38,10 @@ const resolveAll = async (host: string) => (await lookup(host, { all: true })).m
 
 export async function launch(): Promise<Browser> {
   const executablePath = await chromium.executablePath();
+  // Newer @sparticuz/chromium versions expose args as a promise; older ones as an array.
+  const chromiumArgs = await Promise.resolve(chromium.args as string[] | Promise<string[]>);
   return puppeteer.launch({
-    args: puppeteer.defaultArgs({ args: chromium.args, headless: "shell" }),
+    args: puppeteer.defaultArgs({ args: chromiumArgs, headless: "shell" }),
     defaultViewport: { ...VIEWPORT, deviceScaleFactor: 1 },
     executablePath,
     headless: "shell",
@@ -195,7 +197,7 @@ export async function perform(page: Page, action: ManualAction) {
     }
     case "type": {
       const point = typeof action.index === "number" ? await pointOf(page, action.index) : action.x !== undefined && action.y !== undefined ? { x: action.x, y: action.y } : null;
-      if (point) await page.mouse.click(clamp(point.x, VIEWPORT.width), clamp(point.y, VIEWPORT.height), { clickCount: 3 });
+      if (point) await page.mouse.click(clamp(point.x, VIEWPORT.width), clamp(point.y, VIEWPORT.height), { count: 3 });
       await page.keyboard.type(action.text.slice(0, 500), { delay: 15 });
       if (action.enter) await page.keyboard.press("Enter");
       await settle(page);
