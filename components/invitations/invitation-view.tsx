@@ -325,12 +325,12 @@ function Title({ inv }: { inv: Invitation }) {
 
 type RsvpAnswer = "yes" | "family" | "no";
 
-function RsvpForm({ slug, live, t }: { slug?: string; live: boolean; t: Record<string, string> }) {
+function RsvpForm({ slug, live, demo = false, t }: { slug?: string; live: boolean; demo?: boolean; t: Record<string, string> }) {
   const [name, setName] = useState("");
   const [answer, setAnswer] = useState<RsvpAnswer | null>(null);
   const [state, setState] = useState<"idle" | "sending" | "done">("idle");
   const [error, setError] = useState("");
-  const enabled = live && Boolean(slug);
+  const enabled = live && (demo || Boolean(slug));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -338,6 +338,10 @@ function RsvpForm({ slug, live, t }: { slug?: string; live: boolean; t: Record<s
     if (!name.trim()) return setError(t.nameErr);
     if (!answer) return setError(t.choiceErr);
     setError("");
+    if (demo) {
+      setState("done");
+      return;
+    }
     setState("sending");
     try {
       const response = await fetch("/api/invite/rsvp", {
@@ -407,7 +411,17 @@ function Swatches({ colors }: { colors: string[] }) {
   );
 }
 
-export function InvitationView({ invitation, live = true, slug }: { invitation: Invitation; live?: boolean; slug?: string }) {
+export function InvitationView({
+  invitation,
+  live = true,
+  slug,
+  demo = false,
+}: {
+  invitation: Invitation;
+  live?: boolean;
+  slug?: string;
+  demo?: boolean;
+}) {
   const languages = invitation.languages.length ? invitation.languages : (["ru"] as Lang[]);
   const [lang, setLang] = useState<Lang>(languages[0]);
   useEffect(() => {
@@ -611,7 +625,7 @@ export function InvitationView({ invitation, live = true, slug }: { invitation: 
                     {new Date(`${invitation.rsvpDeadline}T12:00:00+06:00`).toLocaleDateString(LOCALE[lang], { day: "numeric", month: "long", timeZone: "Asia/Bishkek" })}
                   </p>
                 ) : null}
-                <RsvpForm slug={slug} live={live} t={t} />
+                <RsvpForm slug={slug} live={live} demo={demo} t={t} />
               </div>
               <ScallopCap className={`${styles.gCap} ${styles.gCapBottom}`} />
             </section>
@@ -737,7 +751,7 @@ export function InvitationView({ invitation, live = true, slug }: { invitation: 
                 {new Date(`${invitation.rsvpDeadline}T12:00:00+06:00`).toLocaleDateString(LOCALE[lang], { day: "numeric", month: "long", timeZone: "Asia/Bishkek" })}
               </p>
             ) : null}
-            <RsvpForm slug={slug} live={live} t={t} />
+            <RsvpForm slug={slug} live={live} demo={demo} t={t} />
           </section>
         ) : null}
 

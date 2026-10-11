@@ -464,3 +464,24 @@ export function sampleInvitation(templateId: TemplateId, eventType: EventType = 
     dressColors: ["#1d1d1f", "#9b2335", "#1f3b8a", "#d4af62", "#f5f2ea"],
   };
 }
+
+const DEMO_KY: Record<EventType, string> = {
+  wedding: "Сиздерди биздин үйлөнүү тоюбузга чакырабыз! Кубанычыбызды бирге бөлүшөлү.",
+  birthday: "Туулган күнүмө чакырам! Майрамды бирге белгилейли.",
+  gender_party: "Үй-бүлөбүзгө ким келерин бирге билели!",
+  tushoo_toi: "Уулубуздун тушоо тоюна чакырабыз!",
+  kyz_uzatuu: "Кызыбыздын кыз узатуу тоюна чакырабыз!",
+  corporate: "Жамаатыбызды майрамдык кечеге чакырабыз!",
+};
+
+/** Full-featured example used on the public demo pages: two languages, music, contacts. */
+export function demoInvitation(templateId: TemplateId, eventType: EventType, musicUrl = ""): Invitation {
+  const sample = sampleInvitation(templateId, eventType);
+  return applyInvitationPatch(sample, {
+    languages: ["ru", "ky"],
+    message: { ru: sample.message.ru ?? "", ky: DEMO_KY[eventType] },
+    contacts: [{ name: "Айгуль", phone: "+996 700 123 456" }],
+    rsvpDeadline: "2027-06-01",
+    musicUrl,
+  });
+}
