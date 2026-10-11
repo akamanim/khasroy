@@ -16,7 +16,7 @@ export function SalesChat({ shop, currency, count }: { shop: string; currency: s
   const [turns, setTurns] = useState<Turn[]>([
     {
       role: "assistant",
-      content: `Здравствуйте! Я консультант «${shop}». Подскажу по товарам, ценам, наличию и доставке. Что ищете?`,
+      content: `Здравствуйте! Я консультант магазина ${shop}. Подскажу по товарам, ценам, наличию и доставке. Что ищете?`,
     },
   ]);
   const [input, setInput] = useState("");
