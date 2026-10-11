@@ -128,8 +128,9 @@ function Countdown({ target, lang, live }: { target: Date; lang: Lang; live: boo
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [live]);
-  if (now === null) return null;
-  const diff = Math.max(0, target.getTime() - now);
+  // The section renders immediately so the scroll-reveal observer can find it;
+  // the digits fill in once the client clock is known.
+  const diff = now === null ? 0 : Math.max(0, target.getTime() - now);
   const t = UI[lang];
   const cells: Array<[number, string]> = [
     [Math.floor(diff / 86_400_000), t.days],
@@ -143,7 +144,7 @@ function Countdown({ target, lang, live }: { target: Date; lang: Lang; live: boo
       <div className={styles.countRow}>
         {cells.map(([value, label]) => (
           <div key={label} className={styles.countCell}>
-            <strong key={value} className={styles.tick}>{String(value).padStart(2, "0")}</strong>
+            <strong key={value} className={styles.tick}>{now === null ? "··" : String(value).padStart(2, "0")}</strong>
             <span>{label}</span>
           </div>
         ))}
