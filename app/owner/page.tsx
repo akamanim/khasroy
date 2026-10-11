@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, memo, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, PanelLeft, PanelRight, Plus, ShieldCheck } from "lucide-react";
 import { Core } from "@/components/khasroy/core";
 import { MarkdownMessage } from "@/components/khasroy/markdown-message";
@@ -21,6 +21,15 @@ const welcome: Message = {
     "Я на связи. Слева — ваши инструменты и их цифры, справа — моё состояние. С чего начнём?",
 };
 
+// Only the message that is still typing re-renders; finished ones keep their markup.
+const Bubble = memo(function Bubble({ role, content }: { role: Message["role"]; content: string }) {
+  return (
+    <article className={role === "user" ? styles.me : styles.ai}>
+      {role === "assistant" ? <MarkdownMessage content={content} /> : <p>{content}</p>}
+    </article>
+  );
+});
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([welcome]);
   const [input, setInput] = useState("");
@@ -39,6 +48,8 @@ export default function Home() {
   const bottom = useRef<HTMLDivElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+  const followRef = useRef<() => void>(() => undefined);
+  const lastOwnerMessage = useRef("");
   const [atBottom, setAtBottom] = useState(true);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
@@ -53,20 +64,53 @@ export default function Home() {
   const field = useRef<HTMLTextAreaElement>(null);
 
 
-  // Follow the conversation only while the reader is at the bottom. The answer types itself
-  // out and grows every few milliseconds, so we pin scrollTop on each resize instead of
-  // restarting a smooth scrollIntoView (which also dragged the whole page) on every update.
+  // Follow the conversation only while the reader is at the bottom. Any upward wheel, touch
+  // or key scroll releases it at once; it re-attaches only when the reader returns to the very
+  // bottom or presses the "к новому" button. Our own scrollTop writes are ignored by the
+  // scroll listener, so a growing answer can never re-capture a reader who scrolled away.
   useEffect(() => {
     const el = log.current;
     if (!el) return;
+    let ownScroll = -1;
+    let touching = false;
+    let frame = 0;
+    const release = () => {
+      if (!stickToBottom.current) return;
+      stickToBottom.current = false;
+      setAtBottom(false);
+    };
+    const distance = () => el.scrollHeight - el.scrollTop - el.clientHeight;
     const onScroll = () => {
-      stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-      setAtBottom(stickToBottom.current);
+      if (ownScroll >= 0 && Math.abs(el.scrollTop - ownScroll) < 2) return;
+      ownScroll = -1;
+      const bottomNow = distance() < 6;
+      if (bottomNow && !touching) {
+        stickToBottom.current = true;
+        setAtBottom(true);
+      } else if (!bottomNow) release();
+    };
+    const onWheel = (event: WheelEvent) => { if (event.deltaY < 0) release(); };
+    const onTouchStart = () => { touching = true; };
+    const onTouchMove = () => release();
+    const onTouchEnd = () => { touching = false; };
+    const onKey = (event: KeyboardEvent) => {
+      if (["ArrowUp", "PageUp", "Home"].includes(event.key)) release();
     };
     const follow = () => {
-      if (stickToBottom.current) el.scrollTop = el.scrollHeight;
+      if (!stickToBottom.current || frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (!stickToBottom.current) return;
+        el.scrollTop = el.scrollHeight;
+        ownScroll = el.scrollTop;
+      });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("keydown", onKey);
     const observer = new ResizeObserver(follow);
     for (const child of Array.from(el.children)) observer.observe(child);
     const mutations = new MutationObserver(() => {
@@ -74,9 +118,16 @@ export default function Home() {
       follow();
     });
     mutations.observe(el, { childList: true });
+    followRef.current = follow;
     follow();
     return () => {
+      cancelAnimationFrame(frame);
       el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("keydown", onKey);
       observer.disconnect();
       mutations.disconnect();
     };
@@ -85,9 +136,12 @@ export default function Home() {
   useEffect(() => {
     // A new message from the owner always brings the view back down.
     const last = messages[messages.length - 1];
-    if (last?.role === "user") stickToBottom.current = true;
-    const el = log.current;
-    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+    if (last?.role === "user" && last.id !== lastOwnerMessage.current) {
+      lastOwnerMessage.current = last.id;
+      stickToBottom.current = true;
+      setAtBottom(true);
+    }
+    followRef.current();
   }, [messages, busy, progressLog]);
 
   async function finishChat(next: Message[]) {
@@ -279,9 +333,7 @@ export default function Home() {
           <div ref={log} className={styles.messages} role="log" aria-live="polite" aria-label="История сообщений">
             <div className={styles.spacer} />
             {messages.filter((m) => m.role === "user" || m.content).map((m) => (
-              <article key={m.id} className={m.role === "user" ? styles.me : styles.ai}>
-                {m.role === "assistant" ? <MarkdownMessage content={m.content} /> : <p>{m.content}</p>}
-              </article>
+              <Bubble key={m.id} role={m.role} content={m.content} />
             ))}
             {busy ? (
               <div className={styles.progress} role="status" aria-live="polite">

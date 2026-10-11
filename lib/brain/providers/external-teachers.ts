@@ -62,9 +62,8 @@ export function withExternalTeacherKeys<T>(keys: ExternalTeacherKeys, run: () =>
 }
 export function externalTeacherConfigured(provider: ExternalTeacher) {
   const direct = Boolean(contextKey(provider) || envKey(provider));
-  if (provider === "openai") {
-    return enabledFlag("KHASROY_OPENAI_ENABLED", Boolean(contextKey(provider))) && (direct || vaultCapable());
-  }
+  // OpenAI (ChatGPT) is switched off by the owner.
+  if (provider === "openai") return false;
   if (provider === "gemini") {
     return enabledFlag("KHASROY_GEMINI_ENABLED", true) && (direct || vaultCapable());
   }
