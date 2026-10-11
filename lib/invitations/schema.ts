@@ -142,7 +142,7 @@ export const TEMPLATE_META: Record<TemplateId, TemplateMeta> = {
     fonts: ["Kurale", "Manrope:wght@400;600"],
   },
   golden: {
-    name: "Алтын баракча", note: "Фото на весь экран, золотые фигурные карточки и рукописные имена",
+    name: "Свадьба востока", note: "Фото на весь экран, золотые фигурные карточки и рукописные имена",
     paletteable: false, defaultPalette: "gold", pageBg: "#2a1d14",
     events: ["wedding", "kyz_uzatuu", "tushoo_toi", "birthday", "corporate"],
     fonts: ["Great Vibes", "Cormorant Garamond:ital,wght@0,400;0,500;0,600;1,400", "Montserrat:wght@400;500"],
@@ -428,6 +428,14 @@ export function displayTitle(inv: Invitation): string {
 }
 
 /** Sample content used by the template gallery. */
+// Example photos for templates built around photography. Free under the Unsplash License
+// (Almaz Nourzhanov, Dmitrii Filatov; Almaty). Hot-linked from Unsplash's CDN; only samples
+// use them, client photos still go through PHOTO_HOSTS validation.
+const unsplash = (id: string) => `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=1080&q=75`;
+const SAMPLE_PHOTOS: Partial<Record<TemplateId, string[]>> = {
+  golden: [unsplash("1764091938954-edccbabd5ef1"), unsplash("1764091939068-1d6cf14bfa5a"), unsplash("1780511440969-1d689c8f3b92")],
+};
+
 export function sampleInvitation(templateId: TemplateId, eventType: EventType = "wedding"): Invitation {
   const base = emptyInvitation(eventType);
   const samples: Record<EventType, Partial<Invitation>> = {
@@ -462,6 +470,7 @@ export function sampleInvitation(templateId: TemplateId, eventType: EventType = 
     dressCode: "Нарядно, в светлых тонах",
     inviters: "Родители: Асан и Айгуль",
     dressColors: ["#1d1d1f", "#9b2335", "#1f3b8a", "#d4af62", "#f5f2ea"],
+    photos: [...(SAMPLE_PHOTOS[templateId] ?? [])],
   };
 }
 
