@@ -52,6 +52,7 @@ const UI: Record<Lang, Record<string, string>> = {
     rsvpAsk: "Пожалуйста, подтвердите ваше присутствие", yourName: "Ваше имя", ansYes: "Приду", ansFamily: "Приду с семьёй", ansNo: "К сожалению, не смогу прийти", send: "Отправить ответ", sending: "Отправляем…", thanks: "Спасибо! Ваш ответ получен.", nameErr: "Напишите ваше имя", choiceErr: "Выберите вариант ответа", sendErr: "Не удалось отправить. Попробуйте ещё раз.", previewNote: "Форма заработает в опубликованном приглашении",
     open: "Открыть приглашение", invited: "Вы приглашены", musicOn: "Включить музыку", musicOff: "Выключить музыку",
     greet: "{name}, приглашаем вас!", partySize: "Сколько вас будет?",
+    route2gis: "Маршрут в 2ГИС", wishes: "Пожелания", wishText: "Ваше пожелание", wishSend: "Оставить пожелание", wishThanks: "Спасибо! Пожелание опубликовано.", wishEmpty: "Станьте первым, кто оставит пожелание", wishErr: "Напишите имя и пожелание",
   },
   ky: {
     program: "Программа", place: "Өтүүчү жер", map: "Картаны ачуу", calendar: "Календарга кошуу",
@@ -63,6 +64,7 @@ const UI: Record<Lang, Record<string, string>> = {
     rsvpAsk: "Сураныч, келериңизди тастыктаңыз", yourName: "Атыңыз", ansYes: "Барам", ansFamily: "Үй-бүлөм менен барам", ansNo: "Тилекке каршы, бара албайм", send: "Жоопту жөнөтүү", sending: "Жөнөтүлүүдө…", thanks: "Рахмат! Жообуңуз кабыл алынды.", nameErr: "Атыңызды жазыңыз", choiceErr: "Жооп вариантын тандаңыз", sendErr: "Жөнөтүлгөн жок. Кайра аракет кылыңыз.", previewNote: "Форма жарыяланган чакырууда иштейт",
     open: "Чакырууну ачуу", invited: "Сиз чакырылдыңыз", musicOn: "Музыканы күйгүзүү", musicOff: "Музыканы өчүрүү",
     greet: "Урматтуу {name}!", partySize: "Канча адам болосуздар?",
+    route2gis: "2ГИСте жол", wishes: "Тилектер", wishText: "Тилегиңиз", wishSend: "Тилек калтыруу", wishThanks: "Рахмат! Тилегиңиз жарыяланды.", wishEmpty: "Биринчи болуп тилек калтырыңыз", wishErr: "Атыңызды жана тилегиңизди жазыңыз",
   },
   en: {
     program: "Programme", place: "Venue", map: "Open map", calendar: "Add to calendar",
@@ -74,6 +76,7 @@ const UI: Record<Lang, Record<string, string>> = {
     rsvpAsk: "Please confirm your attendance", yourName: "Your name", ansYes: "I will come", ansFamily: "Coming with family", ansNo: "Sorry, I can't make it", send: "Send answer", sending: "Sending…", thanks: "Thank you! Your answer has been received.", nameErr: "Enter your name", choiceErr: "Choose an answer", sendErr: "Could not send. Please try again.", previewNote: "The form works in the published invitation",
     open: "Open invitation", invited: "You are invited", musicOn: "Play music", musicOff: "Mute music",
     greet: "Dear {name},", partySize: "How many of you?",
+    route2gis: "Route in 2GIS", wishes: "Wishes", wishText: "Your wish", wishSend: "Leave a wish", wishThanks: "Thank you! Your wish is published.", wishEmpty: "Be the first to leave a wish", wishErr: "Write your name and a wish",
   },
 };
 
@@ -430,6 +433,123 @@ function RsvpForm({
   );
 }
 
+/** 2GIS search link for the venue (an explicit 2GIS map link wins). Bishkek unless Osh is named. */
+function twoGisHref(inv: Invitation): string {
+  if (/2gis\./iu.test(inv.venue.mapUrl)) return inv.venue.mapUrl;
+  const query = [inv.venue.name, inv.venue.address].filter(Boolean).join(", ").trim();
+  if (!query) return "";
+  const city = /(^|[^а-яё])ош([^а-яё]|$)/iu.test(query) ? "osh" : "bishkek";
+  return `https://2gis.kg/${city}/search/${encodeURIComponent(query)}`;
+}
+
+type Wish = { id: string; guest_name: string; text: string; created_at: string };
+
+/** Guests' wishes (тилектер): published right away, the organizer can hide any of them. */
+function Wishes({
+  slug,
+  live,
+  demo = false,
+  guest = "",
+  t,
+}: {
+  slug?: string;
+  live: boolean;
+  demo?: boolean;
+  guest?: string;
+  t: Record<string, string>;
+}) {
+  const [items, setItems] = useState<Wish[]>([]);
+  const [name, setName] = useState(guest);
+  const [text, setText] = useState("");
+  const [state, setState] = useState<"idle" | "sending" | "done">("idle");
+  const [error, setError] = useState("");
+  const enabled = live && (demo || Boolean(slug));
+
+  useEffect(() => {
+    if (!live || !slug || demo) return;
+    fetch(`/api/invite/wishes?slug=${encodeURIComponent(slug)}`)
+      .then((r) => (r.ok ? (r.json() as Promise<{ wishes?: Wish[] }>) : { wishes: [] }))
+      .then((d) => setItems(d.wishes ?? []))
+      .catch(() => undefined);
+  }, [live, slug, demo]);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!enabled) return;
+    if (!name.trim() || !text.trim()) return setError(t.wishErr);
+    setError("");
+    const local: Wish = { id: `local-${Date.now()}`, guest_name: name.trim(), text: text.trim(), created_at: new Date().toISOString() };
+    if (demo) {
+      setItems((list) => [local, ...list]);
+      setText("");
+      setState("done");
+      return;
+    }
+    setState("sending");
+    try {
+      const response = await fetch("/api/invite/wishes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: name.trim(), text: text.trim() }),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      setItems((list) => [local, ...list]);
+      setText("");
+      setState("done");
+    } catch {
+      setState("idle");
+      setError(t.sendErr);
+    }
+  }
+
+  return (
+    <div className={styles.wishes}>
+      {items.length ? (
+        <ul className={styles.wishList}>
+          {items.map((w) => (
+            <li key={w.id}>
+              <p>{w.text}</p>
+              <span>— {w.guest_name}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className={styles.muted}>{t.wishEmpty}</p>
+      )}
+      {state === "done" ? <p className={styles.rsvpThanks} role="status">{t.wishThanks}</p> : null}
+      <form className={styles.rsvpForm} onSubmit={submit} noValidate>
+        <input
+          className={styles.rsvpInput}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t.yourName}
+          aria-label={t.yourName}
+          maxLength={80}
+          disabled={!enabled}
+        />
+        <textarea
+          className={`${styles.rsvpInput} ${styles.wishInput}`}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (state === "done") setState("idle");
+          }}
+          placeholder={t.wishText}
+          aria-label={t.wishText}
+          maxLength={500}
+          rows={3}
+          disabled={!enabled}
+        />
+        {error ? <p className={styles.rsvpError} role="alert">{error}</p> : null}
+        <button type="submit" className={styles.rsvpSend} disabled={!enabled || state === "sending"}>
+          {state === "sending" ? t.sending : t.wishSend}
+        </button>
+        {!enabled ? <p className={styles.note}>{t.previewNote}</p> : null}
+      </form>
+    </div>
+  );
+}
+
 function Swatches({ colors }: { colors: string[] }) {
   if (!colors.length) return null;
   return (
@@ -475,6 +595,7 @@ export function InvitationView({
       ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${invitation.venue.name} ${invitation.venue.address}`.trim())}`
       : "");
   const calHref = calendarHref(invitation, title);
+  const gisHref = twoGisHref(invitation);
   const greeting = guest ? t.greet.replace("{name}", guest) : "";
   const mono = initials(invitation);
 
@@ -611,6 +732,7 @@ export function InvitationView({
                 </p>
                 <div className={styles.actions}>
                   {mapHref ? <a className={styles.gPill} href={mapHref} target="_blank" rel="noopener noreferrer">{t.map}</a> : null}
+                  {gisHref ? <a className={styles.gPill} href={gisHref} target="_blank" rel="noopener noreferrer">{t.route2gis}</a> : null}
                   {calHref ? <a className={`${styles.gPill} ${styles.gPillGhost}`} href={calHref} target="_blank" rel="noopener noreferrer">{t.calendar}</a> : null}
                 </div>
               </div>
@@ -666,6 +788,11 @@ export function InvitationView({
               <ScallopCap className={`${styles.gCap} ${styles.gCapBottom}`} />
             </section>
           ) : null}
+
+          <section className={`${styles.section} ${styles.gContacts}`} data-reveal="">
+            <h2>{t.wishes}</h2>
+            <Wishes slug={slug} live={live} demo={demo} guest={guest} t={t} />
+          </section>
 
           {invitation.contacts.length ? (
             <section className={`${styles.section} ${styles.gContacts}`} data-reveal="">
@@ -751,6 +878,9 @@ export function InvitationView({
               {mapHref ? (
                 <a className={styles.button} href={mapHref} target="_blank" rel="noopener noreferrer">{t.map}</a>
               ) : null}
+              {gisHref ? (
+                <a className={styles.button} href={gisHref} target="_blank" rel="noopener noreferrer">{t.route2gis}</a>
+              ) : null}
               {calHref ? (
                 <a className={`${styles.button} ${styles.buttonGhost}`} href={calHref} target="_blank" rel="noopener noreferrer">{t.calendar}</a>
               ) : null}
@@ -790,6 +920,11 @@ export function InvitationView({
             <RsvpForm slug={slug} live={live} demo={demo} guest={guest} t={t} />
           </section>
         ) : null}
+
+        <section className={`${styles.section} ${styles.rsvp}`} data-reveal="">
+          <h2>{t.wishes}</h2>
+          <Wishes slug={slug} live={live} demo={demo} guest={guest} t={t} />
+        </section>
 
         {invitation.contacts.length ? (
           <section className={styles.section} data-reveal="">

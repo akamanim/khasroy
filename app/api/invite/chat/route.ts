@@ -28,13 +28,11 @@ export async function POST(request: Request) {
     if (record && record.messageCount >= MAX_MESSAGES_PER_SESSION) {
       return studioError("Достигнут лимит сообщений для этого заказа. Оформите заказ, и мы свяжемся с вами.", 429);
     }
-    if (record && record.status !== "draft") {
-      return studioError("Заказ уже оформлен. Для правок свяжитесь с нами по указанному номеру.", 409);
-    }
+    // Ordered invitations stay editable: clients often change the time or venue later.
 
     const current = record?.data ?? emptyInvitation();
     const history: ChatTurn[] = record?.history ?? [];
-    const result = await runInvitationAgent(current, history, message);
+    const result = await runInvitationAgent(current, history, message, Boolean(record && record.status !== "draft"));
     const nextHistory: ChatTurn[] = [
       ...history,
       { role: "user", content: message },

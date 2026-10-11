@@ -4,6 +4,7 @@ import { displayTitle } from "@/lib/invitations/schema";
 import { ANSWER_LABEL, summarizeGuests } from "@/lib/invitations/guests";
 import { loadManagedInvitation } from "@/lib/invitations/server";
 import { PUBLIC_ORIGIN, shareDate } from "@/lib/invitations/share";
+import { ShortLink, WishesAdmin } from "./organizer-tools";
 import { PersonalLinks } from "./personal-links";
 import styles from "./guests.module.css";
 
@@ -25,6 +26,7 @@ export default async function GuestsPage({ params, searchParams }: Props) {
   const inv = managed.record.data;
   const summary = summarizeGuests(managed.rsvps);
   const exportHref = `/i/${slug}/guests/export?k=${token}`;
+  const link = managed.record.alias ?? slug;
 
   return (
     <main className={styles.page} style={{ display: "block", maxWidth: "none" }}>
@@ -34,7 +36,7 @@ export default async function GuestsPage({ params, searchParams }: Props) {
           <h1>{displayTitle(inv)}</h1>
           <p className={styles.muted}>{[shareDate(inv), inv.venue.name].filter(Boolean).join(" · ")}</p>
           <p className={styles.muted}>
-            Приглашение: <a href={`/i/${slug}`} target="_blank" rel="noopener noreferrer">{`${PUBLIC_ORIGIN.replace(/^https:\/\//u, "")}/i/${slug}`}</a>
+            Приглашение: <a href={`/i/${link}`} target="_blank" rel="noopener noreferrer">{`${PUBLIC_ORIGIN.replace(/^https:\/\//u, "")}/i/${link}`}</a>
           </p>
         </header>
 
@@ -75,7 +77,17 @@ export default async function GuestsPage({ params, searchParams }: Props) {
           <p className={styles.muted}>
             Вставьте имена гостей — по одному в строке. Каждый получит свою ссылку: приглашение откроется со словами «Урматтуу Асан байке!», а имя уже будет вписано в форму ответа.
           </p>
-          <PersonalLinks slug={slug} title={displayTitle(inv)} />
+          <PersonalLinks slug={link} title={displayTitle(inv)} />
+        </section>
+
+        <section className={styles.card}>
+          <h2>Короткая ссылка и QR-код</h2>
+          <ShortLink slug={slug} k={token} alias={managed.record.alias ?? ""} />
+        </section>
+
+        <section className={styles.card}>
+          <h2>Пожелания гостей</h2>
+          <WishesAdmin slug={slug} k={token} wishes={managed.wishes} />
         </section>
 
         <p className={styles.muted}>Эта страница открывается только по вашей ссылке. Не пересылайте её гостям.</p>

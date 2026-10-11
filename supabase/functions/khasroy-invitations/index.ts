@@ -8,7 +8,7 @@ const BUCKET = "invitations";
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const PHOTO_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const ACTIVE = "status=in.(draft,submitted,approved,published)";
-const ROW = "id,slug,status,event_type,template_id,data,history,message_count,contact,created_at,updated_at";
+const ROW = "id,slug,alias,status,event_type,template_id,data,history,message_count,contact,created_at,updated_at";
 // The guest-list token goes only to the organizer (their own session, owner panel), never to guests.
 const ROW_PRIVATE = `${ROW},manage_token`;
 const STATUSES = ["draft", "submitted", "approved", "published", "archived"];
@@ -60,6 +60,21 @@ function slugValue(value: unknown) {
   return typeof value === "string" && /^[a-z0-9]{6,24}$/u.test(value) ? value : "";
 }
 
+/** A slug or a custom alias: lowercase latin letters, digits and hyphens. */
+function linkValue(value: unknown) {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9-]{2,39}$/u.test(value) ? value : "";
+}
+
+function token32(value: unknown) {
+  return typeof value === "string" && /^[a-f0-9]{32}$/u.test(value) ? value : "";
+}
+
+async function managedSlug(slug: string, token: string) {
+  if (!slug || !token) return false;
+  const rows = await (await db(`khasroy_invitations?slug=eq.${slug}&manage_token=eq.${token}&${ACTIVE}&select=slug&limit=1`)).json();
+  return Array.isArray(rows) && rows.length > 0;
+}
+
 function newSlug() {
   const alphabet = "abcdefghijkmnpqrstuvwxyz23456789";
   const bytes = crypto.getRandomValues(new Uint8Array(10));
@@ -78,7 +93,7 @@ async function latestForSession(sessionHash: string) {
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 5 });
+  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 6 });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
@@ -90,9 +105,10 @@ Deno.serve(async (request) => {
     const action = typeof body?.action === "string" ? body.action : "";
 
     if (action === "by_slug") {
-      const slug = slugValue(body.slug);
-      if (!slug) return json({ error: "invalid_slug" }, 400);
-      const rows = await (await db(`khasroy_invitations?slug=eq.${slug}&${ACTIVE}&select=${ROW}&limit=1`)).json();
+      // Accepts the generated slug or the organizer's custom alias.
+      const link = linkValue(body.slug);
+      if (!link) return json({ error: "invalid_slug" }, 400);
+      const rows = await (await db(`khasroy_invitations?or=(slug.eq.${link},alias.eq.${link})&${ACTIVE}&select=${ROW}&limit=1`)).json();
       return json({ invitation: Array.isArray(rows) && rows[0] ? rows[0] : null });
     }
 
@@ -128,7 +144,73 @@ Deno.serve(async (request) => {
       const rsvps = await (await db(
         `khasroy_invitation_rsvps?invitation_slug=eq.${slug}&select=guest_name,answer,party_size,created_at&order=created_at.desc&limit=2000`,
       )).json();
-      return json({ invitation: rows[0], rsvps });
+      const wishes = await (await db(
+        `khasroy_invitation_wishes?invitation_slug=eq.${slug}&select=id,guest_name,text,hidden,created_at&order=created_at.desc&limit=1000`,
+      )).json();
+      return json({ invitation: rows[0], rsvps, wishes });
+    }
+
+    if (action === "set_alias") {
+      const slug = slugValue(body.slug);
+      const token = token32(body.token);
+      const alias = body.alias === "" ? "" : linkValue(body.alias);
+      if (body.alias !== "" && !alias) return json({ error: "invalid_alias" }, 400);
+      if (!(await managedSlug(slug, token))) return json({ error: "not_found" }, 404);
+      if (alias) {
+        const taken = await (await db(`khasroy_invitations?or=(slug.eq.${alias},alias.eq.${alias})&slug=neq.${slug}&select=slug&limit=1`)).json();
+        if (Array.isArray(taken) && taken.length) return json({ error: "alias_taken" }, 409);
+      }
+      await db(`khasroy_invitations?slug=eq.${slug}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ alias: alias || null }),
+      });
+      return json({ ok: true, alias: alias || null });
+    }
+
+    if (action === "wish_add") {
+      const slug = slugValue(body.slug);
+      const clean = (v: unknown, max: number) =>
+        typeof v === "string" ? v.replace(/[\u0000-\u0009\u000b-\u001f]/gu, "").trim().slice(0, max) : "";
+      const name = clean(body.name, 80);
+      const text = clean(body.text, 500);
+      if (!slug || !name || !text) return json({ error: "invalid_wish" }, 400);
+      const rows = await (await db(`khasroy_invitations?slug=eq.${slug}&${ACTIVE}&select=slug&limit=1`)).json();
+      if (!Array.isArray(rows) || !rows[0]) return json({ error: "not_found" }, 404);
+      const countRes = await db(`khasroy_invitation_wishes?invitation_slug=eq.${slug}&select=id`, {
+        method: "HEAD",
+        headers: { Prefer: "count=exact" },
+      });
+      const total = Number((countRes.headers.get("content-range") || "").split("/")[1] || 0);
+      if (total >= 1000) return json({ error: "wish_limit" }, 429);
+      await db("khasroy_invitation_wishes", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ invitation_slug: slug, guest_name: name, text }),
+      });
+      return json({ ok: true });
+    }
+
+    if (action === "wishes") {
+      const slug = slugValue(body.slug);
+      if (!slug) return json({ error: "invalid_slug" }, 400);
+      const rows = await (await db(
+        `khasroy_invitation_wishes?invitation_slug=eq.${slug}&hidden=eq.false&select=id,guest_name,text,created_at&order=created_at.desc&limit=200`,
+      )).json();
+      return json({ wishes: rows });
+    }
+
+    if (action === "wish_hide") {
+      const slug = slugValue(body.slug);
+      const token = token32(body.token);
+      const id = typeof body.id === "string" && /^[0-9a-f-]{36}$/u.test(body.id) ? body.id : "";
+      if (!id || !(await managedSlug(slug, token))) return json({ error: "not_found" }, 404);
+      await db(`khasroy_invitation_wishes?id=eq.${id}&invitation_slug=eq.${slug}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ hidden: body.hidden !== false }),
+      });
+      return json({ ok: true });
     }
 
     if (action === "rsvp") {
