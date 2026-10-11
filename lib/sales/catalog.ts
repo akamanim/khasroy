@@ -19,7 +19,7 @@ export type Catalog = {
   products: Product[];
   company: Array<{ key: string; value: string }>;
   faq: Array<{ q: string; a: string }>;
-  source: "sheet" | "demo";
+  source: "sheet" | "builtin";
   loadedAt: string;
 };
 
