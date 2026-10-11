@@ -12,17 +12,77 @@ function priceLabel(price: string, currency: string) {
   return /^\d[\d\s.,]*$/u.test(price) && currency ? `${price.replace(/\B(?=(\d{3})+(?!\d))/gu, " ")} ${currency}` : price;
 }
 
-export function SalesChat({ shop, currency, count }: { shop: string; currency: string; count: number }) {
-  const [turns, setTurns] = useState<Turn[]>([
-    {
-      role: "assistant",
-      content: `Здравствуйте! Я консультант магазина ${shop}. Подскажу по товарам, ценам, наличию и доставке. Что ищете?`,
-    },
-  ]);
+const STAGE_LABELS: Record<string, string> = {
+  greeting: "приветствие",
+  qualification: "выяснение потребности",
+  proposal: "предложение",
+  closing: "закрытие",
+  finished: "контакт получен",
+};
+const DATA_LABELS: Record<string, string> = { need: "потребность", budget: "бюджет", timeline: "срок", product_interest: "интерес", contact: "контакт" };
+const SESSION_KEY = "kh_sales_b_session";
+
+function storedSessionId(): string {
+  try {
+    const existing = window.localStorage.getItem(SESSION_KEY);
+    if (existing) return existing;
+    const created = crypto.randomUUID();
+    window.localStorage.setItem(SESSION_KEY, created);
+    return created;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
+export function SalesChat({
+  shop,
+  currency,
+  count,
+  variant = "a",
+}: {
+  shop: string;
+  currency: string;
+  count: number;
+  variant?: "a" | "b";
+}) {
+  const greeting: Turn = {
+    role: "assistant",
+    content: `Здравствуйте! Я консультант магазина ${shop}. Подскажу по товарам, ценам, наличию и доставке. Что ищете?`,
+  };
+  const [turns, setTurns] = useState<Turn[]>([greeting]);
+  const [sessionId, setSessionId] = useState("");
+  const [funnel, setFunnel] = useState<{ stage: string; data: Record<string, string> } | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const log = useRef<HTMLDivElement>(null);
+
+  // Variant B keeps the conversation on the server; restore it after a reload.
+  useEffect(() => {
+    if (variant !== "b") return;
+    const id = storedSessionId();
+    setSessionId(id);
+    fetch("/api/sales/b", { headers: { "x-session-id": id } })
+      .then((r) => r.json() as Promise<{ stage?: string; data?: Record<string, string>; messages?: Turn[] }>)
+      .then((saved) => {
+        if (saved.messages?.length) setTurns([greeting, ...saved.messages]);
+        if (saved.stage) setFunnel({ stage: saved.stage, data: saved.data ?? {} });
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant]);
+
+  function restart() {
+    const id = crypto.randomUUID();
+    try {
+      window.localStorage.setItem(SESSION_KEY, id);
+    } catch {
+      // Private mode: the new id lives for this page only.
+    }
+    setSessionId(id);
+    setTurns([greeting]);
+    setFunnel({ stage: "greeting", data: {} });
+  }
 
   useEffect(() => {
     const el = log.current;
@@ -40,12 +100,26 @@ export function SalesChat({ shop, currency, count }: { shop: string; currency: s
     setTurns((t) => [...t, { role: "user", content: message }]);
     setBusy(true);
     try {
-      const response = await fetch("/api/sales/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message, history }),
-      });
-      const data = (await response.json()) as { reply?: string; products?: Card[]; leadSaved?: boolean; error?: string };
+      const response = variant === "b"
+        ? await fetch("/api/sales/b", {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-session-id": sessionId },
+            body: JSON.stringify({ message }),
+          })
+        : await fetch("/api/sales/chat", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ message, history }),
+          });
+      const data = (await response.json()) as {
+        reply?: string;
+        products?: Card[];
+        leadSaved?: boolean;
+        error?: string;
+        stage?: string;
+        data?: Record<string, string>;
+      };
+      if (data.stage) setFunnel({ stage: data.stage, data: data.data ?? {} });
       if (!response.ok || !data.reply) throw new Error(data.error || "Не удалось получить ответ.");
       setTurns((t) => [
         ...t,
@@ -65,8 +139,19 @@ export function SalesChat({ shop, currency, count }: { shop: string; currency: s
     }
   }
 
+  const known = funnel ? Object.entries(funnel.data).filter(([, v]) => v) : [];
+
   return (
     <section className={styles.chat} aria-label="Чат с консультантом">
+      {variant === "b" && (
+        <div className={styles.funnel}>
+          <span>Этап: <b>{STAGE_LABELS[funnel?.stage ?? "greeting"] ?? funnel?.stage}</b></span>
+          {known.map(([k, v]) => (
+            <span key={k}>{DATA_LABELS[k] ?? k}: {v}</span>
+          ))}
+          <button type="button" onClick={restart}>Новый диалог</button>
+        </div>
+      )}
       <div ref={log} className={styles.log} role="log" aria-live="polite">
         {turns.map((turn, i) => (
           <div key={i} className={turn.role === "user" ? styles.me : styles.them}>

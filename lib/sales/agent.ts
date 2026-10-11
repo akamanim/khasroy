@@ -13,7 +13,24 @@ const MODELS = [process.env.KHASROY_SALES_MODEL || "openai/gpt-oss-120b", "llama
 
 export type SalesTurn = { role: "user" | "assistant"; content: string };
 export type Lead = { name: string; phone: string; request: string };
-export type SalesResult = { reply: string; products: Product[]; lead: Lead | null; checked: boolean; diagnostic?: string };
+export type SalesResult = {
+  reply: string;
+  products: Product[];
+  lead: Lead | null;
+  checked: boolean;
+  diagnostic?: string;
+  /** The model's full JSON answer, for variants that ask for extra fields (stage, data). */
+  raw?: Record<string, unknown>;
+};
+
+/** Knobs that differ between the A (default) and B (funnel) assistants. */
+export type AgentOptions = {
+  prompt?: (catalog: Catalog, products: Product[]) => string;
+  historyLimit?: number;
+  temperature?: number;
+  maxTokens?: number;
+  reasoningEffort?: "low" | "medium" | "high";
+};
 
 function systemPrompt(catalog: Catalog, products: Product[]): string {
   const shop = companyValue(catalog, "Название", "Компания") || "магазин";
@@ -54,7 +71,7 @@ function systemPrompt(catalog: Catalog, products: Product[]): string {
 ${catalogText(catalog, products)}`;
 }
 
-function parse(text: string): { reply?: unknown; products?: unknown; lead?: unknown } | null {
+function parse(text: string): { reply?: unknown; products?: unknown; lead?: unknown; [key: string]: unknown } | null {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
@@ -65,18 +82,32 @@ function parse(text: string): { reply?: unknown; products?: unknown; lead?: unkn
   }
 }
 
-async function complete(apiKey: string, model: string, messages: Array<{ role: string; content: string }>, retry = true): Promise<string> {
+async function complete(
+  apiKey: string,
+  model: string,
+  messages: Array<{ role: string; content: string }>,
+  options: AgentOptions = {},
+  retry = true,
+): Promise<string> {
   const response = await fetch(GROQ_URL, {
     method: "POST",
     headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 1200, response_format: { type: "json_object" } }),
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 1200,
+      response_format: { type: "json_object" },
+      // Only gpt-oss models accept reasoning_effort.
+      ...(options.reasoningEffort && model.startsWith("openai/gpt-oss") ? { reasoning_effort: options.reasoningEffort } : {}),
+    }),
     signal: AbortSignal.timeout(40_000),
   });
   if (response.status === 429 && retry) {
     // Groq's per-minute token limit: wait briefly once instead of giving the customer a canned reply.
     const wait = Math.min(Number(response.headers.get("retry-after")) || 2, 4);
     await new Promise((resolve) => setTimeout(resolve, wait * 1000));
-    return complete(apiKey, model, messages, false);
+    return complete(apiKey, model, messages, options, false);
   }
   if (!response.ok) throw new Error(`groq ${model} ${response.status}`);
   const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
@@ -99,12 +130,17 @@ function leadFrom(raw: unknown, customerText: string): Lead | null {
 
 const FALLBACK = "Секунду, тут хочу ответить точно — уточню у менеджера. Если удобно, оставьте номер, вам перезвонят.";
 
-export async function runSalesAgent(catalog: Catalog, history: SalesTurn[], message: string): Promise<SalesResult> {
+export async function runSalesAgent(
+  catalog: Catalog,
+  history: SalesTurn[],
+  message: string,
+  options: AgentOptions = {},
+): Promise<SalesResult> {
   const ownerKey = process.env.KHASROY_OWNER_KEY?.trim() ?? "";
   const apiKey = await resolveSecret(ownerKey, "groq", [process.env.GROQ_API_KEY]);
   if (!apiKey) throw new Error("No language model key configured");
 
-  const recent = history.slice(-12);
+  const recent = history.slice(-(options.historyLimit ?? 12));
   const conversation = [...recent.map((t) => t.content), message].join("\n");
   const products = relevantProducts(catalog.products, conversation);
   const customerText = [...recent.filter((t) => t.role === "user").map((t) => t.content), message].join("\n");
@@ -112,7 +148,7 @@ export async function runSalesAgent(catalog: Catalog, history: SalesTurn[], mess
   const sources = [catalogText(catalog, catalog.products), customerText];
 
   const messages = [
-    { role: "system", content: systemPrompt(catalog, products) },
+    { role: "system", content: (options.prompt ?? systemPrompt)(catalog, products) },
     ...recent.map((t) => ({ role: t.role, content: t.content.slice(0, 2000) })),
     { role: "user", content: message },
   ];
@@ -123,7 +159,7 @@ export async function runSalesAgent(catalog: Catalog, history: SalesTurn[], mess
     let parsed: ReturnType<typeof parse> = null;
     for (const model of MODELS) {
       try {
-        parsed = parse(await complete(apiKey, model, messages));
+        parsed = parse(await complete(apiKey, model, messages, options));
         if (parsed && typeof parsed.reply === "string" && parsed.reply.trim()) break;
         problems.push(`${model}: unparseable answer`);
       } catch (error) {
@@ -150,7 +186,7 @@ export async function runSalesAgent(catalog: Catalog, history: SalesTurn[], mess
       .map((id) => catalog.products.find((p) => p.id === id))
       .filter((p): p is Product => Boolean(p))
       .slice(0, 3);
-    return { reply, products: shown, lead: leadFrom(parsed.lead, customerText), checked: true };
+    return { reply, products: shown, lead: leadFrom(parsed.lead, customerText), checked: true, raw: parsed as Record<string, unknown> };
   }
 
   return { reply: FALLBACK, products: [], lead: null, checked: false, diagnostic: problems.join("; ").slice(0, 500) };
