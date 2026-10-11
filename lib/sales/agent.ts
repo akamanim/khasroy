@@ -88,6 +88,11 @@ function parse(text: string): { reply?: unknown; products?: unknown; lead?: unkn
   }
 }
 
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_PREFIX = "openrouter:";
+/** Free Llama 3.3 70B on OpenRouter; used first when OPENROUTER_API_KEY is configured. */
+export const OPENROUTER_LLAMA = `${OPENROUTER_PREFIX}meta-llama/llama-3.3-70b-instruct:free`;
+
 async function complete(
   apiKey: string,
   model: string,
@@ -95,31 +100,52 @@ async function complete(
   options: AgentOptions = {},
   retry = true,
 ): Promise<string> {
-  const response = await fetch(GROQ_URL, {
+  const viaOpenRouter = model.startsWith(OPENROUTER_PREFIX);
+  const id = viaOpenRouter ? model.slice(OPENROUTER_PREFIX.length) : model;
+  const key = viaOpenRouter ? process.env.OPENROUTER_API_KEY?.trim() ?? "" : apiKey;
+  if (!key) throw new Error(`${model}: no API key`);
+  const response = await fetch(viaOpenRouter ? OPENROUTER_URL : GROQ_URL, {
     method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${key}`,
+      "content-type": "application/json",
+      ...(viaOpenRouter ? { "x-title": "Khasroy sales assistant" } : {}),
+    },
     body: JSON.stringify({
-      model,
+      model: id,
       messages,
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens ?? 1200,
-      response_format: { type: "json_object" },
+      // Free OpenRouter endpoints do not all support JSON mode; the prompt asks for JSON and
+      // parse() extracts it either way.
+      ...(viaOpenRouter ? {} : { response_format: { type: "json_object" } }),
       // Only gpt-oss models accept reasoning_effort.
-      ...(options.reasoningEffort && model.startsWith("openai/gpt-oss") ? { reasoning_effort: options.reasoningEffort } : {}),
+      ...(options.reasoningEffort && id.startsWith("openai/gpt-oss") ? { reasoning_effort: options.reasoningEffort } : {}),
       // Qwen 3 thinks out loud by default; keep the thinking out of the JSON answer.
-      ...(model.startsWith("qwen/") ? { reasoning_format: "hidden" } : {}),
+      ...(!viaOpenRouter && id.startsWith("qwen/") ? { reasoning_format: "hidden" } : {}),
     }),
     signal: AbortSignal.timeout(40_000),
   });
   if (response.status === 429 && retry) {
-    // Groq's per-minute token limit: wait briefly once instead of giving the customer a canned reply.
+    // Per-minute limits: wait briefly once instead of giving the customer a canned reply.
     const wait = Math.min(Number(response.headers.get("retry-after")) || 2, 4);
     await new Promise((resolve) => setTimeout(resolve, wait * 1000));
     return complete(apiKey, model, messages, options, false);
   }
-  if (!response.ok) throw new Error(`groq ${model} ${response.status}`);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`${viaOpenRouter ? "openrouter" : "groq"} ${id} ${response.status}${viaOpenRouter ? ` ${detail.slice(0, 160)}` : ""}`);
+  }
   const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return data.choices?.[0]?.message?.content ?? "";
+}
+
+/** Llama via OpenRouter first when its key is set, then the Groq models. */
+function modelOrder(options: AgentOptions): string[] {
+  const base = options.models ?? DEFAULT_MODELS;
+  const preferred = process.env.KHASROY_SALES_MODEL?.trim();
+  const llama = process.env.OPENROUTER_API_KEY?.trim() && !options.models ? [OPENROUTER_LLAMA] : [];
+  return [...new Set([...(preferred ? [preferred] : []), ...llama, ...base])];
 }
 
 function digits(value: string) {
@@ -166,7 +192,7 @@ export async function runSalesAgent(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let parsed: ReturnType<typeof parse> = null;
     let usedModel = "";
-    for (const model of options.models ?? (process.env.KHASROY_SALES_MODEL ? [process.env.KHASROY_SALES_MODEL, ...DEFAULT_MODELS] : DEFAULT_MODELS)) {
+    for (const model of modelOrder(options)) {
       try {
         parsed = parse(await complete(apiKey, model, messages, options));
         usedModel = model;

@@ -13,7 +13,7 @@ function priceLabel(price: string, currency: string) {
 }
 
 function modelLabel(model: string) {
-  if (model.startsWith("llama")) return `Llama 3.3 · ${model}`;
+  if (model.includes("llama")) return `Llama 3.3 · ${model.replace(/^openrouter:/u, "OpenRouter · ")}`;
   if (model.startsWith("openai/gpt-oss")) return `GPT-OSS · ${model}`;
   return model;
 }
