@@ -31,7 +31,17 @@ export default async function InvitationPage({ params }: Params) {
   const record = await loadInvitationBySlug(slug).catch(() => null);
   if (!record) notFound();
   return (
-    <main style={{ height: "100dvh", overflowY: "auto", WebkitOverflowScrolling: "touch", background: PAGE_BG[record.data.palette] }}>
+    // Global CSS turns every <main> into the owner console's grid; reset that here.
+    <main
+      style={{
+        display: "block",
+        maxWidth: "none",
+        height: "100dvh",
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
+        background: PAGE_BG[record.data.palette],
+      }}
+    >
       <InvitationView invitation={record.data} />
     </main>
   );
