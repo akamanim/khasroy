@@ -1,19 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { InvitationView } from "@/components/invitations/invitation-view";
-import { displayTitle, type Palette } from "@/lib/invitations/schema";
+import { TEMPLATE_META, displayTitle } from "@/lib/invitations/schema";
 import { loadInvitationBySlug } from "@/lib/invitations/server";
 
 export const dynamic = "force-dynamic";
-
-const PAGE_BG: Record<Palette, string> = {
-  ivory: "#efe8dd",
-  blush: "#f0dfdb",
-  sage: "#e2e7dd",
-  sky: "#e1eaf4",
-  night: "#0a0f1b",
-  gold: "#130f0b",
-};
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -39,7 +30,7 @@ export default async function InvitationPage({ params }: Params) {
         height: "100dvh",
         overflowY: "auto",
         WebkitOverflowScrolling: "touch",
-        background: PAGE_BG[record.data.palette],
+        background: (TEMPLATE_META[record.data.templateId] ?? TEMPLATE_META.minimal).pageBg,
       }}
     >
       <InvitationView invitation={record.data} />
