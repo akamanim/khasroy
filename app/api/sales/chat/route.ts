@@ -47,6 +47,7 @@ export async function POST(request: Request) {
       products: result.products.map(({ id, name, price, photo, link, stock }) => ({ id, name, price, photo, link, stock })),
       leadSaved,
       source: catalog.source,
+      ...(result.diagnostic ? { diagnostic: result.diagnostic } : {}),
     });
   } catch (error) {
     console.error("Sales chat failed", error);
