@@ -93,9 +93,6 @@ main {
   height: min(100%, 365px);
   top: 0;
 }
-.core-stage { position: relative; width: 100%; height: 100%; }
-.core-plane { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45)); }
-@media (prefers-reduced-motion: reduce) { .core-plane { display: none; } }
 .core-canvas { width: 100%; height: 100%; transition: filter .5s; }
 .khasroy-core { position: relative; width: 100%; height: 100%; }
 .core-canvas {
