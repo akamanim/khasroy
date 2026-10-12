@@ -3,6 +3,7 @@ import { isOwnerRequest } from "@/lib/owner-session";
 import { AllModelsLimitedError } from "@/lib/ai/limits";
 import { getReel, listReels, queueReel, saveReel, type Script } from "@/lib/reels/server";
 import { buildPlan, cleanScript, writeScript } from "@/lib/reels/writer";
+import { checkPlan } from "@/lib/reels/catalog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +48,12 @@ export async function POST(request: Request) {
         // The owner may have edited the script by hand: that edited version is what gets built.
         const script = body.script && typeof body.script === "object" ? cleanScript(body.script as Record<string, unknown>) : null;
         if (!script || !script.scenes.length) return NextResponse.json({ error: "Нет сценария" }, { status: 400 });
-        const checked = await buildPlan(script);
+        // The studio builds variants in the browser and sends the chosen (maybe hand-tuned) plan;
+        // it is checked again here. Without a plan, the server builds one from the seed.
+        const seed = Number.isFinite(Number(body.seed)) ? Math.floor(Math.abs(Number(body.seed))) % 1_000_000 : undefined;
+        const checked = body.plan && typeof body.plan === "object"
+          ? { ...checkPlan(body.plan), model: "studio" }
+          : await buildPlan(script, seed, typeof body.style === "string" ? body.style : undefined);
         if (checked.errors.length) {
           return NextResponse.json({ error: `План не собрался: ${checked.errors.join("; ")}`, fixes: checked.fixes }, { status: 422 });
         }
