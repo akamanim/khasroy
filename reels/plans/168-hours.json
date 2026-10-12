@@ -1,0 +1,13 @@
+{
+  "title": "168 часов в неделе — ИИнна отвечает за вас",
+  "scenes": [
+    { "tool": "counter", "duration": 2.0, "transition": "cut", "params": { "headline": "На связи", "value": "24/7", "label": "без выходных", "bg": "black" } },
+    { "tool": "dot_grid", "duration": 2.8, "transition": "wipe", "params": { "headline": "Это *168 часов*\nв неделю", "number": 168, "label": "часов в неделе", "filled": 1, "columns": 7, "rows": 24 } },
+    { "tool": "headline", "duration": 1.8, "transition": "fade", "params": { "text": "Пока вы\n*спите*…", "bg": "black", "align": "center", "size": "xl" } },
+    { "tool": "voice", "duration": 4.0, "transition": "slide", "params": { "headline": "Слушаю", "who": "Алексей К.", "duration": "0:06", "transcript": "Нужен *чёрный*, с *гравировкой*, на *завтра*", "reply": "Есть! Чёрный с гравировкой — успеем на завтра :)" } },
+    { "tool": "choice", "duration": 3.0, "transition": "push", "params": { "headline": "Решаете\n*вы*", "question": "Клиент просит скидку 10%. Согласны?", "options": ["Да", "Нет"], "pick": 0 } },
+    { "tool": "notification", "duration": 2.6, "transition": "slide", "params": { "headline": "Новый\n*заказ*", "sub": "пока вы спали", "title": "Пришёл новый заказ", "body": "Алексей К. · гравировка", "app": "Telegram" } },
+    { "tool": "headline", "duration": 2.2, "transition": "wipe", "params": { "text": "Вы *отдыхаете*.\nИИнна\nработает", "bg": "cream", "align": "center", "size": "l" } },
+    { "tool": "outro", "duration": 2.6, "transition": "iris", "params": { "brand": "ИИнна", "line": "Отвечает клиентам 24/7", "cta": "Ссылка в профиле" } }
+  ]
+}

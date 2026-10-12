@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import { AllModelsLimitedError } from "@/lib/ai/limits";
+import { looksLikeReelRequest } from "@/lib/reels/intent";
+import { saveReel } from "@/lib/reels/server";
+import { buildPlan, writeScript } from "@/lib/reels/writer";
+import { PUBLIC_ORIGIN } from "@/lib/invitations/share";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { OWNER_COOKIE, ownerSessionToken, safeEqual } from "@/lib/server-auth";
@@ -293,6 +298,44 @@ export async function POST(request: Request) {
       const content = `Доработка сайта остановилась на техническом этапе: ${detail.slice(0, 220)}. Существующий проект не потерян.`;
       await saveDirectReply(ownerKey, latestUser.content, content);
       return NextResponse.json({ content, provider: "web-studio", model: "web-studio-v2", brainMode: "website_edit", memory: "active", webStudio: { ok: false, detail } });
+    }
+  }
+
+  // A reel request goes to the reel studio: a script made from ИИнна's real facts and the
+  // studio's tools, saved as a job the owner can preview, edit and render.
+  if (looksLikeReelRequest(latestUser.content)) {
+    const brief = latestUser.content.slice(0, 2000);
+    try {
+      const { script } = await writeScript(brief);
+      let planned = "";
+      let job;
+      try {
+        const checked = await buildPlan(script);
+        job = await saveReel({ brief, title: script.title, script, ...(checked.errors.length ? {} : { plan: checked.plan }) });
+        planned = checked.errors.length ? "" : `Превью уже собрано из ${checked.plan.scenes.length} сцен (~${Math.round(checked.seconds)} с).`;
+      } catch (error) {
+        if (error instanceof AllModelsLimitedError) job = await saveReel({ brief, title: script.title, script });
+        else throw error;
+      }
+      const lines = script.scenes.map((scene, i) => `${i + 1}. **${scene.text.replace(/\*/gu, "") || "—"}** — ${scene.what}`).join("\n");
+      const content = [
+        `Сценарий рилса «${script.title}» готов.${script.idea ? ` ${script.idea}` : ""}`,
+        "",
+        lines,
+        "",
+        planned || "Превью соберу, когда вы откроете студию и утвердите сценарий.",
+        `[Открыть в студии рилсов](${PUBLIC_ORIGIN}/owner/reels?job=${job.id}) — там можно поправить текст, посмотреть превью и нажать «Собрать видео».`,
+      ].join("\n");
+      await saveDirectReply(ownerKey, latestUser.content, content);
+      return NextResponse.json({ content, provider: "reels-studio", model: "reels", brainMode: "reels", memory: "active" });
+    } catch (error) {
+      console.error("Khasroy reel request failed", error);
+      const limited = error instanceof AllModelsLimitedError;
+      const content = limited
+        ? `Лимит моделей сейчас закончился. Откройте [студию рилсов](${PUBLIC_ORIGIN}/owner/reels?brief=${encodeURIComponent(brief.slice(0, 500))}) и нажмите «Написать сценарий» — она сама дождётся лимита и продолжит.`
+        : `Не получилось написать сценарий: ${(error instanceof Error ? error.message : "ошибка").slice(0, 160)}. Попробуйте в [студии рилсов](${PUBLIC_ORIGIN}/owner/reels?brief=${encodeURIComponent(brief.slice(0, 500))}).`;
+      await saveDirectReply(ownerKey, latestUser.content, content);
+      return NextResponse.json({ content, provider: "reels-studio", model: "reels", brainMode: "reels", memory: "active" });
     }
   }
 
