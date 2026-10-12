@@ -355,6 +355,9 @@ export function createStormCore(
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
+  // A wide canvas (the owner console's full-width cloud) stretches the cloud sideways instead of
+  // leaving empty sky on both sides. Narrow canvases keep the original shape (stretch 1).
+  let stretch = 1;
   const resize = () => {
     const width = Math.max(1, canvas.clientWidth);
     const height = Math.max(1, canvas.clientHeight);
@@ -362,6 +365,7 @@ export function createStormCore(
     composer.setSize(width, height);
     camera.aspect = width / height;
     camera.position.z = camera.aspect < 1.1 ? (5.2 / Math.max(0.55, camera.aspect)) * 1.05 : 5.2;
+    stretch = Math.min(2.8, Math.max(1, camera.aspect / 1.7));
     camera.updateProjectionMatrix();
   };
   resize();
@@ -457,10 +461,12 @@ export function createStormCore(
     uniforms.uDen.value = current.density;
 
     frame.scale.setScalar(1 + 0.012 * Math.sin(time * 1.1) + pulse * 0.025 + speech * 0.015);
+    frame.scale.x *= stretch;
     pointerX += (targetX - pointerX) * dt * 2.5;
     pointerY += (targetY - pointerY) * dt * 2.5;
     sway += dt * current.sway;
-    root.rotation.y = Math.sin(sway * 0.25) * 0.45 + pointerX * 0.6;
+    // A stretched cloud turns less, so its far end does not swing into depth.
+    root.rotation.y = (Math.sin(sway * 0.25) * 0.45 + pointerX * 0.6) / (stretch * stretch);
     root.rotation.x = pointerY * 0.25 + Math.sin(sway * 0.2) * 0.05;
     root.position.y = Math.sin(time * 0.8) * 0.03;
 
