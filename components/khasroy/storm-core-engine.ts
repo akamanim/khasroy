@@ -365,7 +365,8 @@ export function createStormCore(
     composer.setSize(width, height);
     camera.aspect = width / height;
     camera.position.z = camera.aspect < 1.1 ? (5.2 / Math.max(0.55, camera.aspect)) * 1.05 : 5.2;
-    stretch = Math.min(2.8, Math.max(1, camera.aspect / 1.7));
+    // About 90% of the canvas width at the console size (aspect ~2.9 → stretch ~2.7).
+    stretch = camera.aspect > 1.7 ? Math.min(3.2, 1 + (camera.aspect - 1.7) * 1.45) : 1;
     camera.updateProjectionMatrix();
   };
   resize();
