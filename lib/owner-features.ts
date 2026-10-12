@@ -63,6 +63,12 @@ export const FEATURES: FeatureGroup[] = [
     ],
   },
   {
+    title: "Контент",
+    items: [
+      { name: "Рилсы ИИнны", what: "Хасрой пишет сценарий, вы утверждаете, он собирает ролик из 14 готовых сцен в стиле ИИнны; видео собирается на GitHub.", status: "built", href: "/owner/reels" },
+    ],
+  },
+  {
     title: "Есть в коде, нужна настройка",
     items: [
       { name: "Веб-студия", what: "Собирает сайт и выкладывает его на GitHub и Vercel.", status: "setup", href: "/settings" },
