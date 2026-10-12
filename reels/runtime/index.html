@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<title>Reel</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="stage"></div>
+<script src="runtime.js"></script>
+<script src="tools.js"></script>
+<script>
+  // Preview in a normal browser: index.html#<url-encoded plan JSON> plays the plan in a loop.
+  if (location.hash.length > 1) {
+    try {
+      const plan = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+      Promise.all([...document.fonts].map((f) => f.load())).then(() => {
+        const total = reel.load(plan);
+        const t0 = performance.now();
+        const loop = () => { reel.seek(((performance.now() - t0) / 1000) % total); requestAnimationFrame(loop); };
+        loop();
+      });
+    } catch (error) { document.body.textContent = String(error); }
+  }
+</script>
+</body>
+</html>

@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "node scripts/ensure-local-owner-key.mjs && next dev",
-    "build": "npm run test:memory-relevance && npm run test:invitation-schema && npm run test:sales-assistant && npm run test:xlsx-write && npm run test:qr && npm run test:cloud-browser && npm run test:owner-console && npm run test:limits && npm run test:resource-router-health && npm run test:site-agent-provider && npm run test:site-intelligence-provider && npm run test:site-agent-v8-runtime && npm run test:web-studio-orchestrator && npm run test:web-studio-github-staging && npm run test:web-studio-quality && npm run test:web-studio-lead-followup && npm run test:web-studio-followup-worker && npm run test:smm-pipeline && npm run test:smm-compose && npm run test:smm-publisher && npm run test:smm-repair && npm run test:smm-plan-route-repair && next build",
+    "build": "npm run test:memory-relevance && npm run test:invitation-schema && npm run test:sales-assistant && npm run test:xlsx-write && npm run test:qr && npm run test:cloud-browser && npm run test:owner-console && npm run test:limits && npm run test:reels && npm run test:resource-router-health && npm run test:site-agent-provider && npm run test:site-intelligence-provider && npm run test:site-agent-v8-runtime && npm run test:web-studio-orchestrator && npm run test:web-studio-github-staging && npm run test:web-studio-quality && npm run test:web-studio-lead-followup && npm run test:web-studio-followup-worker && npm run test:smm-pipeline && npm run test:smm-compose && npm run test:smm-publisher && npm run test:smm-repair && npm run test:smm-plan-route-repair && next build",
     "typecheck": "tsc --noEmit",
     "start": "next start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
@@ -36,7 +36,8 @@
     "db:generate": "drizzle-kit generate",
     "test:cloud-browser": "node --experimental-strip-types tests/cloud-browser.mjs",
     "test:owner-console": "node --experimental-strip-types tests/owner-console.mjs",
-    "test:limits": "node --experimental-strip-types tests/limits.mjs"
+    "test:limits": "node --experimental-strip-types tests/limits.mjs",
+    "test:reels": "node --experimental-strip-types tests/reels.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
