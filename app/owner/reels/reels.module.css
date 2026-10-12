@@ -44,7 +44,7 @@
 .muted { font-size: 12.5px; color: #6f7f92; margin: 0; }
 
 .page textarea, .page input { font: inherit; color: #e6edf5; }
-.brief, .title, .text, .secs, .what, .feedback input {
+.brief, .title, .text, .secs, .what, .lines, .feedback input {
   width: 100%;
   border-radius: 12px;
   border: 1px solid #22314a;
@@ -79,6 +79,18 @@
 .text { font-weight: 700; font-size: 15px; }
 .secs { width: 76px; flex: none; text-align: center; }
 .what { font-size: 13px; color: #9fb0c3; min-height: 38px; }
+.lines { font-size: 13.5px; line-height: 1.5; color: #e6edf5; min-height: 60px; border-left: 3px solid #8853fd !important; }
+.kind {
+  flex: none;
+  max-width: 128px;
+  padding: 9px 8px;
+  border-radius: 10px;
+  border: 1px solid #2c2050;
+  background: rgba(136, 83, 253, 0.12);
+  color: #cdb8ff;
+  font: inherit;
+  font-size: 12.5px;
+}
 
 .feedback { display: flex; gap: 8px; }
 .feedback input { flex: 1; }

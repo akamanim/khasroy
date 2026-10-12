@@ -5,7 +5,22 @@ import { ArrowLeft, Clapperboard, Download, Plus, RefreshCw, Sparkles, Trash2, W
 import { waitLabel } from "@/lib/ai/limits";
 import styles from "./reels.module.css";
 
-type Scene = { seconds: number; what: string; text: string };
+type Line = { from: "client" | "inna"; text: string };
+type Scene = { seconds: number; kind?: string; what: string; text: string; lines?: Line[]; question?: string; [key: string]: unknown };
+
+// Scene kinds of the studio (same names as lib/reels/compose.ts).
+const KIND_NAMES = ["надпись", "удар", "сомнение", "цифра", "часы", "уведомление", "переписка", "голосовое", "выбор", "список", "товар", "экран", "бейдж", "концовка"];
+
+const linesToText = (lines?: Line[]) => (lines ?? []).map((l) => `${l.from === "client" ? "Клиент" : "ИИнна"}: ${l.text}`).join("\n");
+const textToLines = (value: string): Line[] =>
+  value
+    .split("\n")
+    .map((row) => row.trim())
+    .filter(Boolean)
+    .map((row) => {
+      const m = /^(клиент|client|иинна|inna|я)\s*:\s*(.*)$/iu.exec(row);
+      return m ? { from: /^(клиент|client)$/iu.test(m[1]) ? ("client" as const) : ("inna" as const), text: m[2] } : { from: "client" as const, text: row };
+    });
 type Script = { title: string; idea: string; scenes: Scene[] };
 type PlanScene = { tool: string; duration: number; transition: string; params: Record<string, unknown> };
 type Plan = { title: string; scenes: PlanScene[] };
@@ -241,6 +256,9 @@ export default function ReelsStudio() {
                   <li key={i}>
                     <div className={styles.sceneTop}>
                       <b>{i + 1}</b>
+                      <select className={styles.kind} value={s.kind || "надпись"} onChange={(e) => editScene(i, { kind: e.target.value })} aria-label={`Вид сцены ${i + 1}`}>
+                        {KIND_NAMES.map((k) => <option key={k} value={k}>{k}</option>)}
+                      </select>
                       <input
                         className={styles.text}
                         value={s.text}
@@ -262,11 +280,24 @@ export default function ReelsStudio() {
                         <Trash2 size={14} />
                       </button>
                     </div>
+                    {s.kind === "переписка" || s.kind === "голосовое" ? (
+                      <textarea
+                        className={styles.lines}
+                        rows={Math.max(2, s.lines?.length ?? 2)}
+                        value={linesToText(s.lines)}
+                        onChange={(e) => editScene(i, { lines: textToLines(e.target.value) })}
+                        placeholder={"Клиент: …\nИИнна: …"}
+                        aria-label={`Реплики сцены ${i + 1}`}
+                      />
+                    ) : null}
+                    {s.kind === "выбор" ? (
+                      <input className={styles.what} value={s.question ?? ""} onChange={(e) => editScene(i, { question: e.target.value })} placeholder="Вопрос владельцу" aria-label={`Вопрос сцены ${i + 1}`} />
+                    ) : null}
                     <textarea className={styles.what} rows={1} value={s.what} onChange={(e) => editScene(i, { what: e.target.value })} placeholder="Что в кадре" aria-label={`Кадр сцены ${i + 1}`} />
                   </li>
                 ))}
               </ol>
-              <button type="button" className={styles.ghost} onClick={() => { setDirty(true); setScript({ ...script, scenes: [...script.scenes, { seconds: 2.5, what: "", text: "" }] }); }}>
+              <button type="button" className={styles.ghost} onClick={() => { setDirty(true); setScript({ ...script, scenes: [...script.scenes, { seconds: 2.5, kind: "надпись", what: "", text: "" }] }); }}>
                 <Plus size={14} /> Сцена
               </button>
               <div className={styles.feedback}>

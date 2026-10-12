@@ -283,6 +283,8 @@ export function wrapLines(text: string, perLine: number, maxLines: number): stri
   return out.slice(0, maxLines).join("\n");
 }
 
+const ACCENT_KEYS = new Set(["text", "headline", "transcript"]);
+
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.replace(/\\n/gu, "\n").replace(/[\u0000-\u0009\u000b-\u001f]/gu, "").trim() : "";
 }
@@ -299,9 +301,14 @@ function checkParam(key: string, spec: ParamSpec, value: unknown, where: string,
         text = wrapped;
       }
       if (text.replace(/\*/gu, "").length > spec.max + (spec.maxLines ?? 1)) {
-        text = text.slice(0, spec.max).trim();
+        // Cut at a word boundary, never in the middle of a word.
+        const cut = text.slice(0, spec.max + 1);
+        const space = Math.max(cut.lastIndexOf(" "), cut.lastIndexOf("\n"));
+        text = (space > spec.max * 0.5 ? cut.slice(0, space) : cut.slice(0, spec.max)).trim().replace(/[,;:—-]+$/u, "");
         fixes.push(`${where}.${key}: сократил до ${spec.max} знаков`);
       }
+      // Accents (*word*) only work in big text; elsewhere a star would show on screen.
+      if (!ACCENT_KEYS.has(key)) text = text.replace(/\*/gu, "");
       // An unmatched * would show up as a star on screen.
       if ((text.match(/\*/gu) || []).length % 2) text = text.replace(/\*/gu, "");
       return text;
@@ -340,7 +347,7 @@ function checkParam(key: string, spec: ParamSpec, value: unknown, where: string,
     case "url": {
       const v = typeof value === "string" ? value.trim() : "";
       if (!v) return undefined;
-      if (!/^https:\/\/[^\s"'<>]+$/iu.test(v)) {
+      if (!/^https:\/\/[^\s"'<>]+$/iu.test(v) || /(^|\.)example\.(com|org|net)\//iu.test(v.replace(/^https:\/\//u, ""))) {
         fixes.push(`${where}.${key}: убрал непонятную ссылку`);
         return undefined;
       }
