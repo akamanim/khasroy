@@ -220,3 +220,68 @@ export async function perform(page: Page, action: ManualAction) {
 function clamp(value: number, max: number) {
   return Math.max(0, Math.min(max - 1, Math.round(Number(value) || 0)));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Source gallery: when Khasroy answers from web pages, open each page in the cloud browser and
+// collect what makes it visual — the lead picture, photos from the article and a screenshot.
+
+export type MediaCard = {
+  title: string;
+  url: string;
+  site: string;
+  description: string;
+  image: string;
+  images: string[];
+  shot: string;
+};
+
+const MEDIA = `(() => {
+  const meta = (n) => { const el = document.querySelector('meta[property="' + n + '"],meta[name="' + n + '"]'); return el ? (el.getAttribute('content') || '') : ''; };
+  const abs = (u) => { try { const x = new URL(u, location.href); return x.protocol === 'https:' ? x.href : ''; } catch { return ''; } };
+  const bad = /(logo|icon|avatar|sprite|pixel|placeholder|blank|spacer|badge|emoji|banner-ad|\\/ads?\\/)/i;
+  const root = document.querySelector('article') || document.querySelector('main') || document.body;
+  const lead = abs(meta('og:image') || meta('og:image:url') || meta('twitter:image') || meta('twitter:image:src'));
+  const seen = new Set(lead ? [lead] : []);
+  const images = [];
+  for (const img of root.querySelectorAll('img')) {
+    const src = abs(img.currentSrc || img.src || img.getAttribute('data-src') || '');
+    if (!src || seen.has(src) || bad.test(src)) continue;
+    const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    if (w < 320 || h < 180) continue;
+    seen.add(src);
+    images.push(src);
+    if (images.length >= 6) break;
+  }
+  const image = lead || images.shift() || '';
+  return {
+    title: (meta('og:title') || document.title || '').trim().slice(0, 200),
+    site: (meta('og:site_name') || location.hostname.replace(/^www\\./, '')).slice(0, 60),
+    description: (meta('og:description') || meta('description') || '').trim().slice(0, 300),
+    image,
+    images: images.slice(0, 4),
+    url: location.href,
+  };
+})()`;
+
+/** Opens one source page (following redirects such as Google News links) and collects its pictures. */
+export async function visitForMedia(browser: Browser, source: { title: string; url: string }): Promise<MediaCard> {
+  const page = await openPage(browser, EMPTY_STATE);
+  try {
+    await goto(page, source.url);
+    // Google News links land on a page that forwards to the article with a script.
+    if (/(^|\.)news\.google\.com$/iu.test(new URL(page.url()).hostname)) {
+      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 8000 }).catch(() => undefined);
+      await settle(page);
+    }
+    // Wake up lazy-loaded pictures, then return to the top for the screenshot.
+    await page.evaluate("window.scrollBy(0, 1400)").catch(() => undefined);
+    await sleep(700);
+    await page.evaluate("window.scrollTo(0, 0)").catch(() => undefined);
+    await sleep(250);
+    const media = (await page.evaluate(MEDIA)) as Omit<MediaCard, "shot">;
+    const shot = (await page.screenshot({ type: "jpeg", quality: 45, encoding: "base64" })) as string;
+    return { ...media, title: media.title || source.title, shot };
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}

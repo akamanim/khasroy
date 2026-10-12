@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { launch } from "@/lib/browser/engine";
+import { launch, visitForMedia } from "@/lib/browser/engine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,7 +8,8 @@ export const maxDuration = 30;
 let lastRun = 0;
 
 /** Public self-check: can this deployment start Chromium and open a fixed page? No input is accepted. */
-export async function GET() {
+export async function GET(request: Request) {
+  const media = new URL(request.url).searchParams.get("check") === "media";
   if (Date.now() - lastRun < 10_000) return NextResponse.json({ ok: false, error: "too often" }, { status: 429 });
   lastRun = Date.now();
   const started = Date.now();
@@ -16,6 +17,19 @@ export async function GET() {
   try {
     browser = await launch();
     const launchedMs = Date.now() - started;
+    if (media) {
+      // Fixed page with pictures: checks that the source gallery can collect images here.
+      const card = await visitForMedia(browser, { title: "", url: "https://www.anthropic.com/news" });
+      return NextResponse.json({
+        ok: Boolean(card.image),
+        site: card.site,
+        title: card.title,
+        image: card.image,
+        photos: card.images.length,
+        shotBytes: Math.round((card.shot.length * 3) / 4),
+        totalMs: Date.now() - started,
+      });
+    }
     const page = await browser.newPage();
     await page.goto("https://example.com", { waitUntil: "domcontentloaded", timeout: 15_000 });
     const title = await page.title();

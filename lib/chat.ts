@@ -31,7 +31,10 @@ type ChatApiResponse = {
   code?: string;
   detail?: string;
   attempts?: number;
+  sources?: Array<{ title: string; url: string }>;
 };
+
+export type ChatSource = { title: string; url: string };
 
 export type ChatProgress = {
   stage?: string;
@@ -41,6 +44,8 @@ export type ChatProgress = {
 export type ChatCallbacks = {
   onProgress?: (progress: ChatProgress) => void;
   onChunk?: (delta: string, full: string) => void;
+  /** Web pages the answer was built from, when Khasroy searched the internet. */
+  onSources?: (sources: ChatSource[]) => void;
 };
 
 export class KhasroyAuthError extends Error {
@@ -421,6 +426,11 @@ export async function chat(messages: Message[], callbacks?: ChatCallbacks): Prom
     });
     return runImageGeneration(latestUser.content, callbacks);
   }
+
+  const sources = Array.isArray(payload.data.sources)
+    ? payload.data.sources.filter((s) => s && typeof s.url === "string" && /^https?:\/\//iu.test(s.url)).slice(0, 6)
+    : [];
+  if (sources.length) callbacks?.onSources?.(sources.map((s) => ({ title: String(s.title ?? ""), url: s.url })));
 
   callbacks?.onProgress?.({ stage: "RESPONSE", message: "Ответ готов. Показываю его постепенно…" });
   await revealContent(content, callbacks);

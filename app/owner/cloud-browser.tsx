@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, Maximize2, Minimize2, Play, RotateCw } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ExternalLink, Images, Maximize2, Minimize2, Monitor, Play, RotateCw } from "lucide-react";
 import styles from "./console.module.css";
 
 type BrowserState = { url: string; scrollY: number; cookies: unknown[] };
 type View = { url: string; title: string; screenshot: string };
 type Step = { n: number; thought: string; action: string; model: string };
 type Confirm = { question: string; index: number; label: string };
+type Card = { index: number; title: string; url: string; site: string; description: string; image: string; images: string[]; shot: string };
+type Gallery = { question: string; total: number; cards: Card[]; skipped: number; loading: boolean; error: string };
+
+/** Fired by the chat when an answer was built from web pages. */
+export const SOURCES_EVENT = "khasroy:sources";
+export type SourcesEventDetail = { question: string; sources: Array<{ title: string; url: string }> };
 
 const EMPTY: BrowserState = { url: "", scrollY: 0, cookies: [] };
 const STORE = "khasroy.cloud-browser";
@@ -40,6 +46,19 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [paused, setPaused] = useState<{ goal: string; history: string[] } | null>(null);
   const stepsBox = useRef<HTMLOListElement>(null);
+  const [gallery, setGallery] = useState<Gallery | null>(null);
+  const [mode, setMode] = useState<"page" | "gallery">("page");
+  const [selected, setSelected] = useState(0);
+  const [heroImage, setHeroImage] = useState("");
+  const [broken, setBroken] = useState<Set<string>>(new Set());
+  const galleryRun = useRef(0);
+  const loadGalleryRef = useRef<(detail: SourcesEventDetail) => void>(() => undefined);
+
+  useEffect(() => {
+    const onSources = (event: Event) => loadGalleryRef.current((event as CustomEvent<SourcesEventDetail>).detail);
+    window.addEventListener(SOURCES_EVENT, onSources);
+    return () => window.removeEventListener(SOURCES_EVENT, onSources);
+  }, []);
 
   useEffect(() => {
     const saved = load();
@@ -67,6 +86,64 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [large]);
+
+  // Opens every page the answer came from and streams back its pictures, one card per page.
+  async function loadGallery(detail: SourcesEventDetail) {
+    if (unauthorized || !detail?.sources?.length) return;
+    const run = ++galleryRun.current;
+    const sources = detail.sources.slice(0, 5);
+    setGallery({ question: detail.question, total: sources.length, cards: [], skipped: 0, loading: true, error: "" });
+    setMode("gallery");
+    setSelected(0);
+    setHeroImage("");
+    const update = (fn: (g: Gallery) => Gallery) => setGallery((g) => (g && run === galleryRun.current ? fn(g) : g));
+    try {
+      const response = await fetch("/api/owner/browser", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "gallery", sources }),
+      });
+      if (!response.ok || !response.body) throw new Error(`Браузер ответил ошибкой ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as Partial<Card> & { type: string; message?: string };
+          if (event.type === "card") {
+            const card = event as Card;
+            update((g) => ({ ...g, cards: [...g.cards, card].sort((a, b) => a.index - b.index) }));
+          } else if (event.type === "skip") {
+            update((g) => ({ ...g, skipped: g.skipped + 1 }));
+          } else if (event.type === "error") {
+            update((g) => ({ ...g, error: String(event.message ?? "Браузер не открыл источники") }));
+          }
+        }
+      }
+    } catch (err) {
+      update((g) => ({ ...g, error: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      update((g) => ({ ...g, loading: false }));
+    }
+  }
+  loadGalleryRef.current = (detail) => void loadGallery(detail);
+
+  const imageFor = (card: Card) =>
+    card.image && !broken.has(card.image) ? card.image : card.shot ? `data:image/jpeg;base64,${card.shot}` : "";
+  const markBroken = (src: string) => setBroken((prev) => (prev.has(src) ? prev : new Set(prev).add(src)));
+
+  function openCard(card: Card) {
+    setMode("page");
+    setPoint(null);
+    void act({ action: "goto", url: card.url }, "Открываю статью…");
+  }
 
   async function act(body: Record<string, unknown>, label: string): Promise<BrowserState | null> {
     setBusy(label);
@@ -216,7 +293,15 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
     <section className={`${styles.panel} ${styles.browser} ${large ? styles.browserLarge : ""}`} aria-label="Облачный браузер">
       <header className={styles.panelHead}>
         <span className={styles.label}>Облачный браузер</span>
-        <span className={busy ? styles.accent : styles.muted}>{busy || (view?.url ? "готов" : "пусто")}</span>
+        <span className={busy || gallery?.loading ? styles.accent : styles.muted}>
+          {busy || (gallery?.loading ? "открываю источники…" : view?.url ? "готов" : "пусто")}
+        </span>
+        {gallery ? (
+          <div className={styles.modeSwitch} role="tablist" aria-label="Что показать">
+            <button type="button" role="tab" aria-selected={mode === "gallery"} onClick={() => setMode("gallery")} aria-label="Источники"><Images size={13} /></button>
+            <button type="button" role="tab" aria-selected={mode === "page"} onClick={() => setMode("page")} aria-label="Страница"><Monitor size={13} /></button>
+          </div>
+        ) : null}
         <button type="button" className={styles.iconButton} onClick={() => setLarge((v) => !v)} aria-label={large ? "Свернуть браузер" : "Развернуть браузер"}>
           {large ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
@@ -238,6 +323,18 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
             />
           </form>
 
+          {gallery && mode === "gallery" ? (
+            <Sources
+              gallery={gallery}
+              selected={selected}
+              heroImage={heroImage}
+              imageFor={imageFor}
+              onBroken={markBroken}
+              onSelect={(i) => { setSelected(i); setHeroImage(""); }}
+              onPhoto={setHeroImage}
+              onOpen={openCard}
+            />
+          ) : (
           <div className={styles.browserView} data-busy={busy ? "true" : undefined}>
             {view?.screenshot ? (
               // eslint-disable-next-line @next/next/no-img-element -- live screenshot from the cloud browser
@@ -247,8 +344,9 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
             )}
             {busy ? <span className={styles.browserBusy}>{busy}</span> : null}
           </div>
+          )}
 
-          {view?.screenshot ? (
+          {view?.screenshot && mode === "page" ? (
             <div className={styles.browserTools}>
               <button type="button" disabled={!!busy} onClick={() => act({ action: "scroll", direction: "up" }, "Листаю…")} aria-label="Листать вверх"><ArrowUp size={13} /></button>
               <button type="button" disabled={!!busy} onClick={() => act({ action: "scroll", direction: "down" }, "Листаю…")} aria-label="Листать вниз"><ArrowDown size={13} /></button>
@@ -313,5 +411,82 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
         </div>
       </div>
     </section>
+  );
+}
+
+function Sources({
+  gallery,
+  selected,
+  heroImage,
+  imageFor,
+  onBroken,
+  onSelect,
+  onPhoto,
+  onOpen,
+}: {
+  gallery: Gallery;
+  selected: number;
+  heroImage: string;
+  imageFor: (card: Card) => string;
+  onBroken: (src: string) => void;
+  onSelect: (index: number) => void;
+  onPhoto: (src: string) => void;
+  onOpen: (card: Card) => void;
+}) {
+  const hero = gallery.cards[selected] ?? gallery.cards[0];
+  const heroSrc = hero ? heroImage || imageFor(hero) : "";
+  const waiting = Math.max(0, gallery.total - gallery.cards.length - gallery.skipped);
+  return (
+    <div className={styles.gallery}>
+      <div className={styles.galleryHero}>
+        {hero && heroSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element -- pictures come from the source pages
+          <img key={heroSrc} src={heroSrc} alt={hero.title} referrerPolicy="no-referrer" onError={() => onBroken(heroSrc)} />
+        ) : (
+          <div className={styles.galleryPlaceholder}>
+            <span className={styles.pulse} />
+            {gallery.loading ? `Открываю источники ответа${gallery.question ? ` «${gallery.question.slice(0, 60)}»` : ""}…` : gallery.error || "Источники не открылись."}
+          </div>
+        )}
+        {hero ? (
+          <div className={styles.galleryCaption}>
+            <span>{hero.site}</span>
+            <b>{hero.title}</b>
+            {hero.description ? <p>{hero.description}</p> : null}
+            <div>
+              <button type="button" onClick={() => onOpen(hero)}>Открыть в браузере</button>
+              <a href={hero.url} target="_blank" rel="noopener noreferrer">На сайте <ExternalLink size={11} /></a>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {hero && hero.images.length ? (
+        <div className={styles.galleryPhotos} aria-label="Фото из статьи">
+          {[hero.image, ...hero.images].filter((src) => src && !src.startsWith("data:")).map((src) => (
+            <button key={src} type="button" data-active={src === heroSrc || undefined} onClick={() => onPhoto(src)}>
+              {/* eslint-disable-next-line @next/next/no-img-element -- pictures come from the source pages */}
+              <img src={src} alt="" referrerPolicy="no-referrer" loading="lazy" onError={(e) => { const button = e.currentTarget.parentElement; if (button) button.hidden = true; }} />
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div className={styles.galleryStrip} aria-label="Источники">
+        {gallery.cards.map((card, i) => (
+          <button key={card.url} type="button" data-active={i === selected || undefined} onClick={() => onSelect(i)} title={card.title}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- pictures come from the source pages */}
+            <img src={imageFor(card)} alt="" referrerPolicy="no-referrer" loading="lazy" onError={() => card.image && onBroken(card.image)} />
+            <span>{card.site}</span>
+          </button>
+        ))}
+        {Array.from({ length: gallery.loading ? waiting : 0 }, (_, i) => (
+          <span key={`wait-${i}`} className={styles.galleryWaiting} aria-hidden="true" />
+        ))}
+      </div>
+      {gallery.skipped && !gallery.loading ? (
+        <p className={styles.muted}>Не открылось источников: {gallery.skipped}.</p>
+      ) : null}
+    </div>
   );
 }

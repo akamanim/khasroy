@@ -87,7 +87,6 @@ export function LeftBoard({
   const inv = data.stats?.invitations;
   const sales = data.stats?.sales;
   const ordered = inv ? inv.orders7 : 0;
-  const conversion = inv && inv.orders7 + inv.started7 > 0 ? `${Math.round((inv.orders7 / (inv.orders7 + inv.started7)) * 100)}%` : "—";
   return (
     <div className={styles.board}>
       <section className={styles.panel}>
@@ -99,10 +98,7 @@ export function LeftBoard({
           <>
             <Kpi label="Заказы за 7 дней" value={ordered} now={inv.orders7} prev={inv.ordersPrev} />
             <Kpi label="Начали, но не заказали" value={inv.started7} now={inv.started7} prev={inv.startedPrev} />
-            <Kpi label="Доходят до заказа" value={conversion} hint="из тех, кто начал за 7 дней" />
-            <Kpi label="Зашли на сайт" value="—" hint="визиты пока не считаются" />
             <Kpi label="Ответы гостей" value={inv.rsvp7} now={inv.rsvp7} prev={inv.rsvpPrev} />
-            <Kpi label="Живых приглашений" value={inv.live} />
             <a className={styles.link} href="/owner/orders">Заказы ›</a>
           </>
         ) : (
