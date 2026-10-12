@@ -460,6 +460,11 @@
   height: min(300px, 36vh);
   transition: filter 0.5s ease, opacity 0.5s ease;
 }
+/* The wide cloud only needs a soft rim, not the round vignette used on the narrow studio cloud. */
+.cloud canvas {
+  -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 74%, transparent 100%);
+  mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 74%, transparent 100%);
+}
 .cloud[data-state="idle"] { filter: brightness(1.05); }
 .cloud[data-state="thinking"],
 .cloud[data-state="responding"] { filter: brightness(1.3); }
