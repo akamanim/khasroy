@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, PanelLeft, PanelRight, P
 import { Core } from "@/components/khasroy/core";
 import { MarkdownMessage } from "@/components/khasroy/markdown-message";
 import { LeftBoard, RightBoard, useOwnerDashboard } from "./console-boards";
+import { SOURCES_EVENT, type SourcesEventDetail } from "./cloud-browser";
 import styles from "./console.module.css";
 import {
   authenticateOwner,
@@ -156,6 +157,12 @@ export default function Home() {
             if (previous[previous.length - 1]?.message === progress.message) return previous;
             return [...previous.slice(-7), progress];
           });
+        },
+        onSources(sources) {
+          // Show the pages behind the answer, with their pictures, in the cloud browser.
+          const question = [...next].reverse().find((m) => m.role === "user")?.content ?? "";
+          if (window.matchMedia("(min-width: 1101px)").matches) setRightOpen(true);
+          window.dispatchEvent(new CustomEvent<SourcesEventDetail>(SOURCES_EVENT, { detail: { question, sources } }));
         },
         onChunk(_delta, full) {
           setMessages((previous) =>

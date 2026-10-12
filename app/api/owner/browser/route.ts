@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isOwnerRequest } from "@/lib/owner-session";
 import { runBrowserTask, type AgentEvent } from "@/lib/browser/agent";
-import { EMPTY_STATE, launch, openPage, perform, snapshot, stateOf, type BrowserState, type ManualAction } from "@/lib/browser/engine";
+import { EMPTY_STATE, launch, openPage, perform, snapshot, stateOf, visitForMedia, type BrowserState, type ManualAction } from "@/lib/browser/engine";
 import { normalizeUrl } from "@/lib/browser/guard";
 
 export const runtime = "nodejs";
@@ -46,6 +46,53 @@ export async function POST(request: Request) {
   if (!(await isOwnerRequest())) return NextResponse.json({ error: "Только для владельца" }, { status: 401 });
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const state = readState(body.state);
+
+  if (body.action === "gallery") {
+    const sources = (Array.isArray(body.sources) ? body.sources : [])
+      .map((item) => {
+        const r = (item ?? {}) as { title?: unknown; url?: unknown };
+        const url = typeof r.url === "string" ? normalizeUrl(r.url) : null;
+        return url ? { title: typeof r.title === "string" ? r.title.slice(0, 200) : "", url } : null;
+      })
+      .filter((item): item is { title: string; url: string } => item !== null)
+      .slice(0, 5);
+    if (!sources.length) return NextResponse.json({ error: "Нет источников" }, { status: 400 });
+    const encoder = new TextEncoder();
+    const deadline = Date.now() + (maxDuration - 8) * 1000;
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (event: Record<string, unknown>) => controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        let browser: Awaited<ReturnType<typeof launch>> | null = null;
+        try {
+          browser = await launch();
+          const queue = sources.map((source, index) => ({ source, index }));
+          // Two pages at a time: fast enough, and light on the function's memory.
+          const worker = async () => {
+            for (let job = queue.shift(); job; job = queue.shift()) {
+              if (Date.now() > deadline) {
+                send({ type: "skip", index: job.index, url: job.source.url, title: job.source.title, reason: "не хватило времени" });
+                continue;
+              }
+              try {
+                const card = await visitForMedia(browser!, job.source);
+                send({ type: "card", index: job.index, source: job.source.url, ...card });
+              } catch (error) {
+                send({ type: "skip", index: job.index, url: job.source.url, title: job.source.title, reason: (error instanceof Error ? error.message : String(error)).slice(0, 160) });
+              }
+            }
+          };
+          await Promise.all([worker(), worker()]);
+          send({ type: "done" });
+        } catch (error) {
+          send({ type: "error", message: (error instanceof Error ? error.message : String(error)).slice(0, 300) });
+        } finally {
+          await browser?.close().catch(() => undefined);
+          controller.close();
+        }
+      },
+    });
+    return new Response(stream, { headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store" } });
+  }
 
   if (body.action === "task") {
     const goal = String(body.goal ?? "").trim().slice(0, 1000);
