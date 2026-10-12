@@ -447,9 +447,11 @@
 .pillButton:disabled { opacity: 0.5; cursor: default; }
 
 /* The cloud sits behind the top of the chat; messages scroll over it and fade at the top edge. */
+/* The cloud floats above the chat: messages scroll behind it. Clicks and scrolling pass through. */
 .cloud {
   position: absolute;
-  z-index: 0;
+  z-index: 2;
+  pointer-events: none;
   top: 18px;
   left: 50%;
   transform: translateX(-50%);
@@ -474,9 +476,9 @@
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: #1f2b3d transparent;
-  /* Text over the cloud is faint so the cloud reads clearly; it is fully solid below it. */
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, rgba(0, 0, 0, 0.08) 70px, rgba(0, 0, 0, 0.28) 200px, rgba(0, 0, 0, 0.7) 330px, #000 400px);
-  mask-image: linear-gradient(180deg, transparent 0, rgba(0, 0, 0, 0.08) 70px, rgba(0, 0, 0, 0.28) 200px, rgba(0, 0, 0, 0.7) 330px, #000 400px);
+  /* Only the very top edge fades; the cloud itself covers the messages passing behind it. */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, rgba(0, 0, 0, 0.5) 40px, #000 110px);
+  mask-image: linear-gradient(180deg, transparent 0, rgba(0, 0, 0, 0.5) 40px, #000 110px);
   pointer-events: auto;
 }
 /* Pushes a short conversation down below the cloud; a long one scrolls up over it. */
