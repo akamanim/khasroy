@@ -108,14 +108,15 @@ export function pickStyle(script: Script, rand: () => number): string {
  * Turns the script into a plan by fixed rules and runs the plan checker over it. `seed` makes each
  * build look different (layouts, transitions, cameras, music) while staying reproducible.
  */
-export function scriptToPlan(script: Script, seed = hashSeed(script.title)): Checked {
+export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts: { style?: string } = {}): Checked {
   const rand = random(seed);
   const pick = <T,>(items: T[], avoid?: T): T => {
     const pool = items.filter((x) => x !== avoid);
     const from = pool.length ? pool : items;
     return from[Math.floor(rand() * from.length)];
   };
-  const style = pickStyle(script, rand);
+  const auto = pickStyle(script, rand);
+  const style = opts.style && STYLE_BPM[opts.style] ? opts.style : auto;
   const bpm = STYLE_BPM[style];
   const beat = 60 / bpm;
   // Scene lengths snap to whole beats, so every cut lands on the music.

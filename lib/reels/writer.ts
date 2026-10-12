@@ -70,8 +70,8 @@ export async function writeScript(brief: string, previous?: Script, feedback?: s
 /** The approved script becomes a plan by fixed rules — no second model call, nothing invented.
  *  Every build gets a fresh seed, so the same script comes out with new moves, music and looks;
  *  the seed is saved in the plan, so the render matches the preview. */
-export async function buildPlan(script: Script, seed = Math.floor(Math.random() * 1_000_000)): Promise<Checked & { model: string }> {
-  return { ...scriptToPlan(script, seed), model: "rules" };
+export async function buildPlan(script: Script, seed = Math.floor(Math.random() * 1_000_000), style?: string): Promise<Checked & { model: string }> {
+  return { ...scriptToPlan(script, seed, { style }), model: "rules" };
 }
 
 export { cleanScript };
