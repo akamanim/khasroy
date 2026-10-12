@@ -86,8 +86,12 @@ export default function ReelsStudio() {
 
   useEffect(() => {
     refreshList();
-    const id = new URL(window.location.href).searchParams.get("job");
+    const params = new URL(window.location.href).searchParams;
+    const id = params.get("job");
     if (id) api<{ job: Job | null }>(null, `?id=${id}`).then((d) => openJob(d.job)).catch(() => undefined);
+    // From the chat: "открыть студию" with the request already filled in.
+    const fromChat = params.get("brief");
+    if (!id && fromChat) setBrief(fromChat.slice(0, 2000));
   }, [refreshList, openJob]);
 
   // Follow a reel while GitHub renders it.
