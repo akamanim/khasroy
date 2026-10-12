@@ -16,6 +16,7 @@ export type ScriptScene = {
   label?: string;
   question?: string;
   items?: string[];
+  before?: string[];
   name?: string;
   price?: string;
   section?: string;
@@ -40,6 +41,13 @@ export const KINDS: Record<string, { tool: string; hint: string }> = {
   "товар": { tool: "product", hint: "карточка товара: name, price (только если дано)" },
   "экран": { tool: "screen", hint: "раздел кабинета ИИнны: section" },
   "бейдж": { tool: "badge", hint: "бейдж «ИИнна — личный менеджер»" },
+  "печать": { tool: "typewriter", hint: "фраза печатается с курсором, как будто ИИнна пишет: text" },
+  "до/после": { tool: "compare", hint: "сверху проблемы без ИИнны, снизу решения с ней: before (2–3 пункта), items (2–3 пункта)" },
+  "бегущая строка": { tool: "ticker", hint: "1–3 слова бегут лентами через экран: text" },
+  "завал": { tool: "pile", hint: "сообщения клиентов сыпятся кучей: text — заголовок, items — 2–4 коротких вопроса клиентов" },
+  "ночь": { tool: "night", hint: "часы бегут через ночь до рассвета: text («Пока вы *спите*»), label" },
+  "смена слов": { tool: "swap", hint: "«ИИнна» и прокручивающиеся глаголы: text — начало, items — 2–5 слов" },
+  "реакция": { tool: "burst", hint: "слово с салютом из сердечек и звёзд: text (1–2 слова), label" },
   "концовка": { tool: "outro", hint: "логотип и призыв; text — призыв" },
 };
 
@@ -69,6 +77,8 @@ export function cleanScript(raw: Record<string, unknown>): Script {
       };
       if (lines?.length) scene.lines = lines;
       if (items?.length) scene.items = items;
+      const before = Array.isArray(s.before) ? s.before.map((i) => str(i, 40)).filter(Boolean).slice(0, 3) : undefined;
+      if (before?.length) scene.before = before;
       for (const key of ["number", "label", "question", "name", "price", "section", "title", "body"] as const) {
         const v = str(s[key], 80);
         if (v) scene[key] = v;
@@ -96,6 +106,30 @@ function random(seed: number) {
 
 const STYLE_BPM: Record<string, number> = { pulse: 120, bounce: 140, chill: 92 };
 
+/**
+ * Looks: whole-reel directions. Each one sets the theme, music, the family of transitions and
+ * camera moves, the layouts it prefers and which creative tools may stand in for a plain headline.
+ * The studio shows three different looks at once, so the variants never resemble each other.
+ */
+export type Look = {
+  id: string;
+  name: string;
+  theme: string;
+  style: string;
+  moves: string[];
+  cameras: string[];
+  headline: string[];
+  phone: number;
+  alt: Record<string, number>;
+};
+export const LOOKS: Look[] = [
+  { id: "punch", name: "Удар", theme: "brand", style: "bounce", moves: ["whip", "slab", "glitch", "split", "push"], cameras: ["push", "panL", "panR", "tilt"], headline: ["block", "giant"], phone: 0.3, alt: { ticker: 0.45 } },
+  { id: "night", name: "Ночь", theme: "night", style: "chill", moves: ["fade", "zoom", "iris", "slide"], cameras: ["drift", "pull", "push"], headline: ["stack", "block"], phone: 0.85, alt: { typewriter: 0.5 } },
+  { id: "paper", name: "Журнал", theme: "mono", style: "pulse", moves: ["wipe", "push", "split", "slide"], cameras: ["still", "drift", "panR"], headline: ["stack", "giant"], phone: 0.2, alt: { typewriter: 0.3 } },
+  { id: "acid", name: "Кислота", theme: "acid", style: "bounce", moves: ["glitch", "whip", "zoom", "slab"], cameras: ["push", "tilt", "panL"], headline: ["giant", "block"], phone: 0.5, alt: { ticker: 0.5 } },
+  { id: "cinema", name: "Кино", theme: "cinema", style: "pulse", moves: ["fade", "iris", "zoom", "wipe"], cameras: ["push", "pull", "drift"], headline: ["stack"], phone: 0.6, alt: { typewriter: 0.4 } },
+];
+
 /** Music style from the tone of the script: calm tutorials get "chill", bold ones "bounce". */
 export function pickStyle(script: Script, rand: () => number): string {
   const text = `${script.title} ${script.idea} ${script.scenes.map((s) => s.text).join(" ")}`.toLowerCase();
@@ -108,26 +142,32 @@ export function pickStyle(script: Script, rand: () => number): string {
  * Turns the script into a plan by fixed rules and runs the plan checker over it. `seed` makes each
  * build look different (layouts, transitions, cameras, music) while staying reproducible.
  */
-export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts: { style?: string } = {}): Checked {
+export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts: { style?: string; look?: string } = {}): Checked {
   const rand = random(seed);
+  const look = LOOKS.find((l) => l.id === opts.look) ?? LOOKS[seed % LOOKS.length];
   const pick = <T,>(items: T[], avoid?: T): T => {
     const pool = items.filter((x) => x !== avoid);
     const from = pool.length ? pool : items;
     return from[Math.floor(rand() * from.length)];
   };
-  const auto = pickStyle(script, rand);
+  const auto = opts.look ? look.style : pickStyle(script, rand);
   const style = opts.style && STYLE_BPM[opts.style] ? opts.style : auto;
   const bpm = STYLE_BPM[style];
   const beat = 60 / bpm;
   // Scene lengths snap to whole beats, so every cut lands on the music.
   const onBeat = (sec: number, minBeats: number) => Math.round(Math.max(minBeats, Math.round(sec / beat)) * beat * 100) / 100;
   const scenes: Scene[] = [];
-  const cycle = ["cream", "black", "violet"];
-  const moves = ["slide", "whip", "push", "zoom", "wipe", "slab", "split", "fade"];
+  // In the paper look "black" is drawn as paper too, so it alternates paper with ink blocks instead.
+  const cycle = look.theme === "mono" ? ["cream", "violet"] : ["cream", "black", "violet"];
+  const moves = look.moves;
   let lastBg = "";
   let lastMove = "";
   let lastHeadline = "";
-  const pickBg = (preferred: string[]) => preferred.find((b) => b !== lastBg) ?? cycle.find((b) => b !== lastBg) ?? "cream";
+  const pickBg = (preferred: string[]) => {
+    const pref = look.theme === "mono" ? preferred.map((b) => (b === "black" ? "violet" : b)) : preferred;
+    return pref.find((b) => b !== lastBg) ?? cycle.find((b) => b !== lastBg) ?? "cream";
+  };
+  let lastTool = "";
 
   // Scenes that would come out empty are dropped instead of drawing a placeholder.
   const list = script.scenes.filter((s) => {
@@ -142,7 +182,14 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
   }
 
   list.forEach((s, i) => {
-    const tool = KINDS[s.kind]?.tool ?? "headline";
+    let tool = KINDS[s.kind]?.tool ?? "headline";
+    // A plain headline may become one of the look's creative tools (never the same tool twice in a row).
+    if (tool === "headline" && i > 0) {
+      for (const [alt, chance] of Object.entries(look.alt)) {
+        if (alt === "ticker" && words(s.text || s.what) > 3) continue;
+        if (alt !== lastTool && rand() < chance) { tool = alt; break; }
+      }
+    }
     const text = s.text || s.what;
     const client = s.lines?.filter((l) => l.from === "client") ?? [];
     const inna = s.lines?.filter((l) => l.from === "inna") ?? [];
@@ -152,7 +199,9 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
       case "headline":
         bg = pickBg(cycle);
         {
-          const options = words(text) <= 3 ? ["stack", "block", "giant"] : /\*/u.test(text) ? ["stack", "block"] : ["stack"];
+          const fits = words(text) <= 3 ? ["stack", "block", "giant"] : /\*/u.test(text) ? ["stack", "block"] : ["stack"];
+          const liked = fits.filter((v) => look.headline.includes(v));
+          const options = liked.length ? liked : fits;
           const variant = pick(options, lastHeadline);
           lastHeadline = variant;
           params = { text, align: "center", size: words(text) <= 3 ? "xl" : "l", variant };
@@ -168,7 +217,7 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
         break;
       case "counter":
         bg = pickBg(["black", "cream", "violet"]);
-        params = { value: s.number || (plain(text).match(/[\d/ ]+/u)?.[0]?.trim() ?? "24/7"), headline: s.number ? text : "", label: s.label ?? "", variant: rand() < 0.5 ? "ring" : "corner" };
+        params = { value: s.number || (plain(text).match(/[\d/ ]+/u)?.[0]?.trim() ?? "24/7"), headline: s.number ? text : "", label: s.label ?? "", variant: look.id === "paper" ? "corner" : rand() < 0.5 ? "ring" : "corner" };
         break;
       case "dot_grid": {
         bg = "cream";
@@ -179,7 +228,7 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
       case "notification":
         bg = "black";
         params = {
-          variant: rand() < 0.55 ? "phone" : "float",
+          variant: rand() < look.phone ? "phone" : "float",
           headline: text || "Новый\n*заказ*",
           title: s.title || (/заказ/iu.test(text) || !text ? "Пришёл новый заказ" : plain(text)),
           body: s.body ?? "",
@@ -189,7 +238,7 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
       case "chat":
         bg = pickBg(["cream", "black"]);
         params = {
-          ...(rand() < 0.55 ? { variant: "phone", title: text } : {}),
+          ...(rand() < look.phone ? { variant: "phone", title: text } : {}),
           headline: text,
           messages: (s.lines?.length ? s.lines : [{ from: "client" as const, text: "Здравствуйте! Есть в наличии?" }, { from: "inna" as const, text: "Да, есть! Оформить?" }])
             .map((l) => ({ from: l.from === "client" ? "client" : "me", text: l.text })),
@@ -220,26 +269,59 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
         bg = "cream";
         params = { headline: text || "*Ваш*\nличный\nменеджер" };
         break;
+      case "typewriter":
+        bg = pickBg(["black", "cream", "violet"]);
+        params = { text: text || "Сейчас отвечу…", label: s.label ?? "" };
+        break;
+      case "compare":
+        bg = look.theme === "mono" ? "cream" : "black";
+        params = {
+          before: s.before?.length ? s.before : ["Ответ через час", "Потерянные заявки"],
+          after: s.items?.length ? s.items : ["Ответ сразу", "Заказ оформлен"],
+          ...(s.label ? { right: s.label } : {}),
+        };
+        break;
+      case "ticker":
+        bg = pickBg(["cream", "violet", "black"]);
+        params = { text: plain(text) || "24/7" };
+        break;
+      case "pile":
+        bg = pickBg(["cream", "black"]);
+        params = { headline: text || "Директ\n*разрывается*", messages: s.items?.length ? s.items : client.map((l) => l.text).slice(0, 4) };
+        break;
+      case "night":
+        bg = "black";
+        params = { text: text || "Пока вы *спите*", label: s.label || "ИИнна на связи" };
+        break;
+      case "swap":
+        bg = pickBg(["violet", "black"]);
+        params = { prefix: plain(text) || "ИИнна", words: s.items?.length ? s.items : ["отвечает", "продаёт", "напоминает"] };
+        break;
+      case "burst":
+        bg = pickBg(["violet", "black"]);
+        params = { text: plain(text) || "Заказ!", label: s.label ?? "", shape: pick(["mix", "heart", "star", "spark"]) };
+        break;
       case "outro":
         bg = lastBg === "violet" ? "black" : "violet";
         params = { brand: "ИИнна", cta: plain(text) || "Ссылка в профиле", line: s.label || "" };
         break;
     }
-    if (["headline", "slam", "glitch", "counter", "chat", "choice", "list", "product", "outro"].includes(tool)) params.bg = bg;
+    if (["headline", "slam", "glitch", "counter", "chat", "choice", "list", "product", "outro", "typewriter", "compare", "ticker", "pile", "swap", "burst"].includes(tool)) params.bg = bg;
     // Cuts for hard hits, varied moves for the rest, an iris into the ending.
     let transition = "cut";
     if (i > 0) {
-      if (tool === "outro") transition = pick(["iris", "slab", "zoom"]);
-      else if (tool === "slam" || tool === "glitch") transition = pick(["cut", "glitch"]);
-      else if (scenes[i - 1]?.tool === "slam") transition = pick(["slab", "whip", "split"]);
+      if (tool === "outro") transition = pick(["iris", "slab", "zoom"], lastMove);
+      else if (tool === "slam" || tool === "glitch" || tool === "burst") transition = pick(["cut", "glitch"], lastMove);
+      else if (scenes[i - 1]?.tool === "slam") transition = pick(["slab", "whip", "split"], lastMove);
       else transition = pick(moves, lastMove);
       if (transition !== "cut") lastMove = transition;
     }
     lastBg = bg;
+    lastTool = tool;
     const minBeats = tool === "slam" ? 2 : tool === "glitch" ? 3 : 4;
-    scenes.push({ tool, duration: onBeat(s.seconds, minBeats), transition, params });
+    scenes.push({ tool, duration: onBeat(s.seconds, minBeats), transition, camera: pick(look.cameras), params });
   });
-  return checkPlan({ title: script.title, scenes, style, bpm, seed });
+  return checkPlan({ title: script.title, scenes, style, bpm, seed, theme: look.theme });
 }
 
 /** Stable seed from text, used when the caller does not pass one. */

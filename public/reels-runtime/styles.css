@@ -123,3 +123,32 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; 
   border-top: 3px solid rgba(136, 83, 253, 0.55);
   box-shadow: 0 -40px 160px rgba(136, 83, 253, 0.35);
 }
+
+/* ---------- themes: the same scenes in a different look ---------- */
+/* night: deep plum instead of paper, indigo instead of violet blocks */
+.theme-night .bg-cream { background: #15121f; color: var(--white); }
+.theme-night .bg-violet { background: #2a1b5c; color: var(--white); }
+.theme-night .bg-violet .accent { color: #b99bff; }
+.theme-night .bg-cream .card { background: #221d33; color: var(--white); }
+.theme-night .bg-cream::after { mix-blend-mode: screen; opacity: 0.05; }
+/* mono: paper and ink only; violet stays for accents */
+.theme-mono .bg-violet { background: var(--ink); color: var(--white); }
+.theme-mono .bg-violet .accent { color: var(--violet); }
+.theme-mono .bg-black { background: #ece8df; color: var(--ink); }
+.theme-mono .bg-black .card { background: #fff; color: var(--ink); }
+/* acid: violet blocks become lime, paper gets brighter */
+.theme-acid .bg-violet { background: #c6ff3d; color: var(--ink); }
+.theme-acid .bg-violet .accent { color: var(--violet); }
+.theme-acid .bg-cream { background: #f6f4ee; }
+.theme-acid .accent { color: var(--violet); }
+/* cinema: letterbox and vignette */
+.cinema-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+  background:
+    linear-gradient(#000 0 0) top / 100% 120px no-repeat,
+    linear-gradient(#000 0 0) bottom / 100% 120px no-repeat,
+    radial-gradient(ellipse 80% 70% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55));
+}

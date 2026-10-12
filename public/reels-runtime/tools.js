@@ -24,6 +24,16 @@
     screen: () => [{ at: 1.0, sfx: "pop" }],
     badge: () => [{ at: 0.05, sfx: "whoosh", len: 0.6 }],
     outro: () => [{ at: 0.05, sfx: "impact" }, { at: 0.85, sfx: "pop" }],
+    typewriter: (p) => {
+      const n = String(p.text || "").replace(/\*/g, "").length;
+      return Array.from({ length: Math.min(14, Math.ceil(n / 3)) }, (_, i) => ({ at: 0.25 + i * 3 * 0.055, sfx: "tick" }));
+    },
+    compare: () => [{ at: 0.1, sfx: "whoosh", len: 0.5 }, { at: 1.1, sfx: "whoosh", len: 0.6 }, { at: 1.5, sfx: "pop" }],
+    ticker: () => [{ at: 0.0, sfx: "whoosh", len: 0.8 }, { at: 0.7, sfx: "impact" }],
+    pile: (p) => Array.from({ length: Math.min(7, Math.max(3, Array.isArray(p.messages) ? p.messages.length * 2 : 6)) }, (_, i) => ({ at: 0.25 + i * 0.16, sfx: "pop" })),
+    night: () => [{ at: 0.2, sfx: "riser", len: 1.4 }, { at: 1.7, sfx: "notify" }],
+    swap: (p) => Array.from({ length: Math.min(5, Array.isArray(p.words) ? p.words.length : 3) }, (_, i) => ({ at: 0.45 + i * 0.5, sfx: "tick" })),
+    burst: () => [{ at: 0.3, sfx: "impact" }, { at: 0.45, sfx: "pop" }, { at: 0.6, sfx: "pop" }],
   };
   const R = (name, tool) =>
     window.reel.register(name, {
@@ -756,6 +766,259 @@
           const cp = prog(t, 0.8, 0.6, ease.spring);
           cta.style.opacity = String(prog(t, 0.8, 0.15));
           cta.style.transform = `translateX(-50%) translateY(${(1 - cp) * 40}px) scale(${lerp(0.85, 1, cp)})`;
+        },
+      };
+    },
+  });
+
+  // ---------- creative shelf ----------
+
+  // 15. Typewriter — the line is typed letter by letter with a blinking caret.
+  R("typewriter", {
+    duration: 2.6,
+    bg: "black",
+    build(p) {
+      const node = el("div", null, { position: "absolute", inset: "0" });
+      const source = String(p.text || "Печатает…");
+      // Short lines keep the type big.
+      const raw = source.split(/\s+/).filter(Boolean).reduce((acc, w) => {
+        const last = acc[acc.length - 1];
+        if (last !== undefined && (last + " " + w).replace(/\*/g, "").length <= 13) acc[acc.length - 1] = `${last} ${w}`; else acc.push(w);
+        return acc;
+      }, []).join("\n");
+      const chars = [];
+      const block = el("div", "display", { position: "absolute", left: "80px", right: "80px", top: "50%", fontSize: px(Math.min(170, 900 / (raw.split("\n").reduce((m, l) => Math.max(m, l.replace(/\*/g, "").length), 1) * 0.54))), lineHeight: "1.02", transform: "translateY(-50%)", textTransform: "none", letterSpacing: "-0.03em" });
+      let accent = false;
+      for (const ch of raw) {
+        if (ch === "*") { accent = !accent; continue; }
+        const span = el("span", accent ? "accent" : null, { opacity: "0" }, ch === "\n" ? "<br>" : esc(ch));
+        block.appendChild(span);
+        chars.push(span);
+      }
+      const caret = el("span", null, { display: "inline-block", width: "0.08em", height: "0.9em", marginLeft: "0.04em", background: "var(--violet)", verticalAlign: "-0.08em" });
+      block.appendChild(caret);
+      node.appendChild(block);
+      const label = p.label ? labelNode(p.label, { position: "absolute", left: "84px", top: "300px", color: "var(--violet)" }) : null;
+      if (label) node.appendChild(label);
+      return {
+        node,
+        update(t) {
+          fitText(block, 920);
+          const shown = Math.floor(clamp((t - 0.25) / 0.055, 0, chars.length));
+          chars.forEach((c, i) => { c.style.opacity = i < shown ? "1" : "0"; });
+          if (shown < chars.length) block.insertBefore(caret, chars[shown]); else block.appendChild(caret);
+          caret.style.opacity = shown < chars.length || Math.floor(t * 2.4) % 2 === 0 ? "1" : "0";
+          if (label) label.style.opacity = String(prog(t, 0, 0.3));
+        },
+      };
+    },
+  });
+
+  // 16. Compare — "before" crossed out on top, "after" with ticks below; a violet panel sweeps in.
+  R("compare", {
+    duration: 3.4,
+    bg: "black",
+    build(p) {
+      const node = el("div", null, { position: "absolute", inset: "0" });
+      const before = (Array.isArray(p.before) && p.before.length ? p.before : ["Ответ через час", "Потерянные заявки"]).slice(0, 3);
+      const after = (Array.isArray(p.after) && p.after.length ? p.after : ["Ответ сразу", "Заказ оформлен"]).slice(0, 3);
+      const top = el("div", null, { position: "absolute", left: "0", right: "0", top: "0", height: "960px", padding: "300px 80px 0" });
+      const longest = before.concat(after).reduce((m, x) => Math.max(m, String(x).length), 1);
+      const rowSize = Math.round(Math.min(96, 820 / (longest * 0.64)));
+      top.innerHTML = `<div class="label" style="color:#8d8d8d">${esc(p.left || "Без ИИнны")}</div>` +
+        before.map((b) => `<div class="display row" style="font-size:${rowSize}px;margin-top:40px;color:#6d6d6d;position:relative;display:table;white-space:nowrap">${esc(b)}<i style="position:absolute;left:-6px;right:-6px;top:52%;height:8px;background:#ff5a4e;transform-origin:0 50%;transform:scaleX(0)"></i></div>`).join("");
+      const bottom = el("div", "bg-violet", { position: "absolute", left: "0", right: "0", top: "960px", bottom: "0", padding: "90px 80px 0", color: "var(--white)" });
+      bottom.innerHTML = `<div class="label">${esc(p.right || "С ИИнной")}</div>` +
+        after.map((a) => `<div class="display row" style="font-size:${rowSize}px;margin-top:40px;white-space:nowrap;display:flex;align-items:center;gap:28px"><span style="flex:none;width:76px;height:76px;border-radius:50%;background:var(--ink);display:grid;place-items:center;font-size:44px;color:#fff">✓</span>${esc(a)}</div>`).join("");
+      node.append(top, bottom);
+      const strikes = [...top.querySelectorAll("i")];
+      const rowsTop = [...top.querySelectorAll(".row")];
+      const rowsBottom = [...bottom.querySelectorAll(".row")];
+      return {
+        node,
+        update(t) {
+          rowsTop.forEach((r, i) => { const q = prog(t, 0.1 + i * 0.12, 0.4, ease.outQuint); r.style.opacity = String(q); r.style.transform = `translateX(${(1 - q) * -60}px)`; });
+          strikes.forEach((s, i) => { s.style.transform = `scaleX(${prog(t, 0.55 + i * 0.12, 0.3, ease.inOut)})`; });
+          const sweep = prog(t, 1.0, 0.55, ease.outExpo);
+          bottom.style.clipPath = `inset(0 ${(1 - sweep) * 100}% 0 0)`;
+          rowsBottom.forEach((r, i) => { const q = prog(t, 1.3 + i * 0.14, 0.45, ease.back); r.style.opacity = String(clamp(q * 2)); r.style.transform = `translateY(${(1 - q) * 40}px)`; });
+        },
+      };
+    },
+  });
+
+  // 17. Ticker — the phrase runs in diagonal bands across the screen, the middle band in violet.
+  R("ticker", {
+    duration: 2.2,
+    bg: "cream",
+    build(p) {
+      const node = el("div", null, { position: "absolute", inset: "0", overflow: "hidden" });
+      const text = String(p.text || "24/7").replace(/\*/g, "").toUpperCase();
+      const band = (i) => {
+        const hot = i === 2;
+        const b = el("div", "display black", {
+          position: "absolute", left: "-60%", width: "220%", top: px(260 + i * 300), height: "250px", lineHeight: "250px",
+          fontSize: "190px", whiteSpace: "nowrap", background: hot ? "var(--violet)" : "transparent",
+          color: hot ? "var(--white)" : "currentColor", opacity: hot ? "1" : "0.16",
+        }, Array.from({ length: 8 }, () => esc(text)).join(" <span style='color:var(--violet)'>✦</span> "));
+        node.appendChild(b);
+        return b;
+      };
+      const bands = [0, 1, 2, 3, 4].map(band);
+      return {
+        node,
+        update(t, dur) {
+          bands.forEach((b, i) => {
+            const dir = i % 2 ? 1 : -1;
+            const speed = i === 2 ? 260 : 180;
+            const enter = prog(t, i * 0.05, 0.6, ease.outExpo);
+            b.style.transform = `rotate(-8deg) translateX(${dir * (t * speed + (1 - enter) * 900)}px)`;
+          });
+          node.style.transform = `scale(${lerp(1.08, 1, prog(t, 0, dur, ease.out))})`;
+        },
+      };
+    },
+  });
+
+  // 18. Pile — client messages flood in and pile up, then the heap is swept aside.
+  R("pile", {
+    duration: 2.8,
+    bg: "cream",
+    build(p, ctx) {
+      const node = el("div", null, { position: "absolute", inset: "0" });
+      const head = kinetic(p.headline || "Директ\n*разрывается*", "display black", { position: "absolute", left: "80px", right: "80px", top: "250px", fontSize: px(headlineSize(p.headline || "Директ разрывается", 140)) });
+      node.appendChild(head.block);
+      const base = (Array.isArray(p.messages) && p.messages.length ? p.messages : ["Сколько стоит?", "Есть в наличии?", "Доставка есть?"]).map(String);
+      const r = rng(ctx.seed);
+      const n = Math.min(7, Math.max(5, base.length * 2));
+      const cards = Array.from({ length: n }, (_, i) => {
+        const c = el("div", "card", { left: px(90 + r() * 280), top: px(700 + i * 105), padding: "30px 40px", fontFamily: "Inter", fontWeight: "600", fontSize: "44px", whiteSpace: "nowrap", maxWidth: "820px", overflow: "hidden", textOverflow: "ellipsis" });
+        c.innerHTML = `<span style="color:var(--violet);margin-right:14px">●</span>${esc(base[i % base.length])}`;
+        node.appendChild(c);
+        return { c, rot: (r() * 2 - 1) * 7, x: (r() * 2 - 1) * 60 };
+      });
+      const sweepAway = p.sweep !== false;
+      return {
+        node,
+        update(t, dur) {
+          revealWords(head.words, t, 0.05, 0.08);
+          const away = sweepAway ? prog(t, dur - 0.55, 0.45, ease.in) : 0;
+          cards.forEach(({ c, rot, x }, i) => {
+            const q = prog(t, 0.25 + i * 0.16, 0.35, ease.spring);
+            c.style.opacity = String(clamp((t - 0.25 - i * 0.16) / 0.06));
+            c.style.transform = `translate(${x + away * (1400 + i * 40)}px, ${(1 - q) * -500}px) rotate(${rot * q + away * 20}deg)`;
+          });
+        },
+      };
+    },
+  });
+
+  // 19. Night — the clock runs through the night, the sky goes from dark to dawn; ИИнна keeps working.
+  R("night", {
+    duration: 2.8,
+    bg: "black",
+    build(p) {
+      const node = el("div", null, { position: "absolute", inset: "0" });
+      const sky = el("div", null, { position: "absolute", inset: "0", background: "linear-gradient(180deg,#07060d 0%,#1a1236 55%,#3b2470 100%)" });
+      const dawn = el("div", null, { position: "absolute", inset: "0", opacity: "0", background: "linear-gradient(180deg,#1b1640 0%,#8853fd 60%,#ffb37a 100%)" });
+      const moon = el("div", null, { position: "absolute", left: "700px", top: "330px", width: "170px", height: "170px", borderRadius: "50%", boxShadow: "-40px 20px 0 0 #f2efe9", transform: "rotate(-20deg)" });
+      node.append(sky, dawn, moon);
+      const from = String(p.from || "23:00"), to = String(p.to || "07:00");
+      const toMin = (s) => { const m = /^(\d{1,2}):(\d{2})$/.exec(s); return m ? Number(m[1]) * 60 + Number(m[2]) : 0; };
+      let a = toMin(from), b = toMin(to);
+      if (b <= a) b += 24 * 60;
+      const clock = el("div", "display black", { position: "absolute", left: "0", right: "0", top: "700px", textAlign: "center", fontSize: "300px", color: "#fff", letterSpacing: "-0.04em", fontVariantNumeric: "tabular-nums" });
+      const head = kinetic(p.text || "Пока вы *спите*", "display black", { position: "absolute", left: "80px", right: "80px", top: "1120px", textAlign: "center", fontSize: px(headlineSize(p.text || "Пока вы спите", 120)), color: "#fff" });
+      head.words.forEach((w) => { if (w.classList.contains("accent")) w.style.color = "#ffc48f"; });
+      const tag = el("div", "pill", { position: "absolute", left: "50%", top: "1420px", padding: "22px 40px", background: "var(--violet)", color: "#fff", fontSize: "34px", transform: "translateX(-50%)", whiteSpace: "nowrap" }, esc(p.label || "ИИнна на связи"));
+      node.append(clock, head.block, tag);
+      return {
+        node,
+        update(t, dur) {
+          const q = prog(t, 0.2, Math.max(0.8, dur - 0.9), ease.inOut);
+          const m = Math.round(lerp(a, b, q)) % (24 * 60);
+          clock.textContent = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+          dawn.style.opacity = String(q);
+          moon.style.transform = `rotate(-20deg) translateY(${q * 500}px)`;
+          moon.style.opacity = String(1 - q * 0.9);
+          revealWords(head.words, t, 0.3, 0.09);
+          const tp = prog(t, 1.4, 0.5, ease.back);
+          tag.style.transform = `translateX(-50%) scale(${tp})`;
+        },
+      };
+    },
+  });
+
+  // 20. Swap — a fixed start ("ИИнна") with the next word rolling through a slot.
+  R("swap", {
+    duration: 2.6,
+    bg: "violet",
+    build(p) {
+      const node = el("div", null, { position: "absolute", inset: "0" });
+      const words = (Array.isArray(p.words) && p.words.length ? p.words : ["отвечает", "продаёт", "считает"]).slice(0, 5).map(String);
+      const prefix = el("div", "display black", { position: "absolute", left: "80px", right: "80px", top: "620px", fontSize: px(headlineSize(p.prefix || "ИИнна", 170)) }, esc(p.prefix || "ИИнна"));
+      const slot = el("div", "display black", { position: "absolute", left: "80px", right: "40px", top: "820px", height: "230px", overflow: "hidden", fontSize: "190px", lineHeight: "230px" });
+      const longest = words.reduce((m, w) => Math.max(m, w.length), 1);
+      slot.style.fontSize = px(Math.min(190, 920 / (longest * 0.76)));
+      const reel = el("div", null, { position: "absolute", left: "0", top: "0" });
+      words.forEach((w, i) => reel.appendChild(el("div", i === words.length - 1 ? "accent" : null, { height: "230px", whiteSpace: "nowrap" }, esc(w))));
+      slot.appendChild(reel);
+      const bar = el("div", null, { position: "absolute", left: "80px", width: "140px", top: "1090px", height: "14px", background: "currentColor" });
+      node.append(prefix, slot, bar);
+      return {
+        node,
+        update(t) {
+          const pp = prog(t, 0, 0.4, ease.outQuint);
+          prefix.style.transform = `translateY(${(1 - pp) * 60}px)`;
+          prefix.style.opacity = String(pp);
+          let y = 0;
+          words.forEach((_, i) => { if (i > 0) y += prog(t, 0.45 + i * 0.5, 0.28, ease.back); });
+          reel.style.transform = `translateY(${-y * 230}px)`;
+          bar.style.width = px(lerp(0, 920, prog(t, 0.2, 0.45 + words.length * 0.5, ease.inOut)));
+        },
+      };
+    },
+  });
+
+  // 21. Burst — a line lands and shapes burst out around it (hearts, stars, sparks).
+  R("burst", {
+    duration: 2.2,
+    bg: "violet",
+    build(p, ctx) {
+      const node = el("div", null, { position: "absolute", inset: "0" });
+      const r = rng(ctx.seed);
+      const shapes = {
+        heart: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M12 21s-7.5-4.6-10-9.3C.4 8.4 2.3 4.5 6 4.5c2.2 0 3.5 1.3 4 2.3.5-1 1.8-2.3 4-2.3 3.7 0 5.6 3.9 4 7.2C19.5 16.4 12 21 12 21z"/></svg>`,
+        star: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M12 1l2.6 8.4H23l-6.8 5 2.6 8.4L12 17.8 5.2 22.8l2.6-8.4L1 9.4h8.4z"/></svg>`,
+        spark: `<svg viewBox="0 0 24 24" width="100%" height="100%"><path fill="currentColor" d="M12 0c.8 6.3 5.7 11.2 12 12-6.3.8-11.2 5.7-12 12-.8-6.3-5.7-11.2-12-12C6.3 11.2 11.2 6.3 12 0z"/></svg>`,
+      };
+      const kinds = Object.keys(shapes);
+      const colors = ["var(--white)", "var(--ink)", "#ffb37a", "#c6ff3d"];
+      const parts = Array.from({ length: 18 }, () => {
+        const size = 50 + r() * 110;
+        const d = el("div", null, { position: "absolute", left: "540px", top: "960px", width: px(size), height: px(size), marginLeft: px(-size / 2), marginTop: px(-size / 2), color: colors[Math.floor(r() * colors.length)] }, shapes[p.shape && shapes[p.shape] ? p.shape : kinds[Math.floor(r() * kinds.length)]]);
+        node.appendChild(d);
+        const a = r() * Math.PI * 2;
+        return { d, dx: Math.cos(a) * (300 + r() * 380), dy: Math.sin(a) * (420 + r() * 520), spin: (r() * 2 - 1) * 200, delay: r() * 0.12 };
+      });
+      const text = String(p.text || "Заказ!");
+      const word = el("div", "display black", { position: "absolute", left: "0", right: "0", top: "50%", textAlign: "center", fontSize: px(Math.min(260, 940 / (text.replace(/\*/g, "").length * 0.62))), transform: "translateY(-50%)", whiteSpace: "nowrap" }, esc(text.replace(/\*/g, "")));
+      node.appendChild(word);
+      const label = p.label ? labelNode(p.label, { position: "absolute", left: "0", right: "0", textAlign: "center", top: "1180px" }) : null;
+      if (label) node.appendChild(label);
+      return {
+        node,
+        update(t) {
+          fitText(word, 940);
+          const wp = prog(t, 0.1, 0.35, ease.back);
+          word.style.transform = `translateY(-50%) scale(${lerp(0.3, 1, wp)})`;
+          word.style.opacity = String(clamp((t - 0.1) / 0.1));
+          parts.forEach(({ d, dx, dy, spin, delay }) => {
+            const q = prog(t, 0.32 + delay, 1.3, ease.outExpo);
+            d.style.transform = `translate(${dx * q}px, ${dy * q + 160 * q * q}px) rotate(${spin * q}deg) scale(${q < 0.05 ? q * 20 : 1 - Math.max(0, q - 0.75) * 2})`;
+            d.style.opacity = String(t > 0.32 + delay ? 1 : 0);
+          });
+          if (label) label.style.opacity = String(prog(t, 0.6, 0.3));
         },
       };
     },
