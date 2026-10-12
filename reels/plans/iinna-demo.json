@@ -1,0 +1,16 @@
+{
+  "title": "ИИнна — всегда на связи (демо из инструментов)",
+  "format": "9:16",
+  "scenes": [
+    { "tool": "dot_grid", "duration": 2.8, "params": { "headline": "Многие думают,\nпридётся *сидеть\nна связи*", "number": 168, "label": "часов в неделю", "filled": 1, "columns": 7, "rows": 24 } },
+    { "tool": "glitch", "duration": 1.5, "transition": "cut", "params": { "text": "Пришёл ли заказ?", "bg": "black" } },
+    { "tool": "slam", "duration": 1.2, "transition": "cut", "params": { "text": "НЕТ.", "bg": "violet" } },
+    { "tool": "headline", "duration": 2.0, "transition": "wipe", "params": { "text": "Я *сама*\nнапишу\nклиенту", "bg": "cream", "align": "center", "size": "xl" } },
+    { "tool": "notification", "duration": 2.8, "transition": "slide", "params": { "headline": "Новый\n*заказ*", "sub": "№ 204", "title": "Пришёл новый заказ", "body": "Алексей К. · 4 900 сом", "app": "Telegram" } },
+    { "tool": "voice", "duration": 4.4, "transition": "fade", "params": { "headline": "Слушаю", "who": "Алексей К.", "duration": "0:07", "transcript": "Нужен *чёрный* на *подарок*, с *гравировкой*, на *завтра*.", "reply": "Конечно! Есть чёрный с гравировкой — успеем на завтра :)" } },
+    { "tool": "choice", "duration": 3.0, "transition": "push", "params": { "headline": "Спрошу\n*вас*", "question": "Клиент просит скидку 10%. Согласны?", "options": ["Да", "Нет"], "pick": 0 } },
+    { "tool": "product", "duration": 2.8, "transition": "zoom", "params": { "headline": "*Сама*\nпредложу", "name": "Cuff 01", "caption": "Чёрный · гравировка", "price": "2 900 сом", "tag": "Хит" } },
+    { "tool": "badge", "duration": 3.0, "transition": "wipe", "params": { "name": "ИИнна", "role": "личный менеджер", "headline": "*Ваш*\nличный\nменеджер" } },
+    { "tool": "outro", "duration": 2.6, "transition": "iris", "params": { "brand": "ИИнна", "line": "Отвечает клиентам 24/7", "cta": "Ссылка в профиле" } }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "title": "Все инструменты (проверка)",
+  "scenes": [
+    { "tool": "headline", "duration": 2.4, "params": { "text": "Я *сама*\nнапишу\nклиенту", "align": "center", "size": "xl" } },
+    { "tool": "slam", "duration": 1.4, "params": { "text": "НЕТ." } },
+    { "tool": "counter", "duration": 2.6, "params": { "headline": "Отвечаю\n*за секунды*", "value": "4 900", "from": 0, "label": "сом — средний заказ" } },
+    { "tool": "dot_grid", "duration": 3.0, "params": { "headline": "Многие думают,\nпридётся *сидеть\nна связи*", "number": 31, "label": "часов в неделю", "filled": 0.18 } },
+    { "tool": "notification", "duration": 2.6, "params": { "headline": "Новый\n*заказ*", "sub": "№ 204" } },
+    { "tool": "chat", "duration": 4.2, "params": { "contact": "Алексей К.", "headline": "твоё время", "messages": [ { "from": "client", "text": "Цена?" }, { "from": "client", "text": "Есть доставка?" }, { "from": "me", "text": "Да! Доставим *сегодня* до 20:00 — 300 сом" } ] } },
+    { "tool": "voice", "duration": 4.2, "params": { "headline": "Слушаю", "transcript": "Нужен *чёрный* на *подарок*", "reply": "Есть! Успеем на завтра :)" } },
+    { "tool": "choice", "duration": 3.0, "params": { "headline": "Спрошу\n*вас*", "question": "Клиент просит скидку 10%. Согласны?", "pick": 1 } },
+    { "tool": "product", "duration": 2.8, "params": { "headline": "*Сама*\nпредложу", "name": "Cuff 01", "caption": "Чёрный · гравировка", "price": "2 900 сом", "tag": "Хит" } },
+    { "tool": "badge", "duration": 3.0, "params": {} },
+    { "tool": "glitch", "duration": 1.6, "params": { "text": "Пришёл ли\nзаказ?", "bg": "black" } },
+    { "tool": "list", "duration": 3.4, "params": { "headline": "Что я *умею*", "items": ["Отвечаю 24/7", "Принимаю заказы", "Понимаю голосовые", "Зову вас, когда нужно"] } },
+    { "tool": "screen", "duration": 3.2, "params": { "step": "02 / 08", "title": "Товары", "subtitle": "каталог · добавить · reels", "note": "Добавьте товар" } },
+    { "tool": "outro", "duration": 2.6, "params": { "line": "Отвечает клиентам 24/7" } }
+  ]
+}
