@@ -32,6 +32,8 @@ type ChatApiResponse = {
   detail?: string;
   attempts?: number;
   sources?: Array<{ title: string; url: string }>;
+  queued?: boolean;
+  taskId?: string;
 };
 
 export type ChatSource = { title: string; url: string };
@@ -46,6 +48,8 @@ export type ChatCallbacks = {
   onChunk?: (delta: string, full: string) => void;
   /** Web pages the answer was built from, when Khasroy searched the internet. */
   onSources?: (sources: ChatSource[]) => void;
+  /** The models were out of limit: the request was saved and will be answered when they reset. */
+  onQueued?: (taskId: string) => void;
 };
 
 export class KhasroyAuthError extends Error {
@@ -431,6 +435,7 @@ export async function chat(messages: Message[], callbacks?: ChatCallbacks): Prom
     ? payload.data.sources.filter((s) => s && typeof s.url === "string" && /^https?:\/\//iu.test(s.url)).slice(0, 6)
     : [];
   if (sources.length) callbacks?.onSources?.(sources.map((s) => ({ title: String(s.title ?? ""), url: s.url })));
+  if (payload.data.queued && typeof payload.data.taskId === "string") callbacks?.onQueued?.(payload.data.taskId);
 
   callbacks?.onProgress?.({ stage: "RESPONSE", message: "Ответ готов. Показываю его постепенно…" });
   await revealContent(content, callbacks);

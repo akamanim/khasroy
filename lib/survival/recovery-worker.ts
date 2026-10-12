@@ -36,9 +36,13 @@ function parseHistory(value: unknown): BrainMessage[] {
     .filter((item): item is BrainMessage => item !== null);
 }
 
+// Limits on free models reset within minutes (per-minute limits) or by the next day (daily ones).
+// Retry soon at first, then every half hour, for about half a day before giving up.
+const MAX_ATTEMPTS = 30;
+
 function retryDelayMs(attempts: number) {
-  const exponent = Math.min(Math.max(attempts - 1, 0), 6);
-  return Math.min(60_000 * 2 ** exponent, 60 * 60_000);
+  const exponent = Math.min(Math.max(attempts - 1, 0), 5);
+  return Math.min(60_000 * 2 ** exponent, 30 * 60_000);
 }
 
 function taskError(task: TaskQueueItem, message: string) {
@@ -121,6 +125,7 @@ async function recoverTask(ownerKey: string, task: TaskQueueItem) {
         provider: brain.providerDetail || brain.provider,
         model: brain.model,
         resultPreview: content.slice(0, 1_200),
+        result: content.slice(0, 16_000),
       },
       lastError: "",
     });
@@ -136,24 +141,24 @@ async function recoverTask(ownerKey: string, task: TaskQueueItem) {
     const message = error instanceof Error ? error.message : "recovery_failed";
     const availableAt = new Date(Date.now() + retryDelayMs(attempts)).toISOString();
     await updateTask(ownerKey, task.id, {
-      status: attempts >= 8 ? "failed" : "waiting_for_compute",
+      status: attempts >= MAX_ATTEMPTS ? "failed" : "waiting_for_compute",
       attempts,
       availableAt,
       lastError: taskError(task, message),
       checkpoint: {
         ...task.checkpoint,
-        stage: attempts >= 8 ? "failed" : "waiting_for_compute",
+        stage: attempts >= MAX_ATTEMPTS ? "failed" : "waiting_for_compute",
         lastRecoveryAt: new Date().toISOString(),
-        nextAttemptAt: attempts >= 8 ? null : availableAt,
+        nextAttemptAt: attempts >= MAX_ATTEMPTS ? null : availableAt,
         lastReason: message.slice(0, 500),
       },
     });
 
     return {
       taskId: task.id,
-      status: attempts >= 8 ? ("failed" as const) : ("waiting_for_compute" as const),
+      status: attempts >= MAX_ATTEMPTS ? ("failed" as const) : ("waiting_for_compute" as const),
       reason: message.slice(0, 500),
-      nextAttemptAt: attempts >= 8 ? null : availableAt,
+      nextAttemptAt: attempts >= MAX_ATTEMPTS ? null : availableAt,
     };
   }
 }

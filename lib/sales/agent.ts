@@ -1,4 +1,5 @@
 import { resolveSecret } from "@/lib/server-integrations";
+import { AllModelsLimitedError, RateLimitError, retryAtFrom } from "@/lib/ai/limits";
 import {
   catalogText,
   companyValue,
@@ -151,6 +152,10 @@ async function complete(
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
+    // Out of limit (Cloudflare reports its daily allowance with other codes too): remember when it frees up.
+    if (response.status === 429 || (provider === "cloudflare" && /daily|neuron|allocation/iu.test(detail))) {
+      throw new RateLimitError(provider, retryAtFrom(response.headers, detail, provider), `${provider} ${id}: лимит исчерпан`);
+    }
     throw new Error(`${provider} ${id} ${response.status}${groq ? "" : ` ${detail.slice(0, 160)}`}`);
   }
   const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
@@ -258,6 +263,7 @@ export async function jsonCompletion(
   const llama = process.env.CLOUDFLARE_ACCOUNT_ID?.trim() && process.env.CLOUDFLARE_AI_TOKEN?.trim() ? [CLOUDFLARE_LLAMA] : [];
   const models = [...new Set([...(options.models ?? DEFAULT_MODELS), ...llama])];
   const failures: string[] = [];
+  const limited: number[] = [];
   for (const model of models) {
     try {
       const text = await complete(apiKey, model, messages, options);
@@ -266,7 +272,13 @@ export async function jsonCompletion(
       failures.push(`${model}: not JSON`);
     } catch (error) {
       failures.push(error instanceof Error ? error.message : String(error));
+      if (error instanceof RateLimitError) limited.push(error.retryAt);
     }
+  }
+  // Some model is only out of its limit: the caller can wait until the earliest one resets and go on.
+  // (Other failures alongside, like a timeout, are usually temporary too.)
+  if (limited.length) {
+    throw new AllModelsLimitedError(Math.min(...limited), `Лимиты моделей исчерпаны: ${failures.join("; ").slice(0, 300)}`);
   }
   throw new Error(`Все модели недоступны: ${failures.join("; ").slice(0, 400)}`);
 }

@@ -211,6 +211,11 @@
 .browserConfirm span { font-size: 12px; color: #b7a37a; line-height: 1.4; }
 .browserConfirm div { display: flex; gap: 8px; }
 
+.browserWaiting { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(159, 208, 255, 0.35); background: rgba(159, 208, 255, 0.06); }
+.browserWaiting b { font-size: 13px; color: #cfe8ff; }
+.browserWaiting span { font-size: 12px; line-height: 1.45; color: #9fb0c3; }
+.browserWaiting div { display: flex; gap: 8px; flex-wrap: wrap; }
+
 .browserAnswer {
   padding: 10px 12px;
   border-radius: 12px;
@@ -520,6 +525,19 @@
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: #9fd0ff; animation: pulse 1.2s ease-in-out infinite; }
 .steps { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #6f7f92; }
 @keyframes pulse { 50% { opacity: 0.3; transform: scale(0.7); } }
+
+.queued {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px dashed rgba(159, 208, 255, 0.35);
+  background: rgba(159, 208, 255, 0.05);
+  font-size: 12.5px;
+  color: #b7c4d3;
+}
 
 .jump {
   position: absolute;
