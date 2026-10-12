@@ -191,44 +191,10 @@ export function RightBoard({
         )}
       </section>
 
-      <section className={styles.panel}>
-        <header className={styles.panelHead}>
-          <span className={styles.label}>Изменения</span>
-          <a className={styles.link} href="https://github.com/akamanim/khasroy/pulls?q=is%3Amerged" target="_blank" rel="noopener noreferrer">все ›</a>
-        </header>
-        {data?.changes?.length ? (
-          <ol className={styles.changes}>
-            {data.changes.map((c) => (
-              <li key={c.number}>
-                <a href={c.url} target="_blank" rel="noopener noreferrer">
-                  <time dateTime={c.mergedAt}>{changeDate(c.mergedAt)}</time>
-                  <b>{c.title}</b>
-                </a>
-                {c.points.length ? (
-                  <ul>
-                    {c.points.slice(0, 2).map((point) => <li key={point}>{point}</li>)}
-                  </ul>
-                ) : null}
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className={styles.muted}>{data ? "Список изменений не загрузился — GitHub не ответил." : loading ? "Загружаю…" : "Видно владельцу после входа."}</p>
-        )}
-      </section>
-
       <CloudBrowser unauthorized={unauthorized} onLogin={onLogin} />
       {featuresOpen ? <FeaturesDialog skills={data?.skillList ?? null} onClose={() => setFeaturesOpen(false)} /> : null}
     </div>
   );
-}
-
-function changeDate(iso: string): string {
-  const date = new Date(iso);
-  const opts = { timeZone: "Asia/Bishkek" } as const;
-  const day = date.toLocaleDateString("ru-RU", { ...opts, day: "numeric", month: "short" });
-  const time = date.toLocaleTimeString("ru-RU", { ...opts, hour: "2-digit", minute: "2-digit" });
-  return `${day}, ${time}`;
 }
 
 const STATUS_CLASS: Record<FeatureStatus, string> = { verified: "ok", built: "accent", setup: "warn" };

@@ -1,11 +1,5 @@
 import assert from "node:assert/strict";
-import { changePoints } from "../lib/server-github.ts";
 import { FEATURES, FEATURE_STATUS } from "../lib/owner-features.ts";
-
-const body = "Текст\n\n- Чат над тучей стал **прозрачнее**\n* Прокрутка `не` тянет\n- третий\n- четвёртый\n\n🤖 Generated with Claude Code\n- не пункт";
-assert.deepEqual(changePoints(body), ["Чат над тучей стал прозрачнее", "Прокрутка не тянет", "третий"]);
-assert.deepEqual(changePoints(null), []);
-assert.equal(changePoints(`- ${"а".repeat(200)}`)[0].length, 138);
 
 const names = new Set();
 for (const group of FEATURES) {
