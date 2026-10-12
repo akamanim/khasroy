@@ -230,6 +230,100 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
+    name: "typewriter",
+    shelf: "story",
+    title: "Печать",
+    use: "Фраза печатается буква за буквой с мигающим курсором — как будто ИИнна пишет ответ.",
+    duration: { min: 1.6, default: 2.6, max: 4 },
+    bg: ["black", "cream", "violet"],
+    params: {
+      text: { type: "text", max: 60, maxLines: 4, required: true, hint: "фраза; *слово* — акцент" },
+      label: { type: "text", max: 30, hint: "мелкая подпись сверху" },
+      bg: BG(["black", "cream", "violet"], "black"),
+    },
+  },
+  {
+    name: "compare",
+    shelf: "proof",
+    title: "До / после",
+    use: "Сверху «без ИИнны» — зачёркнутые проблемы, снизу фиолетовая панель «с ИИнной» с галочками.",
+    duration: { min: 2.6, default: 3.4, max: 4.6 },
+    bg: ["black", "cream"],
+    params: {
+      left: { type: "text", max: 24, hint: "подпись верха, «Без ИИнны»" },
+      right: { type: "text", max: 24, hint: "подпись низа, «С ИИнной»" },
+      before: { type: "list", maxItems: 3, maxLength: 24, hint: "2–3 проблемы" },
+      after: { type: "list", maxItems: 3, maxLength: 24, hint: "2–3 решения" },
+      bg: BG(["black", "cream"], "black"),
+    },
+  },
+  {
+    name: "ticker",
+    shelf: "opening",
+    title: "Бегущая строка",
+    use: "Короткая фраза бежит лентами по диагонали через весь экран. Энергичный крючок или лозунг.",
+    duration: { min: 1.4, default: 2.2, max: 3 },
+    bg: ["cream", "black", "violet"],
+    params: {
+      text: { type: "text", max: 24, maxLines: 1, required: true, hint: "1–3 слова" },
+      bg: BG(["cream", "black", "violet"], "cream"),
+    },
+  },
+  {
+    name: "pile",
+    shelf: "story",
+    title: "Завал сообщений",
+    use: "Сообщения клиентов сыпятся и наваливаются кучей, потом их сметает. Боль: директ разрывается.",
+    duration: { min: 2, default: 2.8, max: 3.6 },
+    bg: ["cream", "black"],
+    params: {
+      headline: HEADLINE(32),
+      messages: { type: "list", maxItems: 4, maxLength: 34, hint: "короткие вопросы клиентов" },
+      bg: BG(["cream", "black"], "cream"),
+    },
+  },
+  {
+    name: "night",
+    shelf: "story",
+    title: "Ночь",
+    use: "Часы бегут через ночь, небо светлеет к рассвету, ИИнна на связи. Про работу 24/7.",
+    duration: { min: 2, default: 2.8, max: 3.6 },
+    bg: ["black"],
+    params: {
+      text: { type: "text", max: 32, maxLines: 2, hint: "надпись, «Пока вы *спите*»" },
+      label: { type: "text", max: 24, hint: "плашка, «ИИнна на связи»" },
+      from: { type: "text", max: 5, hint: "время начала, 23:00" },
+      to: { type: "text", max: 5, hint: "время конца, 07:00" },
+    },
+  },
+  {
+    name: "swap",
+    shelf: "opening",
+    title: "Смена слов",
+    use: "Неподвижное начало («ИИнна») и прокручивающиеся слова: отвечает → продаёт → считает.",
+    duration: { min: 1.8, default: 2.6, max: 3.4 },
+    bg: ["violet", "black", "cream"],
+    params: {
+      prefix: { type: "text", max: 14, hint: "начало, «ИИнна»" },
+      words: { type: "list", maxItems: 5, maxLength: 14, hint: "2–5 слов по очереди" },
+      bg: BG(["violet", "black", "cream"], "violet"),
+    },
+  },
+  {
+    name: "burst",
+    shelf: "proof",
+    title: "Реакция",
+    use: "Слово появляется с ударом, вокруг разлетаются сердечки, звёзды и искры. Радость, успех, «Заказ!».",
+    duration: { min: 1.4, default: 2.2, max: 3 },
+    bg: ["violet", "black", "cream"],
+    params: {
+      text: { type: "text", max: 14, maxLines: 1, required: true, hint: "1–2 слова" },
+      label: { type: "text", max: 30, hint: "подпись" },
+      shape: { type: "enum", values: ["mix", "heart", "star", "spark"], default: "mix", hint: "что разлетается" },
+      bg: BG(["violet", "black", "cream"], "violet"),
+    },
+  },
+  {
     name: "outro",
     shelf: "brand",
     title: "Концовка",
@@ -248,6 +342,7 @@ export const TOOLS: ToolSpec[] = [
 export const TRANSITIONS = ["cut", "fade", "slide", "push", "whip", "zoom", "wipe", "slab", "glitch", "split", "iris"] as const;
 export const CAMERAS = ["still", "push", "pull", "panL", "panR", "tilt", "drift"] as const;
 export const STYLES = ["pulse", "bounce", "chill"] as const;
+export const THEMES = ["brand", "night", "mono", "acid", "cinema"] as const;
 export const MAX_SCENES = 14;
 export const MAX_SECONDS = 60;
 
@@ -270,7 +365,7 @@ export function catalogForPrompt(shelves?: Shelf[]): string {
 // Plan validation: the model makes mistakes; the checker fixes what it can and reports the rest.
 
 export type Scene = { tool: string; duration: number; transition: string; camera?: string; params: Record<string, unknown> };
-export type Plan = { title: string; scenes: Scene[]; style?: string; bpm?: number; seed?: number; music?: "on" | "off" };
+export type Plan = { title: string; scenes: Scene[]; style?: string; bpm?: number; seed?: number; music?: "on" | "off"; theme?: string };
 export type Checked = { plan: Plan; fixes: string[]; errors: string[]; seconds: number };
 
 /** Breaks a too-long line at spaces so it fits; keeps the model's own line breaks. */
@@ -424,5 +519,6 @@ export function checkPlan(raw: unknown): Checked {
   const seed = Number(input.seed);
   if (Number.isInteger(seed) && seed >= 0) plan.seed = seed % 1_000_000;
   if (input.music === "off") plan.music = "off";
+  if (typeof input.theme === "string" && (THEMES as readonly string[]).includes(input.theme)) plan.theme = input.theme;
   return { plan, fixes, errors, seconds };
 }

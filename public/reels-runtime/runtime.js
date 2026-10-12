@@ -222,6 +222,8 @@
     load(plan) {
       const root = stage();
       root.innerHTML = "";
+      // Look of the whole reel: brand colours by default, or one of the themes in styles.css.
+      root.className = plan.theme ? `theme-${String(plan.theme).replace(/[^a-z]/g, "")}` : "";
       this.scenes = [];
       this.bpm = Number(plan.bpm) || 0;
       const overlay = el("div", null, { position: "absolute", inset: "0", zIndex: "999", display: "none", pointerEvents: "none" });
@@ -253,6 +255,8 @@
         cut += dur;
       });
       root.appendChild(overlay);
+      // Cinema look: letterbox bars and a vignette over every scene.
+      if (plan.theme === "cinema") root.appendChild(el("div", "cinema-frame"));
       this.duration = cut;
       return this.duration;
     },

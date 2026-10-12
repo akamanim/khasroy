@@ -67,7 +67,8 @@ assert.equal(script.scenes.at(-1).kind, "надпись", "unknown kind becomes 
 const composed = scriptToPlan(script);
 assert.deepEqual(composed.errors, []);
 const tools = composed.plan.scenes.map((s) => s.tool);
-assert.deepEqual(tools, ["glitch", "slam", "headline", "voice", "choice", "notification", "chat", "headline", "outro"]);
+const loose = (t) => (["typewriter", "ticker"].includes(t) ? "headline" : t);
+assert.deepEqual(tools.map(loose), ["glitch", "slam", "headline", "voice", "choice", "notification", "chat", "headline", "outro"]);
 assert.equal(composed.plan.scenes[1].params.text, "НЕТ.");
 const sc = composed.plan.scenes;
 assert.ok(["cut", "glitch"].includes(sc[1].transition), "slam lands hard");
@@ -83,6 +84,10 @@ for (const s of sc) {
 assert.deepEqual(scriptToPlan(script, 42).plan, scriptToPlan(script, 42).plan, "same seed, same reel");
 const looks = new Set([1, 2, 3, 4, 5, 6].map((seed) => JSON.stringify(scriptToPlan(script, seed).plan.scenes.map((s) => [s.transition, s.params.variant]))));
 assert.ok(looks.size >= 4, "different seeds give different reels");
+// Looks: three looks over one script give three different reels.
+const lookPlans = ["punch", "night", "paper"].map((look) => scriptToPlan(script, 7, { look }).plan);
+assert.equal(new Set(lookPlans.map((p) => p.theme)).size, 3, "each look has its own theme");
+assert.equal(new Set(lookPlans.map((p) => JSON.stringify(p.scenes.map((s) => s.transition)))).size, 3, "each look moves differently");
 const voice = composed.plan.scenes[3].params;
 assert.equal(voice.transcript, "Нужен *чёрный*");
 assert.equal(voice.reply, "Есть!");
@@ -114,3 +119,20 @@ assert.equal(t[1].params.step, "01 / 02");
 assert.equal(t[2].params.step, "02 / 02");
 assert.equal(t[3].params.title, "Подключено!");
 console.log("reels compose 2: ok");
+
+// Creative kinds become their tools with sensible parameters.
+const creative = scriptToPlan(cleanScript({ scenes: [
+  { kind: "бегущая строка", text: "24/7" },
+  { kind: "завал", text: "Директ *горит*", items: ["Цена?", "Есть размер M?"] },
+  { kind: "ночь", text: "Пока вы *спите*" },
+  { kind: "до/после", text: "Разница", before: ["Ответ через час"], items: ["Ответ сразу"] },
+  { kind: "смена слов", text: "ИИнна", items: ["отвечает", "продаёт"] },
+  { kind: "печать", text: "Сейчас уточню" },
+  { kind: "реакция", text: "Заказ!" },
+] }), 3, { look: "acid" });
+assert.deepEqual(creative.errors, []);
+assert.deepEqual(creative.plan.scenes.map((s) => s.tool), ["ticker", "pile", "night", "compare", "swap", "typewriter", "burst", "outro"]);
+assert.deepEqual(creative.plan.scenes[1].params.messages, ["Цена?", "Есть размер M?"]);
+assert.deepEqual(creative.plan.scenes[3].params.after, ["Ответ сразу"]);
+assert.equal(creative.plan.theme, "acid");
+console.log("reels creative: ok");

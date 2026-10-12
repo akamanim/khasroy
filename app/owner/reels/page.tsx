@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ArrowLeft, Clapperboard, Download, Pause, Play, Plus, RefreshCw, SkipBack, Sparkles, Trash2, Volume2, VolumeX } from "lucide-react";
 import { waitLabel } from "@/lib/ai/limits";
-import { KINDS, scriptToPlan, type Script as ComposeScript } from "@/lib/reels/compose";
+import { KINDS, LOOKS, scriptToPlan, type Script as ComposeScript } from "@/lib/reels/compose";
 import { soundtrack, type Cue } from "@/lib/reels/preview-audio";
 import styles from "./reels.module.css";
 
@@ -11,7 +11,7 @@ type Line = { from: "client" | "inna"; text: string };
 type Scene = { seconds: number; kind?: string; what: string; text: string; lines?: Line[]; question?: string; [key: string]: unknown };
 type Script = { title: string; idea: string; scenes: Scene[] };
 type PlanScene = { tool: string; duration: number; transition: string; camera?: string; params: Record<string, unknown> };
-type Plan = { title: string; scenes: PlanScene[]; style?: string; bpm?: number; seed?: number; music?: "on" | "off" };
+type Plan = { title: string; scenes: PlanScene[]; style?: string; bpm?: number; seed?: number; music?: "on" | "off"; theme?: string };
 type Job = {
   id: string;
   status: "draft" | "queued" | "rendering" | "done" | "failed";
@@ -51,6 +51,21 @@ const VARIANTS: Record<string, [string, string][]> = {
 };
 const BG: Record<string, [string, string]> = { cream: ["#ebe6dc", "#111"], black: ["#0b0b0d", "#fff"], violet: ["#8853fd", "#fff"] };
 const CHIPS = ["смелее", "короче", "больше переписки", "резче крючок"];
+const DEMO: Script = {
+  title: "Пока вы спите",
+  idea: "Пример сценария: ночью директ разрывается, ИИнна отвечает сама, решения остаются владельцу",
+  scenes: [
+    { seconds: 2, kind: "завал", text: "Директ *разрывается*", what: "Вопросы сыплются кучей", items: ["Сколько стоит?", "Есть размер M?", "Доставка есть?"] },
+    { seconds: 1.3, kind: "удар", text: "СТОП.", what: "Поворот" },
+    { seconds: 2.6, kind: "ночь", text: "Пока вы *спите*", what: "Часы бегут через ночь", label: "ИИнна на связи" },
+    { seconds: 4, kind: "голосовое", text: "Слушаю", what: "Голосовое клиента", lines: [{ from: "client", text: "Нужен *чёрный* на подарок" }, { from: "inna", text: "Есть! Успеем на завтра :)" }] },
+    { seconds: 3, kind: "выбор", text: "Решаете *вы*", what: "Скидку решает владелец", question: "Клиент просит скидку. Согласны?" },
+    { seconds: 2.2, kind: "реакция", text: "Заказ!", what: "Салют" },
+    { seconds: 2.6, kind: "смена слов", text: "ИИнна", what: "Что она делает", items: ["отвечает", "продаёт", "напоминает"] },
+    { seconds: 2.6, kind: "концовка", text: "Ссылка в профиле", what: "Логотип", label: "Отвечает клиентам 24/7" },
+  ],
+};
+
 const EXAMPLES = [
   "Рилс: ИИнна понимает голосовые — клиент наговорил заказ, она ответила и оформила",
   "Рилс про то, что владелец больше не сидит в директе 24/7",
@@ -64,6 +79,26 @@ const textToLines = (value: string): Line[] =>
     return m ? { from: /^(клиент|client)$/iu.test(m[1]) ? ("client" as const) : ("inna" as const), text: m[2] } : { from: "client" as const, text: row };
   });
 const newSeed = () => Math.floor(Math.random() * 1_000_000);
+const LOOK_BY_THEME: Record<string, string> = Object.fromEntries(LOOKS.map((l) => [l.theme, l.id]));
+const lookName = (id: string) => LOOKS.find((l) => l.id === id)?.name ?? id;
+/** Three different looks, avoiding the ones on screen now when possible; `first` stays in front. */
+function pickLooks(avoid: string[] = [], first?: string): string[] {
+  const ids = LOOKS.map((l) => l.id).sort(() => Math.random() - 0.5);
+  const fresh = ids.filter((id) => !avoid.includes(id) && id !== first);
+  const rest = ids.filter((id) => avoid.includes(id) && id !== first);
+  return [...(first ? [first] : []), ...fresh, ...rest].slice(0, 3);
+}
+// Scene colours on the storyboard, per theme (same as public/reels-runtime/styles.css).
+const THEME_BG: Record<string, Record<string, [string, string]>> = {
+  night: { cream: ["#15121f", "#fff"], violet: ["#2a1b5c", "#fff"] },
+  mono: { violet: ["#0b0b0d", "#fff"], black: ["#ece8df", "#111"] },
+  acid: { cream: ["#f6f4ee", "#111"], violet: ["#c6ff3d", "#111"] },
+};
+const sceneColors = (theme: string | undefined, bg: unknown, tool: string): [string, string] => {
+  if (tool === "night") return ["#2a1f55", "#fff"];
+  const key = String(bg || "black");
+  return THEME_BG[theme ?? ""]?.[key] ?? BG[key] ?? BG.black;
+};
 const fmt = (s: number) => s.toFixed(1).replace(".", ",");
 const plain = (v: unknown) => (typeof v === "string" ? v.replace(/\*/g, "").replace(/\n/g, " ") : "");
 const sceneLabel = (s: PlanScene) =>
@@ -98,6 +133,7 @@ export default function ReelsStudio() {
   const [tab, setTab] = useState<"studio" | "done" | "queue">("studio");
   // Variants: three seeds over the same script; the chosen one is what gets rendered.
   const [seeds, setSeeds] = useState<number[]>(() => [newSeed(), newSeed(), newSeed()]);
+  const [looks, setLooks] = useState<string[]>(() => pickLooks());
   const [chosen, setChosen] = useState(0);
   const [sound, setSound] = useState<string>("");
   const [overrides, setOverrides] = useState<Record<number, Override>>({});
@@ -116,6 +152,7 @@ export default function ReelsStudio() {
     setScript(next.script);
     if (!keepLook) {
       setSeeds([next.plan?.seed ?? newSeed(), newSeed(), newSeed()]);
+      setLooks(pickLooks([], next.plan?.theme ? LOOK_BY_THEME[next.plan.theme] : undefined));
       setChosen(0);
       setSound(next.plan ? (next.plan.music === "off" ? "off" : next.plan.style || "") : "");
       setOverrides({});
@@ -127,8 +164,14 @@ export default function ReelsStudio() {
   }, []);
 
   useEffect(() => {
-    refreshList();
     const params = new URL(window.location.href).searchParams;
+    // ?demo — the studio with a sample script and no server calls: for checking the editor itself.
+    if (params.has("demo")) {
+      setBrief(DEMO.idea);
+      setScript(DEMO);
+      return;
+    }
+    refreshList();
     const id = params.get("job");
     if (id) api<{ job: Job | null }>(null, `?id=${id}`).then((d) => openJob(d.job)).catch(() => undefined);
     const fromChat = params.get("brief");
@@ -191,6 +234,8 @@ export default function ReelsStudio() {
       });
       openJob(d.job);
       setSeeds([newSeed(), newSeed(), newSeed()]);
+      setLooks((old) => pickLooks(old));
+      setChosen(0);
       setOverrides({});
       setFeedback("");
       setView("preview");
@@ -201,13 +246,13 @@ export default function ReelsStudio() {
   const variants = useMemo(() => {
     if (!script?.scenes.length) return [];
     const style = sound && sound !== "off" ? sound : undefined;
-    return seeds.map((seed) => {
-      const checked = scriptToPlan(script as unknown as ComposeScript, seed, { style });
+    return seeds.map((seed, i) => {
+      const checked = scriptToPlan(script as unknown as ComposeScript, seed, { style, look: looks[i] });
       const plan = checked.plan as unknown as Plan;
       if (sound === "off") plan.music = "off";
       return { plan, fixes: checked.fixes, errors: checked.errors };
     });
-  }, [script, seeds, sound]);
+  }, [script, seeds, sound, looks]);
 
   const current = variants[chosen] ?? variants[0];
   const plan: Plan | null = useMemo(() => {
@@ -364,6 +409,46 @@ export default function ReelsStudio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [time]);
 
+  // The preview and the variant thumbnails scale the 1080×1920 runtime to whatever size they get.
+  useEffect(() => {
+    const nodes = document.querySelectorAll<HTMLElement>("[data-fit]");
+    const ro = new ResizeObserver((entries) => entries.forEach((e) => {
+      const n = e.target as HTMLElement;
+      n.style.setProperty("--s", String(n.clientWidth / 1080));
+    }));
+    nodes.forEach((n) => ro.observe(n));
+    return () => ro.disconnect();
+  });
+
+  // Editing keys: space plays, arrows step by a beat, Shift+arrows jump between scenes.
+  const keys = useRef({ play: () => {}, pause: () => {}, seek: (_t: number) => {}, select: (_i: number) => {}, time: 0, playing: false, beat: 0, starts: [] as number[] });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el.closest("input, textarea, select, [contenteditable]")) return;
+      const k = keys.current;
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (k.playing) k.pause(); else k.play();
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const dir = e.key === "ArrowRight" ? 1 : -1;
+        if (e.shiftKey && k.starts.length) {
+          let cur = 0;
+          k.starts.forEach((s0, i) => { if (s0 <= k.time + 0.01) cur = i; });
+          const next = Math.max(0, Math.min(k.starts.length - 1, cur + dir));
+          k.select(next);
+        } else k.seek(k.time + dir * (k.beat || 0.1));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const scrubFrom = (e: ReactPointerEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    seek(((e.clientX - r.left) / r.width) * (duration || total));
+  };
+
   // ---------- actions ----------
   const editScene = (i: number, patch: Partial<Scene>) => {
     if (!script) return;
@@ -377,6 +462,7 @@ export default function ReelsStudio() {
   const override = (patch: Override) => setOverrides((o) => ({ ...o, [selected]: { ...o[selected], ...patch } }));
   const newVariants = () => {
     setSeeds([newSeed(), newSeed(), newSeed()]);
+    setLooks((old) => pickLooks(old));
     setChosen(0);
     setOverrides({});
   };
@@ -400,12 +486,17 @@ export default function ReelsStudio() {
     window.history.replaceState(null, "", "/owner/reels");
   };
 
+  keys.current = {
+    play, pause, seek, select: selectScene, time, playing, beat,
+    starts: plan ? plan.scenes.map((_, i) => sceneStart(i)) : [],
+  };
+
   const done = list.filter((r) => r.status === "done");
   const queue = list.filter((r) => r.status === "queued" || r.status === "rendering");
   const rendering = job?.status === "queued" || job?.status === "rendering";
   const pill = busy || (waiting ? `Жду лимит · ${waitLabel(waiting.until - now)}` : rendering ? (job?.status === "queued" ? "В очереди на сборку" : "Видео собирается") : "Хасрой готов");
 
-  const main = { display: "block", maxWidth: "none", padding: 0, height: "100dvh", overflowY: "auto" } as const;
+  const main = { display: "flex", flexDirection: "column", maxWidth: "none", padding: 0, height: "100dvh" } as const;
 
   if (unauthorized) {
     return (
@@ -505,6 +596,13 @@ export default function ReelsStudio() {
                               <textarea rows={Math.max(2, s.lines?.length ?? 2)} value={linesToText(s.lines)} onChange={(e) => editScene(i, { lines: textToLines(e.target.value) })} placeholder={"Клиент: …\nИИнна: …"} aria-label="Реплики" />
                             ) : null}
                             {s.kind === "выбор" ? <input value={s.question ?? ""} onChange={(e) => editScene(i, { question: e.target.value })} placeholder="Вопрос владельцу" aria-label="Вопрос" /> : null}
+                            {s.kind === "до/после" ? (
+                              <textarea rows={2} value={((s.before as string[] | undefined) ?? []).join("\n")} onChange={(e) => editScene(i, { before: e.target.value.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 3) })} placeholder={"Без ИИнны — по строке:\nОтвет через час"} aria-label="До" />
+                            ) : null}
+                            {["до/после", "завал", "смена слов", "список"].includes(s.kind || "") ? (
+                              <textarea rows={3} value={((s.items as string[] | undefined) ?? []).join("\n")} onChange={(e) => editScene(i, { items: e.target.value.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 5) })} placeholder={s.kind === "до/после" ? "С ИИнной — по строке" : s.kind === "смена слов" ? "Слова по строке: отвечает…" : s.kind === "завал" ? "Вопросы клиентов по строке" : "Пункты по строке"} aria-label="Пункты" />
+                            ) : null}
+                            {["ночь", "реакция", "печать", "цифра", "концовка"].includes(s.kind || "") ? <input value={String(s.label ?? "")} onChange={(e) => editScene(i, { label: e.target.value })} placeholder="Подпись" aria-label="Подпись" /> : null}
                             {s.kind === "уведомление" ? <input value={String(s.title ?? "")} onChange={(e) => editScene(i, { title: e.target.value })} placeholder="Заголовок пуша" aria-label="Заголовок пуша" /> : null}
                             {s.kind === "товар" ? <input value={String(s.name ?? "")} onChange={(e) => editScene(i, { name: e.target.value })} placeholder="Название товара" aria-label="Товар" /> : null}
                             <textarea rows={1} value={s.what} onChange={(e) => editScene(i, { what: e.target.value })} placeholder="Что в кадре" aria-label="Что в кадре" />
@@ -529,7 +627,7 @@ export default function ReelsStudio() {
                 </div>
               ) : null}
               <div className={styles.stageRow}>
-                <div className={styles.phone}>
+                <div className={styles.phone} data-fit>
                   {view === "video" && job?.video_url ? (
                     <video src={job.video_url} controls playsInline autoPlay />
                   ) : plan ? (
@@ -543,11 +641,11 @@ export default function ReelsStudio() {
                     <h3>Варианты</h3>
                     {variants.map((v, i) => {
                       const first = v.plan.scenes[0];
-                      const [bg, fg] = BG[String(first?.params.bg || "black")] ?? BG.black;
+                      const [bg, fg] = first ? sceneColors(v.plan.theme, first.params.bg, first.tool) : BG.black;
                       return (
-                        <button key={seeds[i]} type="button" className={styles.v} data-on={chosen === i || undefined} style={{ background: bg, color: fg }} onClick={() => { setChosen(i); setOverrides({}); setView("preview"); }}>
+                        <button key={`${seeds[i]}-${looks[i]}`} type="button" className={styles.v} data-fit data-on={chosen === i || undefined} style={{ background: bg, color: fg }} onClick={() => { setChosen(i); setOverrides({}); setView("preview"); }}>
                           <iframe title={`Вариант ${i + 1}`} tabIndex={-1} src={`/reels-runtime/index.html#${encodeURIComponent(JSON.stringify(v.plan))}`} loading="lazy" />
-                          <span>{SOUND.find((s) => s.id === (v.plan.music === "off" ? "off" : v.plan.style))?.label ?? v.plan.style} · {v.plan.bpm}</span>
+                          <span><b>{lookName(looks[i])}</b>{SOUND.find((s) => s.id === (v.plan.music === "off" ? "off" : v.plan.style))?.label ?? v.plan.style} · {v.plan.bpm}</span>
                         </button>
                       );
                     })}
@@ -631,11 +729,11 @@ export default function ReelsStudio() {
           {/* ---------- bottom: storyboard on the beat grid ---------- */}
           {plan ? (
             <section className={styles.timeline}>
-              <h3>Раскадровка · склейки в такт</h3>
-              <div className={styles.track}>
+              <h3>Раскадровка · склейки в такт <span>пробел — пуск · ← → — по долям · Shift + ← → — по сценам · тяните линейку</span></h3>
+              <div className={styles.track} onWheel={(e) => { if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) seek(time + (e.deltaX || e.deltaY) * 0.004); }}>
                 <div className={styles.strip}>
                   {plan.scenes.map((s, i) => {
-                    const [bg, fg] = BG[String(s.params.bg || "black")] ?? BG.black;
+                    const [bg, fg] = sceneColors(plan.theme, s.params.bg, s.tool);
                     return (
                       <button key={i} type="button" className={styles.cell} data-on={selected === i || undefined} style={{ flex: s.duration, background: bg, color: fg }} onClick={() => selectScene(i)}>
                         <b>{sceneLabel(s)}</b>
@@ -647,8 +745,11 @@ export default function ReelsStudio() {
                 </div>
                 <div
                   className={styles.beats}
-                  onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seek(((e.clientX - r.left) / r.width) * (duration || total)); }}
+                  title="Тяните, чтобы перемотать"
+                  onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); scrubFrom(e); }}
+                  onPointerMove={(e) => { if (e.buttons & 1) scrubFrom(e); }}
                 >
+                  {Array.from({ length: Math.floor(total) + 1 }, (_, sec) => <b key={`s${sec}`} style={{ left: `${(sec / (total || 1)) * 100}%` }}>{sec}</b>)}
                   {beat ? Array.from({ length: Math.ceil(total / beat) }, (_, i) => <i key={i} data-bar={i % 4 === 0 || undefined} style={{ left: `${((i * beat) / total) * 100}%` }} />) : null}
                   {outroAt ? <i className={styles.drop} style={{ left: `${(outroAt / total) * 100}%` }} /> : null}
                 </div>
