@@ -123,6 +123,15 @@ export function LeftBoard({
         ) : null}
       </section>
 
+      <section className={styles.panel}>
+        <header className={styles.panelHead}>
+          <span className={styles.label}>Рилсы ИИнны</span>
+          <span className={styles.ok}>● новое</span>
+        </header>
+        <p className={styles.muted}>Задача → сценарий → ваше «да» → видео.</p>
+        <a className={styles.link} href="/owner/reels">Открыть ›</a>
+      </section>
+
       <section className={`${styles.panel} ${styles.soon}`}>
         <header className={styles.panelHead}>
           <span className={styles.label}>Лендинги</span>
