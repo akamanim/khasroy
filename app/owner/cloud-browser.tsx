@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, ExternalLink, Images, Maximize2, Minimize2, Monitor, Play, RotateCw } from "lucide-react";
+import { waitLabel } from "@/lib/ai/limits";
 import styles from "./console.module.css";
 
 type BrowserState = { url: string; scrollY: number; cookies: unknown[] };
@@ -21,10 +22,12 @@ const WIDTH = 1280;
 const HEIGHT = 800;
 const AUTO_CONTINUE = 4;
 
-function load(): { state: BrowserState; view: View | null } {
+type Waiting = { goal: string; history: string[]; state: BrowserState; until: number };
+
+function load(): { state: BrowserState; view: View | null; waiting?: Waiting | null } {
   try {
     const raw = sessionStorage.getItem(STORE);
-    if (raw) return JSON.parse(raw) as { state: BrowserState; view: View | null };
+    if (raw) return JSON.parse(raw) as { state: BrowserState; view: View | null; waiting?: Waiting | null };
   } catch {
     // Private mode or blocked storage: start empty.
   }
@@ -45,6 +48,9 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
   const [answer, setAnswer] = useState("");
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [paused, setPaused] = useState<{ goal: string; history: string[] } | null>(null);
+  // Out of model limits: the task waits here and resumes on its own when the limit resets.
+  const [waiting, setWaiting] = useState<Waiting | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const stepsBox = useRef<HTMLOListElement>(null);
   const [gallery, setGallery] = useState<Gallery | null>(null);
   const [mode, setMode] = useState<"page" | "gallery">("page");
@@ -64,16 +70,30 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
     const saved = load();
     setState(saved.state);
     setView(saved.view);
+    if (saved.waiting) setWaiting(saved.waiting);
     if (saved.view?.url) setAddress(saved.view.url);
   }, []);
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(STORE, JSON.stringify({ state, view }));
+      sessionStorage.setItem(STORE, JSON.stringify({ state, view, waiting }));
     } catch {
       // Storage full (large screenshot) or blocked: the session still works in memory.
     }
-  }, [state, view]);
+  }, [state, view, waiting]);
+
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+
+  useEffect(() => {
+    if (!waiting || busy || now < waiting.until) return;
+    const resume = waiting;
+    setWaiting(null);
+    void runTaskRef.current(resume.goal, resume.history, 0, resume.state);
+  }, [now, waiting, busy]);
 
   useEffect(() => {
     const box = stepsBox.current;
@@ -175,6 +195,7 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
     setError("");
     setConfirm(null);
     setPaused(null);
+    setWaiting(null);
     if (!history.length) {
       setSteps([]);
       setAnswer("");
@@ -220,6 +241,8 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
           } else if (event.type === "confirm") {
             setConfirm({ question: String(event.question), index: Number(event.index), label: String(event.label) });
             setPaused({ goal: task, history: event.history as string[] });
+          } else if (event.type === "waiting") {
+            setWaiting({ goal: task, history: event.history as string[], state: (event.state as BrowserState) ?? current, until: Number(event.until) });
           } else if (event.type === "paused") {
             next = { history: event.history as string[] };
           } else if (event.type === "error") {
@@ -229,7 +252,7 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
       }
       if (next) {
         // One request lasts under a minute; long tasks continue in the next one on their own.
-        if (continued < AUTO_CONTINUE) return runTask(task, next.history, continued + 1, current);
+        if (continued < AUTO_CONTINUE) return await runTask(task, next.history, continued + 1, current);
         setPaused({ goal: task, history: next.history });
       }
     } catch (err) {
@@ -238,6 +261,9 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
       setBusy("");
     }
   }
+
+  const runTaskRef = useRef(runTask);
+  runTaskRef.current = runTask;
 
   function submitAddress(event: { preventDefault(): void }) {
     event.preventDefault();
@@ -396,6 +422,22 @@ export function CloudBrowser({ unauthorized, onLogin }: { unauthorized: boolean;
               <div>
                 <button type="button" className={styles.pillButton} onClick={approve} disabled={!!busy}>Подтвердить</button>
                 <button type="button" className={styles.pillButton} onClick={() => { setConfirm(null); setPaused(null); }}>Отмена</button>
+              </div>
+            </div>
+          ) : null}
+
+          {waiting ? (
+            <div className={styles.browserWaiting} role="status">
+              <b>Лимит моделей закончился — жду</b>
+              <span>
+                Продолжу сам в {new Date(waiting.until).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                {" "}(через {waitLabel(waiting.until - now)}). Задача не потеряна, шаги сохранены.
+              </span>
+              <div>
+                <button type="button" className={styles.pillButton} disabled={!!busy} onClick={() => { const w = waiting; setWaiting(null); void runTask(w.goal, w.history, 0, w.state); }}>
+                  Попробовать сейчас
+                </button>
+                <button type="button" className={styles.pillButton} onClick={() => setWaiting(null)}>Отменить</button>
               </div>
             </div>
           ) : null}

@@ -3,6 +3,7 @@
 // owner's confirmation; passwords and payment fields are never typed by the agent.
 
 import { jsonCompletion } from "@/lib/sales/agent";
+import { AllModelsLimitedError } from "@/lib/ai/limits";
 import {
   launch,
   openPage,
@@ -19,6 +20,7 @@ export type AgentEvent =
   | { type: "done"; answer: string; state: BrowserState; history: string[]; shot: string; url: string; title: string }
   | { type: "confirm"; question: string; index: number; label: string; state: BrowserState; history: string[]; shot: string; url: string; title: string }
   | { type: "paused"; state: BrowserState; history: string[]; shot: string; url: string; title: string }
+  | { type: "waiting"; until: number; state: BrowserState; history: string[]; shot: string; url: string; title: string }
   | { type: "error"; message: string; state?: BrowserState; history?: string[] };
 
 export const MAX_TOTAL_STEPS = 24;
@@ -72,7 +74,9 @@ export async function runBrowserTask(args: {
       }
       const snap = await snapshot(page);
       const n = history.length + 1;
-      const { data, model } = await jsonCompletion(
+      let reply: Awaited<ReturnType<typeof jsonCompletion>>;
+      try {
+        reply = await jsonCompletion(
         [
           { role: "system", content: SYSTEM },
           {
@@ -81,7 +85,20 @@ export async function runBrowserTask(args: {
           },
         ],
         { temperature: 0.2, maxTokens: 900, reasoningEffort: "low" },
-      );
+        );
+      } catch (error) {
+        if (!(error instanceof AllModelsLimitedError)) throw error;
+        const wait = error.retryAt - Date.now();
+        // A short per-minute limit: sit it out here and redo the step.
+        if (wait <= 20_000 && error.retryAt < deadline - 15_000) {
+          await new Promise((resolve) => setTimeout(resolve, Math.max(0, wait)));
+          continue;
+        }
+        // A long one: hand the task back with the time to resume; the owner console continues it then.
+        emit({ type: "waiting", until: error.retryAt, ...(await finish()) });
+        return;
+      }
+      const { data, model } = reply;
       const thought = str(data.thought, 240) || "Думаю, что делать дальше";
       const action = str(data.action, 20);
       const index = Number(data.index);

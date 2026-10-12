@@ -245,3 +245,19 @@ export type DashboardStats = {
 export async function dashboardStats(): Promise<DashboardStats> {
   return call<DashboardStats>("dashboard", {});
 }
+
+export type QueuedTask = {
+  id: string;
+  kind: string;
+  status: "waiting_for_compute" | "queued" | "running" | "completed" | "failed" | "cancelled";
+  attempts: number;
+  available_at: string;
+  last_error: string | null;
+  checkpoint: Record<string, unknown>;
+  updated_at: string;
+};
+
+/** One task of the owner's durable queue (a job waiting for model limits to reset). */
+export async function getQueuedTask(id: string): Promise<QueuedTask | null> {
+  return call<QueuedTask | null>("task_get", { id });
+}

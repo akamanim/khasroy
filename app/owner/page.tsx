@@ -52,6 +52,9 @@ export default function Home() {
   const followRef = useRef<() => void>(() => undefined);
   const lastOwnerMessage = useRef("");
   const [atBottom, setAtBottom] = useState(true);
+  // Requests saved while the models were out of limit; their answers arrive here when ready.
+  const [queued, setQueued] = useState<Array<{ taskId: string; nextAttemptAt: string | null }>>([]);
+  const queuedIds = queued.map((q) => q.taskId).join(",");
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   // On narrow screens the side boards are drawers over the chat, so they start closed.
@@ -157,6 +160,9 @@ export default function Home() {
             if (previous[previous.length - 1]?.message === progress.message) return previous;
             return [...previous.slice(-7), progress];
           });
+        },
+        onQueued(taskId) {
+          setQueued((prev) => (prev.some((q) => q.taskId === taskId) ? prev : [...prev, { taskId, nextAttemptAt: null }]));
         },
         onSources(sources) {
           // Show the pages behind the answer, with their pictures, in the cloud browser.
@@ -280,6 +286,41 @@ export default function Home() {
     if (el) el.scrollTop = el.scrollHeight;
   }
 
+  // Follows the saved requests: checks every 20 s and, once the limit has reset, shows the answer.
+  useEffect(() => {
+    if (!queuedIds) return;
+    let cancelled = false;
+    const check = async () => {
+      for (const taskId of queuedIds.split(",")) {
+        try {
+          const response = await fetch(`/api/owner/task?id=${taskId}`, { credentials: "include", cache: "no-store" });
+          if (!response.ok || cancelled) continue;
+          const data = (await response.json()) as { status: string; nextAttemptAt: string | null; result: string };
+          if (cancelled) return;
+          const done = (content: string) => {
+            setQueued((prev) => prev.filter((q) => q.taskId !== taskId));
+            setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content }]);
+          };
+          if (data.status === "completed") done(data.result || "Готово, но ответ пустой — повторите вопрос.");
+          else if (["failed", "cancelled", "missing"].includes(data.status)) {
+            done("Не смог продолжить сохранённую задачу: лимиты моделей так и не освободились. Повторите вопрос чуть позже.");
+          } else {
+            const next = data.nextAttemptAt && Date.parse(data.nextAttemptAt) > Date.now() ? data.nextAttemptAt : null;
+            setQueued((prev) => prev.map((q) => (q.taskId === taskId ? { ...q, nextAttemptAt: next } : q)));
+          }
+        } catch {
+          // Network hiccup: try again on the next tick.
+        }
+      }
+    };
+    void check();
+    const timer = setInterval(check, 20_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [queuedIds]);
+
   function newDialog() {
     setMessages([welcome]);
     setResponding(false);
@@ -354,6 +395,16 @@ export default function Home() {
                 ) : null}
               </div>
             ) : null}
+            {queued.map((q) => (
+              <div key={q.taskId} className={styles.queued} role="status">
+                <span className={styles.pulse} />
+                Жду, пока откатится лимит моделей
+                {q.nextAttemptAt
+                  ? ` — продолжу в ${new Date(q.nextAttemptAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`
+                  : " — пробую продолжить"}
+                . Ответ появится здесь сам.
+              </div>
+            ))}
             <div ref={bottom} />
           </div>
 

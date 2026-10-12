@@ -93,7 +93,7 @@ async function latestForSession(sessionHash: string) {
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 7 });
+  if (request.method === "GET") return json({ ok: true, service: "khasroy-invitations", version: 8 });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
@@ -152,6 +152,14 @@ Deno.serve(async (request) => {
         invitations: { orders7, ordersPrev, started7, startedPrev, waiting, live, rsvp7, rsvpPrev, wishes7 },
         sales: { leads7, leadsPrev, chats7, chatsPrev },
       });
+    }
+
+    if (action === "task_get") {
+      // One task of the owner's durable queue, so the console can follow a job that waits for limits.
+      const id = typeof body?.id === "string" && /^[0-9a-f-]{36}$/iu.test(body.id) ? body.id : "";
+      if (!id) return json({ error: "bad_task_id" }, 400);
+      const rows = await (await db(`khasroy_task_queue?id=eq.${id}&owner_hash=eq.${ownerHash}&select=id,kind,status,attempts,available_at,last_error,checkpoint,updated_at&limit=1`)).json();
+      return json(Array.isArray(rows) && rows[0] ? rows[0] : null);
     }
 
     if (action === "set_status") {
