@@ -210,3 +210,38 @@ export async function buildSelfRepositoryContext(query: string): Promise<Reposit
     context: context.slice(0, 15_000),
   };
 }
+
+export type RecentChange = { number: number; title: string; mergedAt: string; url: string; points: string[] };
+
+let changesCache: { at: number; value: RecentChange[] } | null = null;
+
+/** Turns a pull request description into at most three short points (the bulleted lines). */
+export function changePoints(body: string | null | undefined): string[] {
+  const text = (body ?? "").split("🤖")[0];
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^[-*•]\s+/u.test(line))
+    .map((line) => line.replace(/^[-*•]\s+/u, "").replace(/[`*_]/gu, "").trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((line) => (line.length > 140 ? `${line.slice(0, 137)}…` : line));
+}
+
+/** The latest merged pull requests of Khasroy's own repository, newest first. Cached for 10 minutes. */
+export async function recentChanges(limit = 5): Promise<RecentChange[]> {
+  if (changesCache && Date.now() - changesCache.at < 10 * 60_000) return changesCache.value.slice(0, limit);
+  const response = await fetch(
+    `https://api.github.com/repos/${SELF_REPOSITORY}/pulls?state=closed&base=${SELF_BRANCH}&sort=updated&direction=desc&per_page=30`,
+    { headers: githubHeaders(), cache: "no-store", signal: AbortSignal.timeout(8000) },
+  );
+  if (!response.ok) throw new Error(`GitHub ${response.status}`);
+  const pulls = (await response.json()) as Array<{ number: number; title: string; merged_at: string | null; html_url: string; body: string | null }>;
+  const value = pulls
+    .filter((p) => p.merged_at)
+    .sort((a, b) => String(b.merged_at).localeCompare(String(a.merged_at)))
+    .slice(0, 10)
+    .map((p) => ({ number: p.number, title: p.title.trim(), mergedAt: p.merged_at as string, url: p.html_url, points: changePoints(p.body) }));
+  changesCache = { at: Date.now(), value };
+  return value.slice(0, limit);
+}

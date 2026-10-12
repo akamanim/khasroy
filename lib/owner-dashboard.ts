@@ -1,5 +1,6 @@
 import { resolveSecret } from "@/lib/server-integrations";
-import { getPendingTasks, getSkills } from "@/lib/server-memory";
+import { getSkills } from "@/lib/server-memory";
+import { recentChanges, type RecentChange } from "@/lib/server-github";
 import { dashboardStats, type DashboardStats } from "@/lib/invitations/server";
 
 // Everything the owner console shows besides the chat. Each value is either measured or
@@ -18,7 +19,8 @@ export type OwnerDashboard = {
   model: string;
   providers: ProviderStatus[];
   skills: { verified: number; learning: number };
-  tasks: Array<{ id: string; kind: string; status: string; updatedAt: string }>;
+  skillList: Array<{ name: string; description: string; status: "verified" | "learning" }>;
+  changes: RecentChange[] | null;
   attention: string[];
   checkedAt: string;
 };
@@ -69,16 +71,16 @@ async function checkProviders(ownerKey: string): Promise<ProviderStatus[]> {
 }
 
 export async function loadOwnerDashboard(ownerKey: string): Promise<OwnerDashboard> {
-  const [statsResult, providersResult, skillsResult, tasksResult] = await Promise.allSettled([
+  const [statsResult, providersResult, skillsResult, changesResult] = await Promise.allSettled([
     dashboardStats(),
     checkProviders(ownerKey),
     getSkills(ownerKey),
-    getPendingTasks(ownerKey, 8),
+    recentChanges(5),
   ]);
   const stats = statsResult.status === "fulfilled" ? statsResult.value : null;
   const providers = providersResult.status === "fulfilled" ? providersResult.value : [];
   const skills = skillsResult.status === "fulfilled" && Array.isArray(skillsResult.value) ? skillsResult.value : [];
-  const tasks = tasksResult.status === "fulfilled" && Array.isArray(tasksResult.value) ? tasksResult.value : [];
+  const changes = changesResult.status === "fulfilled" ? changesResult.value : null;
 
   const attention: string[] = [];
   if (stats?.invitations.waiting) {
@@ -98,7 +100,12 @@ export async function loadOwnerDashboard(ownerKey: string): Promise<OwnerDashboa
       verified: skills.filter((s) => s.status === "verified").length,
       learning: skills.filter((s) => s.status === "learning").length,
     },
-    tasks: tasks.map((t) => ({ id: t.id, kind: t.kind, status: t.status, updatedAt: (t as { updated_at?: string }).updated_at ?? t.available_at })),
+    skillList: skills
+      .filter((s): s is typeof s & { status: "verified" | "learning" } => s.status === "verified" || s.status === "learning")
+      .sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name, "ru") : a.status === "verified" ? -1 : 1))
+      .slice(0, 80)
+      .map((s) => ({ name: s.name, description: (s.description ?? "").slice(0, 220), status: s.status })),
+    changes,
     attention,
     checkedAt: new Date().toISOString(),
   };
