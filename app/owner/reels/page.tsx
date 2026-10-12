@@ -400,7 +400,7 @@ export default function ReelsStudio() {
     seek(sceneStart(i) + 0.4);
   };
   useEffect(() => {
-    if (!playing || !plan) return;
+    if (!plan) return;
     let acc = 0;
     for (let i = 0; i < plan.scenes.length; i++) {
       acc += plan.scenes[i].duration;
