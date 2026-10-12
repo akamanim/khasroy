@@ -88,3 +88,18 @@ assert.ok(!/\S$/.test(" ") && cut.plan.scenes[0].params.line.split(" ").every((w
 const fake = checkPlan({ scenes: [{ tool: "product", params: { name: "X", image: "https://example.com/a.png" } }] });
 assert.ok(!("image" in fake.plan.scenes[0].params), "placeholder image dropped");
 console.log("reels compose: ok");
+
+const tutorial = scriptToPlan(cleanScript({ scenes: [
+  { kind: "надпись", text: "За *3* шага" },
+  { kind: "экран", text: "Товары", section: "Товары и услуги" },
+  { kind: "товар", text: "Хит" },
+  { kind: "экран", text: "Интеграции" },
+  { kind: "уведомление", text: "Подключено!" },
+  { kind: "надпись", text: "" , what: "" },
+] }));
+const t = tutorial.plan.scenes;
+assert.deepEqual(t.map((s) => s.tool), ["headline", "screen", "screen", "notification", "outro"], "nameless product and empty headline dropped");
+assert.equal(t[1].params.step, "01 / 02");
+assert.equal(t[2].params.step, "02 / 02");
+assert.equal(t[3].params.title, "Подключено!");
+console.log("reels compose 2: ok");

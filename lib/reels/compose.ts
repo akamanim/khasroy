@@ -90,7 +90,14 @@ export function scriptToPlan(script: Script): Checked {
   let moveIndex = 0;
   const pickBg = (preferred: string[]) => preferred.find((b) => b !== lastBg) ?? cycle.find((b) => b !== lastBg) ?? "cream";
 
-  const list = [...script.scenes];
+  // Scenes that would come out empty are dropped instead of drawing a placeholder.
+  const list = script.scenes.filter((s) => {
+    if (s.kind === "товар") return Boolean(s.name);
+    if (["надпись", "удар", "сомнение"].includes(s.kind)) return Boolean(plain(s.text || s.what));
+    return true;
+  });
+  const screens = list.filter((s) => s.kind === "экран").length;
+  let screenNo = 0;
   if (!list.length || list[list.length - 1].kind !== "концовка") {
     list.push({ seconds: 2.6, kind: "концовка", text: "Ссылка в профиле", what: "" });
   }
@@ -127,7 +134,12 @@ export function scriptToPlan(script: Script): Checked {
       }
       case "notification":
         bg = "black";
-        params = { headline: text, title: s.title || "Пришёл новый заказ", body: s.body ?? "", app: "Telegram" };
+        params = {
+          headline: text || "Новый\n*заказ*",
+          title: s.title || (/заказ/iu.test(text) || !text ? "Пришёл новый заказ" : plain(text)),
+          body: s.body ?? "",
+          app: "Telegram",
+        };
         break;
       case "chat":
         bg = pickBg(["cream", "black"]);
@@ -155,7 +167,8 @@ export function scriptToPlan(script: Script): Checked {
         break;
       case "screen":
         bg = "black";
-        params = { title: s.section || plain(text), subtitle: s.label ?? "", step: `${String(i + 1).padStart(2, "0")} / ${String(list.length).padStart(2, "0")}`, note: s.question ?? "" };
+        screenNo += 1;
+        params = { title: s.section || plain(text), subtitle: s.label ?? "", step: `${String(screenNo).padStart(2, "0")} / ${String(screens).padStart(2, "0")}`, note: s.question ?? "" };
         break;
       case "badge":
         bg = "cream";
