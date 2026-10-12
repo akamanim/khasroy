@@ -125,7 +125,7 @@ export function LeftBoard({
 
       <section className={styles.panel}>
         <header className={styles.panelHead}>
-          <span className={styles.label}>Рилсы ИИнны</span>
+          <span className={styles.label}>Khasroy studia</span>
           <span className={styles.ok}>● новое</span>
         </header>
         <p className={styles.muted}>Задача → сценарий → ваше «да» → видео.</p>
