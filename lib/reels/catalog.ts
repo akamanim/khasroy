@@ -44,6 +44,7 @@ export const TOOLS: ToolSpec[] = [
       label: { type: "text", max: 40, hint: "мелкая подпись (необязательно)" },
       align: { type: "enum", values: ["top", "center", "bottom"], default: "top", hint: "где стоит текст" },
       size: { type: "enum", values: ["m", "l", "xl"], default: "l", hint: "размер" },
+      variant: { type: "enum", values: ["stack", "block", "giant"], default: "stack", hint: "раскладка: строки / акцент на плашке / по слову в строку" },
       bg: BG(["cream", "black", "violet"], "cream"),
     },
   },
@@ -84,6 +85,7 @@ export const TOOLS: ToolSpec[] = [
       from: { type: "number", min: 0, max: 1e9, hint: "с какого числа считать" },
       headline: HEADLINE(36),
       label: { type: "text", max: 40, hint: "что это за цифра" },
+      variant: { type: "enum", values: ["corner", "ring"], default: "corner", hint: "цифра в углу / в кольце" },
       bg: BG(["cream", "black", "violet"], "cream"),
     },
   },
@@ -116,6 +118,7 @@ export const TOOLS: ToolSpec[] = [
       app: { type: "text", max: 16, hint: "приложение (Telegram, WhatsApp)" },
       title: { type: "text", max: 32, hint: "заголовок уведомления" },
       body: { type: "text", max: 40, hint: "текст уведомления" },
+      variant: { type: "enum", values: ["float", "phone"], default: "float", hint: "карточка / экран телефона" },
       bg: BG(["black", "cream"], "black"),
     },
   },
@@ -131,6 +134,8 @@ export const TOOLS: ToolSpec[] = [
       channel: { type: "text", max: 24, hint: "откуда (Instagram Direct)" },
       headline: { type: "text", max: 28, hint: "мелкая строка сверху" },
       messages: { type: "messages", maxItems: 4, maxLength: 90, hint: "[{from:'client'|'me', text}] — до 4 сообщений" },
+      title: { type: "text", max: 30, maxLines: 2, hint: "крупный заголовок над телефоном" },
+      variant: { type: "enum", values: ["bare", "phone"], default: "bare", hint: "переписка на фоне / в телефоне" },
       bg: BG(["cream", "black"], "cream"),
     },
   },
@@ -240,7 +245,9 @@ export const TOOLS: ToolSpec[] = [
   },
 ];
 
-export const TRANSITIONS = ["cut", "fade", "slide", "push", "zoom", "wipe", "iris"] as const;
+export const TRANSITIONS = ["cut", "fade", "slide", "push", "whip", "zoom", "wipe", "slab", "glitch", "split", "iris"] as const;
+export const CAMERAS = ["still", "push", "pull", "panL", "panR", "tilt", "drift"] as const;
+export const STYLES = ["pulse", "bounce", "chill"] as const;
 export const MAX_SCENES = 14;
 export const MAX_SECONDS = 60;
 
@@ -262,8 +269,8 @@ export function catalogForPrompt(shelves?: Shelf[]): string {
 // ---------------------------------------------------------------------------------------------
 // Plan validation: the model makes mistakes; the checker fixes what it can and reports the rest.
 
-export type Scene = { tool: string; duration: number; transition: string; params: Record<string, unknown> };
-export type Plan = { title: string; scenes: Scene[] };
+export type Scene = { tool: string; duration: number; transition: string; camera?: string; params: Record<string, unknown> };
+export type Plan = { title: string; scenes: Scene[]; style?: string; bpm?: number; seed?: number; music?: "on" | "off" };
 export type Checked = { plan: Plan; fixes: string[]; errors: string[]; seconds: number };
 
 /** Breaks a too-long line at spaces so it fits; keeps the model's own line breaks. */
@@ -393,7 +400,8 @@ export function checkPlan(raw: unknown): Checked {
     if (clamped !== duration && Number.isFinite(Number(s.duration))) fixes.push(`${where}: длительность ${duration} → ${clamped} с`);
     let transition = typeof s.transition === "string" && (TRANSITIONS as readonly string[]).includes(s.transition) ? s.transition : "cut";
     if (scenes.length === 0) transition = "cut";
-    scenes.push({ tool: spec.name, duration: Math.round(clamped * 10) / 10, transition, params });
+    const camera = typeof s.camera === "string" && (CAMERAS as readonly string[]).includes(s.camera) ? s.camera : undefined;
+    scenes.push({ tool: spec.name, duration: Math.round(clamped * 100) / 100, transition, ...(camera ? { camera } : {}), params });
   });
 
   if (scenes.length > MAX_SCENES) {
@@ -409,5 +417,12 @@ export function checkPlan(raw: unknown): Checked {
   const seconds = scenes.reduce((n, s) => n + s.duration, 0);
   if (seconds > MAX_SECONDS) errors.push(`ролик ${seconds.toFixed(1)} с — длиннее ${MAX_SECONDS} с`);
   const title = cleanText(input.title).slice(0, 80) || "Рилс";
-  return { plan: { title, scenes }, fixes, errors, seconds };
+  const plan: Plan = { title, scenes };
+  if (typeof input.style === "string" && (STYLES as readonly string[]).includes(input.style)) plan.style = input.style;
+  const bpm = Number(input.bpm);
+  if (Number.isFinite(bpm) && bpm >= 70 && bpm <= 170) plan.bpm = Math.round(bpm);
+  const seed = Number(input.seed);
+  if (Number.isInteger(seed) && seed >= 0) plan.seed = seed % 1_000_000;
+  if (input.music === "off") plan.music = "off";
+  return { plan, fixes, errors, seconds };
 }

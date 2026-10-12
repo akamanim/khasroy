@@ -4,8 +4,58 @@
 (function () {
   "use strict";
   const { clamp, lerp, ease, prog, rng, el, esc, kinetic, revealWords, fitText } = window.reel.helpers;
-  const R = (name, tool) => window.reel.register(name, tool);
   const px = (n) => `${Math.round(n)}px`;
+
+  // Sound cues per tool (seconds from the scene's own start); the soundtrack is built from them.
+  const CUES = {
+    slam: () => [{ at: 0.26, sfx: "impact" }],
+    glitch: () => [{ at: 0.02, sfx: "glitch", len: 0.5 }],
+    counter: () => [{ at: 0.35, sfx: "riser", len: 1.0 }, { at: 1.4, sfx: "pop" }],
+    dot_grid: () => [{ at: 0.5, sfx: "riser", len: 1.4 }, { at: 1.95, sfx: "pop" }],
+    notification: () => [{ at: 0.7, sfx: "notify" }],
+    chat: (p) => {
+      const n = Math.min(4, Array.isArray(p.messages) ? p.messages.length : 2);
+      return Array.from({ length: n }, (_, i) => ({ at: 0.5 + i * 0.85, sfx: "pop" }));
+    },
+    voice: (p, dur) => [{ at: 0.7, sfx: "voice", len: Math.max(1, dur * 0.5) }, ...(p.reply ? [{ at: dur * 0.55 + 0.5, sfx: "pop" }] : [])],
+    choice: () => [{ at: 0.3, sfx: "pop" }, { at: 1.85, sfx: "click" }],
+    list: (p) => Array.from({ length: Math.min(4, Array.isArray(p.items) ? p.items.length : 3) }, (_, i) => ({ at: 0.6 + i * 0.42, sfx: "tick" })),
+    product: () => [{ at: 0.3, sfx: "whoosh", len: 0.5 }, { at: 1.0, sfx: "pop" }],
+    screen: () => [{ at: 1.0, sfx: "pop" }],
+    badge: () => [{ at: 0.05, sfx: "whoosh", len: 0.6 }],
+    outro: () => [{ at: 0.05, sfx: "impact" }, { at: 0.85, sfx: "pop" }],
+  };
+  const R = (name, tool) =>
+    window.reel.register(name, {
+      ...tool,
+      build(p, ctx) {
+        const built = tool.build(p, ctx);
+        if (!built.cues && CUES[name]) built.cues = (dur) => CUES[name](p, dur);
+        return built;
+      },
+    });
+
+  /**
+   * A phone that rises from the bottom with a 3D tilt; `content` is laid out on a 1080×1920 canvas
+   * and shown scaled inside the screen.
+   */
+  function phone(content, { top = 600, wallpaper = "#0f0f12", offset = 0 } = {}) {
+    const ph = el("div", "phone", { top: px(top) });
+    ph.appendChild(el("div", "notch"));
+    const screen = el("div", "screen", { background: wallpaper });
+    const scale = 640 / 1080;
+    Object.assign(content.style, { position: "absolute", left: "0", top: "0", width: "1080px", height: "1920px", transformOrigin: "0 0", transform: `scale(${scale}) translateY(${-offset}px)` });
+    screen.appendChild(content);
+    ph.appendChild(screen);
+    return {
+      node: ph,
+      update(t, dur) {
+        const rise = prog(t, 0.05, 0.9, ease.outQuint);
+        const settle = prog(t, 0.05, dur, ease.inOut);
+        ph.style.transform = `perspective(2200px) translateY(${(1 - rise) * 900}px) rotateX(${lerp(14, 6, settle)}deg) rotateY(${lerp(-18, -6, settle)}deg) rotateZ(${lerp(-3, 1, settle)}deg)`;
+      },
+    };
+  }
 
   /** Font size that lets the longest line fit the safe width. */
   function headlineSize(text, base, width = 900) {
@@ -22,11 +72,28 @@
     duration: 2.6,
     bg: "cream",
     build(p) {
-      const base = { m: 120, l: 160, xl: 210 }[p.size] || 160;
-      const size = headlineSize(p.text, base);
-      const { block, words } = kinetic(p.text, `display${p.size === "xl" ? " black" : ""}`, {
+      const variant = p.variant || "stack";
+      // "giant": one word per line, huge, stepping to the right; "block": accent words on a violet block.
+      const raw = String(p.text || "");
+      // Long single-line text is broken into lines of about 12 letters so it stays big.
+      const wrap = (t) => {
+        if (t.includes("\n")) return t;
+        const out = [];
+        let line = "";
+        for (const w of t.split(/\s+/).filter(Boolean)) {
+          if (line && (line + " " + w).replace(/\*/g, "").length > 12) { out.push(line); line = w; } else line = line ? `${line} ${w}` : w;
+        }
+        if (line) out.push(line);
+        return out.join("\n");
+      };
+      const text = variant === "giant" ? raw.replace(/\s*\n\s*/g, " ").split(/\s+/).join("\n") : wrap(raw);
+      const base = variant === "giant" ? 260 : { m: 120, l: 160, xl: 210 }[p.size] || 160;
+      const size = headlineSize(text, base);
+      const { block, words } = kinetic(text, `display${p.size === "xl" || variant === "giant" ? " black" : ""}${variant === "block" ? " hl" : ""}`, {
         position: "absolute", left: "80px", right: "80px", fontSize: px(size),
       });
+      const lineCount = text.split("\n").length;
+      if (variant === "giant") block.querySelectorAll(".line").forEach((l, i) => { l.style.paddingLeft = `${i * 0.18}em`; });
       const align = p.align || "top";
       if (align === "top") block.style.top = "260px";
       else if (align === "bottom") block.style.bottom = "420px";
@@ -38,6 +105,8 @@
       return {
         node,
         update(t, dur) {
+          // The stepped lines of "giant" need room for their indent.
+          if (variant === "giant") fitText(block, 920 - (lineCount - 1) * 0.18 * (parseFloat(block.style.fontSize) || size));
           revealWords(words, t, 0.12, 0.085);
           // Slow drift keeps a held frame alive.
           node.style.transform = `translateY(${-14 * (t / dur)}px)`;
@@ -92,14 +161,22 @@
       const numeric = /^-?\d+$/.test(value.replace(/\s/g, ""));
       const target = numeric ? Number(value.replace(/\s/g, "")) : 0;
       const from = Number(p.from) || 0;
-      const size = Math.min(520, 980 / (value.length * 0.62));
-      const num = el("div", "display black accent", {
-        position: "absolute", left: "70px", bottom: "520px", fontSize: px(size), letterSpacing: "-0.05em", lineHeight: "0.8",
-      });
+      const ring = p.variant === "ring";
+      const size = ring ? Math.min(300, 620 / (value.length * 0.62)) : Math.min(520, 980 / (value.length * 0.62));
+      const num = el("div", "display black accent", ring
+        ? { position: "absolute", left: "0", right: "0", top: "960px", textAlign: "center", fontSize: px(size), letterSpacing: "-0.05em", lineHeight: "0.8", transformOrigin: "50% 50%" }
+        : { position: "absolute", left: "70px", bottom: "520px", fontSize: px(size), letterSpacing: "-0.05em", lineHeight: "0.8" });
+      let arc = null;
+      if (ring) {
+        const svg = el("div", null, { position: "absolute", left: "190px", top: "690px", width: "700px", height: "700px" });
+        svg.innerHTML = `<svg viewBox="0 0 700 700" width="700" height="700"><circle cx="350" cy="350" r="320" fill="none" stroke="currentColor" stroke-opacity=".12" stroke-width="22"/><circle class="arc" cx="350" cy="350" r="320" fill="none" stroke="var(--violet)" stroke-width="22" stroke-linecap="round" stroke-dasharray="2011" stroke-dashoffset="2011" transform="rotate(-90 350 350)"/></svg>`;
+        node.appendChild(svg);
+        arc = svg.querySelector(".arc");
+      }
       const bgViolet = p.bg === "violet";
       if (bgViolet) num.style.color = "var(--white)";
       node.appendChild(num);
-      const label = p.label ? labelNode(p.label, { position: "absolute", left: "84px", bottom: "430px" }) : null;
+      const label = p.label ? labelNode(p.label, ring ? { position: "absolute", left: "0", right: "0", textAlign: "center", top: "1230px" } : { position: "absolute", left: "84px", bottom: "430px" }) : null;
       if (label) node.appendChild(label);
       const fmt = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
       return {
@@ -108,8 +185,11 @@
           if (head) revealWords(head.words, t, 0.1, 0.08);
           const p2 = prog(t, 0.35, 1.1, ease.outExpo);
           num.textContent = numeric ? fmt(lerp(from, target, p2)) : value.slice(0, Math.ceil(value.length * prog(t, 0.35, 0.6, ease.linear)));
-          num.style.transform = `translateY(${(1 - prog(t, 0.3, 0.5, ease.outQuint)) * 80}px)`;
+          num.style.transform = ring
+            ? `translateY(-50%) scale(${lerp(0.6, 1, prog(t, 0.3, 0.6, ease.back))})`
+            : `translateY(${(1 - prog(t, 0.3, 0.5, ease.outQuint)) * 80}px)`;
           num.style.opacity = String(prog(t, 0.3, 0.25));
+          if (arc) arc.style.strokeDashoffset = String(2011 * (1 - prog(t, 0.35, 1.1, ease.outExpo)));
           if (label) label.style.opacity = String(prog(t, 0.9, 0.4));
         },
       };
@@ -201,10 +281,26 @@
           </div>
         </div>`;
       node.appendChild(card);
+      let device = null;
+      if (p.variant === "phone") {
+        // Lock screen in a phone; the headline stays above it.
+        head.block.style.top = "230px";
+        head.block.style.fontSize = px(headlineSize(p.headline || "Новый заказ", 150));
+        if (sub) sub.remove();
+        const lock = el("div", null, { background: "radial-gradient(ellipse at 30% 10%, #3b2a7a, #120d22 60%, #09080d)" });
+        lock.innerHTML = `<div style="position:absolute;left:0;right:0;top:250px;text-align:center;color:#fff;font-family:'Inter Display';font-weight:600;font-size:250px;letter-spacing:-.03em">${esc(p.clock || "23:47")}</div>
+          <div style="position:absolute;left:0;right:0;top:210px;text-align:center;color:rgba(255,255,255,.75);font-family:Inter;font-weight:500;font-size:44px">${esc(p.date || "понедельник")}</div>`;
+        card.remove();
+        Object.assign(card.style, { top: "640px", left: "60px", right: "60px", background: "rgba(245,242,236,.94)" });
+        lock.appendChild(card);
+        device = phone(lock, { top: 560, wallpaper: "#120d22" });
+        node.appendChild(device.node);
+      }
       return {
         node,
-        update(t) {
+        update(t, dur) {
           revealWords(head.words, t, 0.08, 0.1);
+          if (device) device.update(t, dur);
           if (sub) sub.style.opacity = String(prog(t, 0.45, 0.3));
           const drop = prog(t, 0.65, 0.9, ease.spring);
           card.style.transform = `translateY(${(1 - drop) * -1150}px) scale(${lerp(0.94, 1, drop)})`;
@@ -263,9 +359,29 @@
         items.push({ node: bubble, start: at });
         at += mine ? 0.9 : 0.75;
       });
+      let device = null;
+      let head = null;
+      if (p.variant === "phone") {
+        // The conversation lives in a phone; a big headline sits above it.
+        const content = el("div", null, { background: dark ? "#111" : "var(--cream)" });
+        Array.from(node.children).forEach((c) => content.appendChild(c));
+        // Bigger type inside the phone so it still reads at phone size.
+        list.querySelectorAll(":scope > div").forEach((b) => { if (b.style.fontSize) b.style.fontSize = "62px"; });
+        list.style.gap = "34px";
+        device = phone(content, { top: 600, wallpaper: dark ? "#111" : "#ede9e1", offset: 150 });
+        node.appendChild(device.node);
+        const bigText = p.title || p.headline || "";
+        if (bigText) {
+          head = kinetic(bigText, "display black", { position: "absolute", left: "80px", right: "80px", top: "240px", fontSize: px(headlineSize(bigText, 140)) });
+          node.appendChild(head.block);
+          content.querySelectorAll(".label").forEach((l) => l.remove());
+        }
+      }
       return {
         node,
-        update(t) {
+        update(t, dur) {
+          if (device) device.update(t, dur);
+          if (head) revealWords(head.words, t, 0.05, 0.08);
           header.style.opacity = String(prog(t, 0.05, 0.3));
           header.style.transform = `translateY(${(1 - prog(t, 0.05, 0.4)) * 20}px)`;
           for (const it of items) {
@@ -292,7 +408,7 @@
     build(p, ctx) {
       const node = el("div", null, { position: "absolute", inset: "0" });
       node.appendChild(el("div", "glow-arc"));
-      const kicker = labelNode(p.kicker || "я", { position: "absolute", left: "86px", top: "250px", color: "var(--violet)", fontSize: "26px" });
+      const kicker = labelNode(p.kicker || "ИИнна", { position: "absolute", left: "86px", top: "250px", color: "var(--violet)", fontSize: "26px" });
       const head = kinetic(p.headline || "Слушаю", "display black", { position: "absolute", left: "80px", right: "80px", top: "290px", fontSize: px(headlineSize(p.headline || "Слушаю", 190)) });
       node.append(kicker, head.block);
       const who = labelNode(`${p.who || "Алексей К."} · ${p.label || "голосовое"}`, { position: "absolute", left: "86px", top: "600px", color: "#8d8d8d", fontSize: "26px" });

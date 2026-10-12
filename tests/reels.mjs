@@ -69,9 +69,20 @@ assert.deepEqual(composed.errors, []);
 const tools = composed.plan.scenes.map((s) => s.tool);
 assert.deepEqual(tools, ["glitch", "slam", "headline", "voice", "choice", "notification", "chat", "headline", "outro"]);
 assert.equal(composed.plan.scenes[1].params.text, "НЕТ.");
-assert.equal(composed.plan.scenes[1].transition, "cut");
-assert.equal(composed.plan.scenes[2].transition, "wipe", "after a slam comes a wipe");
-assert.equal(composed.plan.scenes.at(-1).transition, "iris");
+const sc = composed.plan.scenes;
+assert.ok(["cut", "glitch"].includes(sc[1].transition), "slam lands hard");
+assert.ok(["slab", "whip", "split"].includes(sc[2].transition), "after a slam comes a big move");
+assert.ok(["iris", "slab", "zoom"].includes(sc.at(-1).transition), "outro has a closing move");
+for (let i = 2; i < sc.length; i++) assert.notEqual(sc[i].transition, sc[i - 1].transition, `transition repeats at scene ${i + 1}`);
+assert.ok(composed.plan.style && composed.plan.bpm && composed.plan.seed !== undefined, "plan carries style, bpm, seed");
+const beat = 60 / composed.plan.bpm;
+for (const s of sc) {
+  const n = s.duration / beat;
+  assert.ok(Math.abs(n - Math.round(n)) < 0.02, `${s.tool} lasts ${s.duration}s, not on the beat (${beat.toFixed(3)}s)`);
+}
+assert.deepEqual(scriptToPlan(script, 42).plan, scriptToPlan(script, 42).plan, "same seed, same reel");
+const looks = new Set([1, 2, 3, 4, 5, 6].map((seed) => JSON.stringify(scriptToPlan(script, seed).plan.scenes.map((s) => [s.transition, s.params.variant]))));
+assert.ok(looks.size >= 4, "different seeds give different reels");
 const voice = composed.plan.scenes[3].params;
 assert.equal(voice.transcript, "Нужен *чёрный*");
 assert.equal(voice.reply, "Есть!");

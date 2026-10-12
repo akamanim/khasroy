@@ -96,14 +96,22 @@
     if (widest > maxWidth) node.style.fontSize = `${Math.floor((size * maxWidth) / widest)}px`;
   }
 
-  /** Reveals words one after another: slide up from the line mask with a short fade. */
+  /**
+   * Reveals words one after another: each slides up out of its line mask, sharpening from a blur.
+   * Accent words get a violet block that wipes in behind them when the block style is on.
+   */
   function revealWords(words, t, start, step = 0.09, length = 0.5) {
     const block = words[0] && words[0].parentElement && words[0].parentElement.parentElement;
     if (block && !block.dataset.fitted) fitText(block, block.clientWidth || 920);
     words.forEach((w, i) => {
       const p = prog(t, start + i * step, length, ease.outQuint);
-      w.style.transform = `translateY(${(1 - p) * 105}%)`;
+      w.style.transform = `translateY(${(1 - p) * 105}%) skewY(${(1 - p) * 6}deg)`;
       w.style.opacity = String(clamp(p * 1.6));
+      w.style.filter = p < 0.98 ? `blur(${(1 - p) * 10}px)` : "none";
+      if (w.classList.contains("accent") && block && block.classList.contains("hl")) {
+        const hp = prog(t, start + i * step + length * 0.6, 0.35, ease.inOut);
+        w.style.backgroundSize = `${hp * 100}% 100%`;
+      }
     });
   }
 
@@ -111,22 +119,87 @@
   const fit = (n, size) => (n > 14 ? size * 0.72 : n > 10 ? size * 0.84 : size);
 
   // ---------- transitions ----------
-  // Each transition styles the *incoming* scene for p in [0, 1]; the outgoing one stays underneath.
+  // A transition is centred on the cut: it starts half its length before the beat the next scene
+  // lands on. It may style the incoming scene, the outgoing scene and a full-screen overlay.
   const transitions = {
-    cut: () => ({}),
-    fade: (p) => ({ opacity: String(ease.out(p)) }),
-    slide: (p) => ({ transform: `translateY(${(1 - ease.outQuint(p)) * 100}%)` }),
-    push: (p) => ({ transform: `translateX(${(1 - ease.outQuint(p)) * 100}%)` }),
-    zoom: (p) => ({ transform: `scale(${lerp(1.18, 1, ease.outQuint(p))})`, opacity: String(ease.out(p)) }),
-    // A diagonal edge sweeps the new scene in.
-    wipe: (p) => {
-      const e = lerp(-20, 120, ease.inOut(p));
-      return { clipPath: `polygon(0 0, ${e + 18}% 0, ${e - 18}% 100%, 0 100%)` };
+    cut: { len: 0 },
+    fade: { len: 0.4, in: (p) => ({ opacity: String(ease.inOut(p)) }) },
+    slide: {
+      len: 0.5,
+      in: (p) => ({ transform: `translateY(${(1 - ease.outQuint(p)) * 100}%)` }),
+      out: (p) => ({ transform: `translateY(${-ease.inOut(p) * 22}%) scale(${1 - 0.06 * p})`, filter: `brightness(${1 - 0.35 * p})` }),
     },
-    // A circle grows from the centre.
-    iris: (p) => ({ clipPath: `circle(${ease.inOut(p) * 120}% at 50% 50%)` }),
+    push: {
+      len: 0.5,
+      in: (p) => ({ transform: `translateX(${(1 - ease.outQuint(p)) * 100}%)` }),
+      out: (p) => ({ transform: `translateX(${-ease.outQuint(p) * 100}%)` }),
+    },
+    // Whip pan: both scenes rush sideways with motion blur.
+    whip: {
+      len: 0.36,
+      in: (p) => ({ transform: `translateX(${(1 - ease.outExpo(p)) * 110}%)`, filter: `blur(${(1 - p) * 26}px)` }),
+      out: (p) => ({ transform: `translateX(${-ease.in(p) * 110}%)`, filter: `blur(${p * 26}px)` }),
+    },
+    zoom: {
+      len: 0.45,
+      in: (p) => ({ transform: `scale(${lerp(1.35, 1, ease.outQuint(p))})`, opacity: String(ease.out(p)), filter: `blur(${(1 - p) * 14}px)` }),
+      out: (p) => ({ transform: `scale(${lerp(1, 0.82, ease.inOut(p))})`, opacity: String(1 - ease.in(p)) }),
+    },
+    wipe: {
+      len: 0.55,
+      in: (p) => {
+        const e = lerp(-20, 120, ease.inOut(p));
+        return { clipPath: `polygon(0 0, ${e + 18}% 0, ${e - 18}% 100%, 0 100%)` };
+      },
+    },
+    // A violet slab sweeps across, covers the frame for an instant and uncovers the next scene.
+    slab: {
+      len: 0.7,
+      in: (p) => ({ opacity: p < 0.5 ? "0" : "1" }),
+      overlay: (o, p) => {
+        const x = lerp(-130, 130, ease.inOut(p));
+        o.style.display = "block";
+        o.style.background = "var(--violet)";
+        o.style.clipPath = `polygon(${x - 35}% 0, ${x + 65}% 0, ${x + 35}% 100%, ${x - 65}% 100%)`;
+      },
+    },
+    // Glitch cut: the frame tears into RGB for a few frames around the cut.
+    glitch: {
+      len: 0.3,
+      in: (p) => ({ opacity: p < 0.5 ? "0" : "1", transform: `translateX(${Math.sin(p * 60) * 18 * (1 - p)}px)` }),
+      out: (p) => ({ transform: `translateX(${Math.sin(p * 47) * 22 * p}px) skewX(${p * 4}deg)` }),
+      overlay: (o, p) => {
+        o.style.display = "block";
+        const a = 0.45 * Math.sin(p * Math.PI);
+        const shift = Math.round(Math.sin(p * 37) * 60);
+        o.style.background = `repeating-linear-gradient(0deg, rgba(255,47,109,${a}) 0 10px, transparent 10px 38px, rgba(24,200,255,${a}) 38px 46px, transparent 46px 97px)`;
+        o.style.backgroundPosition = `0 ${shift}px`;
+        o.style.mixBlendMode = "screen";
+        o.style.clipPath = `inset(${(Math.sin(p * 31) * 0.5 + 0.5) * 55}% 0 ${(Math.cos(p * 23) * 0.5 + 0.5) * 25}% 0)`;
+      },
+    },
+    // The old scene splits into two halves that slide apart.
+    split: {
+      len: 0.55,
+      out: (p) => {
+        const d = ease.inOut(p) * 52;
+        return { clipPath: `polygon(0 0, 100% 0, 100% ${50 - d}%, 0 ${50 - d}%, 0 ${50 + d}%, 100% ${50 + d}%, 100% 100%, 0 100%)` };
+      },
+      in: (p) => ({ transform: `scale(${lerp(1.12, 1, ease.outQuint(p))})` }),
+    },
+    iris: { len: 0.55, in: (p) => ({ clipPath: `circle(${ease.inOut(p) * 120}% at 50% 50%)` }) },
   };
-  const TRANSITION_TIME = { cut: 0, fade: 0.35, slide: 0.45, push: 0.45, zoom: 0.4, wipe: 0.55, iris: 0.5 };
+
+  // Slow camera moves that keep every held frame alive; picked per scene.
+  const cameras = {
+    still: () => "none",
+    push: (p) => `scale(${1 + 0.07 * p})`,
+    pull: (p) => `scale(${1.08 - 0.07 * p})`,
+    panL: (p) => `translateX(${lerp(24, -24, p)}px) scale(1.04)`,
+    panR: (p) => `translateX(${lerp(-24, 24, p)}px) scale(1.04)`,
+    tilt: (p) => `rotate(${lerp(-1.2, 0.6, p)}deg) scale(1.05)`,
+    drift: (p) => `translate(${Math.sin(p * 3) * 10}px, ${lerp(16, -16, p)}px) scale(1.03)`,
+  };
 
   // ---------- reel ----------
   const tools = {};
@@ -139,8 +212,9 @@
     helpers: { clamp, lerp, ease, prog, rng, el, esc, kinetic, revealWords, fit, fitText },
     scenes: [],
     duration: 0,
+    bpm: 0,
 
-    /** Registers a tool: { build(params, ctx) -> { node, update(t, dur) }, duration }. */
+    /** Registers a tool: { build(params, ctx) -> { node, update(t, dur), cues? }, duration }. */
     register(name, tool) {
       tools[name] = tool;
     },
@@ -149,41 +223,78 @@
       const root = stage();
       root.innerHTML = "";
       this.scenes = [];
-      let cursor = 0;
-      (plan.scenes || []).forEach((scene, index) => {
+      this.bpm = Number(plan.bpm) || 0;
+      const overlay = el("div", null, { position: "absolute", inset: "0", zIndex: "999", display: "none", pointerEvents: "none" });
+      this.overlay = overlay;
+      let cut = 0;
+      const list = plan.scenes || [];
+      list.forEach((scene, index) => {
         const tool = tools[scene.tool];
         if (!tool) throw new Error(`unknown tool: ${scene.tool}`);
         const params = scene.params || {};
         const dur = Math.max(0.6, Number(scene.duration) || tool.duration || 2.5);
-        const transition = index === 0 ? "cut" : transitions[scene.transition] ? scene.transition : "cut";
-        const overlap = TRANSITION_TIME[transition] || 0;
-        const start = Math.max(0, cursor - overlap);
+        const name = index === 0 ? "cut" : transitions[scene.transition] ? scene.transition : "cut";
+        const tr = transitions[name];
+        const half = (tr.len || 0) / 2;
         const wrap = el("section", `scene bg-${params.bg || tool.bg || "cream"}`);
         wrap.dataset.tool = scene.tool;
-        const built = tool.build(params, { index, seed: 1000 + index * 77, dur });
-        wrap.appendChild(built.node);
+        const cam = el("div", null, { position: "absolute", inset: "0", transformOrigin: "50% 45%" });
+        const seed = 1000 + index * 77 + (Number(plan.seed) || 0);
+        const built = tool.build(params, { index, seed, dur });
+        cam.appendChild(built.node);
+        wrap.appendChild(cam);
         wrap.style.display = "none";
         wrap.style.zIndex = String(index + 1);
         root.appendChild(wrap);
-        this.scenes.push({ wrap, built, start, dur, transition, overlap });
-        cursor = start + dur;
+        const camNames = Object.keys(cameras).filter((k) => k !== "still");
+        const camera = cameras[scene.camera] ? scene.camera : camNames[(seed * 7) % camNames.length];
+        // The scene's own clock starts when its transition begins; the cut sits on `cut`.
+        this.scenes.push({ wrap, cam, built, tool: scene.tool, params, cut, start: cut - half, dur, name, tr, half, camera, seed });
+        cut += dur;
       });
-      this.duration = cursor;
+      root.appendChild(overlay);
+      this.duration = cut;
       return this.duration;
     },
 
+    /** Sound cues for the soundtrack: transitions, hits, pops and clicks with their times. */
+    cues() {
+      const out = [];
+      this.scenes.forEach((s, i) => {
+        if (i > 0 && s.name !== "cut") out.push({ t: Math.max(0, s.cut - s.half), sfx: s.name === "glitch" ? "glitch" : "whoosh", len: s.tr.len });
+        if (i > 0 && s.name === "cut") out.push({ t: s.cut, sfx: "tick" });
+        const own = s.built.cues ? s.built.cues(s.dur) : [];
+        own.forEach((c) => out.push({ ...c, t: s.cut - s.half * 0.6 + c.at }));
+      });
+      return out.filter((c) => c.t >= 0 && c.t < this.duration).sort((a, b) => a.t - b.t);
+    },
+
     seek(t) {
-      for (const s of this.scenes) {
-        const local = t - s.start;
-        const visible = local >= 0 && local < s.dur + 1e-6;
-        // A scene stays drawn while the next one transitions over it.
+      const o = this.overlay;
+      o.style.display = "none";
+      o.style.mixBlendMode = "normal";
+      for (let i = 0; i < this.scenes.length; i++) {
+        const s = this.scenes[i];
+        const next = this.scenes[i + 1];
+        const end = next ? next.cut + next.half : this.duration;
+        const visible = t >= s.start && t < end;
         s.wrap.style.display = visible ? "block" : "none";
         if (!visible) continue;
+        // Local time counts from the moment the scene reaches the cut, so tool timings stay as designed.
+        const local = Math.max(0, t - s.cut + s.half * 0.6);
         s.built.update(local, s.dur);
-        const fx = s.overlap ? transitions[s.transition](clamp(local / s.overlap)) : {};
+        s.cam.style.transform = cameras[s.camera](clamp((t - s.start) / (s.dur + s.half * 2)));
+        let fx = {};
+        if (s.half && t < s.cut + s.half && s.tr.in) fx = s.tr.in(clamp((t - s.start) / s.tr.len));
+        if (next && next.half && t >= next.start && next.tr.out) fx = { ...fx, ...next.tr.out(clamp((t - next.start) / next.tr.len)) };
+        if (next && next.half && t >= next.start && next.tr.overlay) next.tr.overlay(o, clamp((t - next.start) / next.tr.len));
         s.wrap.style.opacity = fx.opacity ?? "1";
         s.wrap.style.transform = fx.transform ?? "none";
         s.wrap.style.clipPath = fx.clipPath ?? "none";
+        s.wrap.style.filter = fx.filter ?? "none";
+        // Living grain: the noise shifts every frame.
+        s.wrap.style.setProperty("--gx", `${Math.floor(t * 24) * 37 % 240}px`);
+        s.wrap.style.setProperty("--gy", `${Math.floor(t * 24) * 53 % 240}px`);
       }
     },
   };
