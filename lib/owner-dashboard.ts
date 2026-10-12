@@ -1,6 +1,5 @@
 import { resolveSecret } from "@/lib/server-integrations";
 import { getSkills } from "@/lib/server-memory";
-import { recentChanges, type RecentChange } from "@/lib/server-github";
 import { dashboardStats, type DashboardStats } from "@/lib/invitations/server";
 
 // Everything the owner console shows besides the chat. Each value is either measured or
@@ -20,7 +19,6 @@ export type OwnerDashboard = {
   providers: ProviderStatus[];
   skills: { verified: number; learning: number };
   skillList: Array<{ name: string; description: string; status: "verified" | "learning" }>;
-  changes: RecentChange[] | null;
   attention: string[];
   checkedAt: string;
 };
@@ -71,16 +69,14 @@ async function checkProviders(ownerKey: string): Promise<ProviderStatus[]> {
 }
 
 export async function loadOwnerDashboard(ownerKey: string): Promise<OwnerDashboard> {
-  const [statsResult, providersResult, skillsResult, changesResult] = await Promise.allSettled([
+  const [statsResult, providersResult, skillsResult] = await Promise.allSettled([
     dashboardStats(),
     checkProviders(ownerKey),
     getSkills(ownerKey),
-    recentChanges(5),
   ]);
   const stats = statsResult.status === "fulfilled" ? statsResult.value : null;
   const providers = providersResult.status === "fulfilled" ? providersResult.value : [];
   const skills = skillsResult.status === "fulfilled" && Array.isArray(skillsResult.value) ? skillsResult.value : [];
-  const changes = changesResult.status === "fulfilled" ? changesResult.value : null;
 
   const attention: string[] = [];
   if (stats?.invitations.waiting) {
@@ -105,7 +101,6 @@ export async function loadOwnerDashboard(ownerKey: string): Promise<OwnerDashboa
       .sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name, "ru") : a.status === "verified" ? -1 : 1))
       .slice(0, 80)
       .map((s) => ({ name: s.name, description: (s.description ?? "").slice(0, 220), status: s.status })),
-    changes,
     attention,
     checkedAt: new Date().toISOString(),
   };

@@ -237,16 +237,6 @@
 .browserLarge .browserSteps { max-height: 40vh; }
 .browserLarge .browserAnswer { max-height: none; }
 
-/* Recent changes board */
-.changes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
-.changes > li { display: flex; flex-direction: column; gap: 3px; padding-top: 10px; border-top: 1px solid #141d2b; }
-.changes > li:first-child { padding-top: 0; border-top: 0; }
-.changes a { display: flex; flex-direction: column; gap: 2px; color: inherit; text-decoration: none; }
-.changes a:hover b { color: #cfe8ff; }
-.changes time { font-size: 11px; color: #6f7f92; }
-.changes b { font-size: 13px; font-weight: 600; line-height: 1.35; color: #e6edf5; }
-.changes ul { margin: 0; padding: 0 0 0 14px; font-size: 12px; line-height: 1.4; color: #8b98a8; }
-
 .featuresButton {
   display: inline-flex;
   align-items: center;
