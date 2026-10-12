@@ -7,6 +7,7 @@ Opens public/reels-runtime/index.html in headless Chromium (Playwright), seeks e
 screenshots into ffmpeg. Same plan → same video. --frames-at saves stills instead, for quick checks.
 """
 import argparse
+import os
 import json
 import pathlib
 import subprocess
@@ -15,6 +16,7 @@ import sys
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
 # The runtime lives in public/ so the owner console can preview plans live with the same code.
 PAGE = (ROOT.parent / "public" / "reels-runtime" / "index.html").as_uri()
 
@@ -54,12 +56,15 @@ def main() -> int:
             browser.close()
             return 0
 
+        cues = page.evaluate("reel.cues()")
+        cuts = page.evaluate("reel.scenes.map((s) => ({ tool: s.tool, cut: s.cut }))")
         frames = int(round(duration * args.fps))
         size = f"{int(1080 * args.scale)}x{int(1920 * args.scale)}"
+        silent = args.out + ".video.mp4"
         ff = subprocess.Popen(
             ["ffmpeg", "-v", "error", "-y", "-f", "image2pipe", "-framerate", str(args.fps), "-c:v", "mjpeg", "-i", "-",
              "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "18", "-movflags", "+faststart",
-             "-s", size, args.out],
+             "-s", size, silent],
             stdin=subprocess.PIPE,
         )
         for i in range(frames):
@@ -69,7 +74,22 @@ def main() -> int:
         ff.stdin.close()
         code = ff.wait()
         browser.close()
-        print(f"{args.out}: {frames} frames, {duration:.2f}s")
+        if code:
+            return code
+
+        # Soundtrack: music in the plan's style plus effects on the runtime's cues.
+        if plan.get("music", "on") != "off":
+            from audio import soundtrack  # noqa: E402  (sibling module)
+            outro = next((c["cut"] for c in cuts if c["tool"] == "outro"), None)
+            wav = soundtrack(duration, cues, style=plan.get("style", "pulse"), bpm=plan.get("bpm"),
+                             seed=int(plan.get("seed", 1)), outro_at=outro, path=args.out + ".wav")
+            code = subprocess.call(["ffmpeg", "-v", "error", "-y", "-i", silent, "-i", wav, "-c:v", "copy", "-c:a", "aac",
+                                    "-b:a", "192k", "-ar", "48000", "-af", "loudnorm=I=-14:TP=-1.5:LRA=9", "-shortest", "-movflags", "+faststart", args.out])
+            pathlib.Path(wav).unlink(missing_ok=True)
+            pathlib.Path(silent).unlink(missing_ok=True)
+        else:
+            pathlib.Path(silent).rename(args.out)
+        print(f"{args.out}: {frames} frames, {duration:.2f}s, {len(cues)} sound cues")
         return code
 
 

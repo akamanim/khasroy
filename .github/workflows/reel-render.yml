@@ -53,7 +53,7 @@ jobs:
         if: steps.job.outputs.mode != 'none'
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-          pip install -q playwright==1.56.0
+          pip install -q playwright==1.56.0 numpy scipy
           python -m playwright install --with-deps chromium
       - name: Render
         if: steps.job.outputs.mode != 'none'

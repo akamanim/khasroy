@@ -82,12 +82,50 @@ const plain = (s: string) => s.replace(/\*/gu, "").trim();
 const words = (s: string) => plain(s).split(/\s+/u).filter(Boolean).length;
 
 /** Turns the script into a plan by fixed rules and runs the plan checker over it. */
-export function scriptToPlan(script: Script): Checked {
+/** Deterministic random numbers from a seed (mulberry32). */
+function random(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const STYLE_BPM: Record<string, number> = { pulse: 120, bounce: 140, chill: 92 };
+
+/** Music style from the tone of the script: calm tutorials get "chill", bold ones "bounce". */
+export function pickStyle(script: Script, rand: () => number): string {
+  const text = `${script.title} ${script.idea} ${script.scenes.map((s) => s.text).join(" ")}`.toLowerCase();
+  if (/(шаг|обуча|как подключ|настро|спокойн|инструкц)/u.test(text)) return "chill";
+  if (/(дерз|стоп|нет\.|скидк|быстр|!)/u.test(text) && rand() < 0.7) return "bounce";
+  return ["pulse", "bounce", "chill"][Math.floor(rand() * 3)];
+}
+
+/**
+ * Turns the script into a plan by fixed rules and runs the plan checker over it. `seed` makes each
+ * build look different (layouts, transitions, cameras, music) while staying reproducible.
+ */
+export function scriptToPlan(script: Script, seed = hashSeed(script.title)): Checked {
+  const rand = random(seed);
+  const pick = <T,>(items: T[], avoid?: T): T => {
+    const pool = items.filter((x) => x !== avoid);
+    const from = pool.length ? pool : items;
+    return from[Math.floor(rand() * from.length)];
+  };
+  const style = pickStyle(script, rand);
+  const bpm = STYLE_BPM[style];
+  const beat = 60 / bpm;
+  // Scene lengths snap to whole beats, so every cut lands on the music.
+  const onBeat = (sec: number, minBeats: number) => Math.round(Math.max(minBeats, Math.round(sec / beat)) * beat * 100) / 100;
   const scenes: Scene[] = [];
   const cycle = ["cream", "black", "violet"];
-  const moves = ["slide", "wipe", "push", "zoom", "fade"];
+  const moves = ["slide", "whip", "push", "zoom", "wipe", "slab", "split", "fade"];
   let lastBg = "";
-  let moveIndex = 0;
+  let lastMove = "";
+  let lastHeadline = "";
   const pickBg = (preferred: string[]) => preferred.find((b) => b !== lastBg) ?? cycle.find((b) => b !== lastBg) ?? "cream";
 
   // Scenes that would come out empty are dropped instead of drawing a placeholder.
@@ -112,7 +150,12 @@ export function scriptToPlan(script: Script): Checked {
     switch (tool) {
       case "headline":
         bg = pickBg(cycle);
-        params = { text, align: "center", size: words(text) <= 3 ? "xl" : "l" };
+        {
+          const options = words(text) <= 3 ? ["stack", "block", "giant"] : /\*/u.test(text) ? ["stack", "block"] : ["stack"];
+          const variant = pick(options, lastHeadline);
+          lastHeadline = variant;
+          params = { text, align: "center", size: words(text) <= 3 ? "xl" : "l", variant };
+        }
         break;
       case "slam":
         bg = pickBg(["violet", "black"]);
@@ -124,7 +167,7 @@ export function scriptToPlan(script: Script): Checked {
         break;
       case "counter":
         bg = pickBg(["black", "cream", "violet"]);
-        params = { value: s.number || (plain(text).match(/[\d/ ]+/u)?.[0]?.trim() ?? "24/7"), headline: s.number ? text : "", label: s.label ?? "" };
+        params = { value: s.number || (plain(text).match(/[\d/ ]+/u)?.[0]?.trim() ?? "24/7"), headline: s.number ? text : "", label: s.label ?? "", variant: rand() < 0.5 ? "ring" : "corner" };
         break;
       case "dot_grid": {
         bg = "cream";
@@ -135,6 +178,7 @@ export function scriptToPlan(script: Script): Checked {
       case "notification":
         bg = "black";
         params = {
+          variant: rand() < 0.55 ? "phone" : "float",
           headline: text || "Новый\n*заказ*",
           title: s.title || (/заказ/iu.test(text) || !text ? "Пришёл новый заказ" : plain(text)),
           body: s.body ?? "",
@@ -144,6 +188,7 @@ export function scriptToPlan(script: Script): Checked {
       case "chat":
         bg = pickBg(["cream", "black"]);
         params = {
+          ...(rand() < 0.55 ? { variant: "phone", title: text } : {}),
           headline: text,
           messages: (s.lines?.length ? s.lines : [{ from: "client" as const, text: "Здравствуйте! Есть в наличии?" }, { from: "inna" as const, text: "Да, есть! Оформить?" }])
             .map((l) => ({ from: l.from === "client" ? "client" : "me", text: l.text })),
@@ -183,12 +228,22 @@ export function scriptToPlan(script: Script): Checked {
     // Cuts for hard hits, varied moves for the rest, an iris into the ending.
     let transition = "cut";
     if (i > 0) {
-      if (tool === "outro") transition = "iris";
-      else if (tool === "slam" || tool === "glitch" || scenes[i - 1]?.tool === "slam") transition = tool === "slam" || tool === "glitch" ? "cut" : "wipe";
-      else transition = moves[moveIndex++ % moves.length];
+      if (tool === "outro") transition = pick(["iris", "slab", "zoom"]);
+      else if (tool === "slam" || tool === "glitch") transition = pick(["cut", "glitch"]);
+      else if (scenes[i - 1]?.tool === "slam") transition = pick(["slab", "whip", "split"]);
+      else transition = pick(moves, lastMove);
+      if (transition !== "cut") lastMove = transition;
     }
     lastBg = bg;
-    scenes.push({ tool, duration: s.seconds, transition, params });
+    const minBeats = tool === "slam" ? 2 : tool === "glitch" ? 3 : 4;
+    scenes.push({ tool, duration: onBeat(s.seconds, minBeats), transition, params });
   });
-  return checkPlan({ title: script.title, scenes });
+  return checkPlan({ title: script.title, scenes, style, bpm, seed });
+}
+
+/** Stable seed from text, used when the caller does not pass one. */
+export function hashSeed(text: string): number {
+  let h = 2166136261;
+  for (const ch of text) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  return (h >>> 0) % 1_000_000;
 }
