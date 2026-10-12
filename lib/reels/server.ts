@@ -4,8 +4,9 @@ import type { Plan } from "@/lib/reels/catalog";
 
 const ENDPOINT = "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-reels";
 
-export type ScriptScene = { seconds: number; what: string; text: string };
-export type Script = { title: string; idea: string; scenes: ScriptScene[] };
+import type { Script } from "@/lib/reels/compose";
+
+export type { Script, ScriptScene } from "@/lib/reels/compose";
 
 export type ReelJob = {
   id: string;
