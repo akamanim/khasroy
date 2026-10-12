@@ -141,6 +141,8 @@ html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; 
 .theme-acid .bg-violet .accent { color: var(--violet); }
 .theme-acid .bg-cream { background: #f6f4ee; }
 .theme-acid .accent { color: var(--violet); }
+.theme-acid .hl .accent { color: var(--white); }
+.theme-acid .bg-violet .hl .accent { color: #c6ff3d; }
 /* cinema: letterbox and vignette */
 .cinema-frame {
   position: absolute;

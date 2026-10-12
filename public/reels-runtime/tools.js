@@ -827,7 +827,7 @@
       const rowSize = Math.round(Math.min(96, 820 / (longest * 0.64)));
       top.innerHTML = `<div class="label" style="color:#8d8d8d">${esc(p.left || "Без ИИнны")}</div>` +
         before.map((b) => `<div class="display row" style="font-size:${rowSize}px;margin-top:40px;color:#6d6d6d;position:relative;display:table;white-space:nowrap">${esc(b)}<i style="position:absolute;left:-6px;right:-6px;top:52%;height:8px;background:#ff5a4e;transform-origin:0 50%;transform:scaleX(0)"></i></div>`).join("");
-      const bottom = el("div", "bg-violet", { position: "absolute", left: "0", right: "0", top: "960px", bottom: "0", padding: "90px 80px 0", color: "var(--white)" });
+      const bottom = el("div", "bg-violet", { position: "absolute", left: "0", right: "0", top: "960px", bottom: "0", padding: "90px 80px 0" });
       bottom.innerHTML = `<div class="label">${esc(p.right || "С ИИнной")}</div>` +
         after.map((a) => `<div class="display row" style="font-size:${rowSize}px;margin-top:40px;white-space:nowrap;display:flex;align-items:center;gap:28px"><span style="flex:none;width:76px;height:76px;border-radius:50%;background:var(--ink);display:grid;place-items:center;font-size:44px;color:#fff">✓</span>${esc(a)}</div>`).join("");
       node.append(top, bottom);
