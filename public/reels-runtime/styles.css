@@ -1,11 +1,11 @@
 /* ИИнна reel style: paper cream, violet, near-black; tight Inter Display capitals. */
 
-@font-face { font-family: "Inter Display"; font-weight: 900; src: url("../fonts/InterDisplay-Black.otf") format("opentype"); }
-@font-face { font-family: "Inter Display"; font-weight: 700; src: url("../fonts/InterDisplay-Bold.otf") format("opentype"); }
-@font-face { font-family: "Inter Display"; font-weight: 600; src: url("../fonts/InterDisplay-SemiBold.otf") format("opentype"); }
-@font-face { font-family: "Inter Display"; font-weight: 500; src: url("../fonts/InterDisplay-Medium.otf") format("opentype"); }
-@font-face { font-family: "Inter"; font-weight: 500; src: url("../fonts/Inter-Medium.otf") format("opentype"); }
-@font-face { font-family: "Inter"; font-weight: 600; src: url("../fonts/Inter-SemiBold.otf") format("opentype"); }
+@font-face { font-family: "Inter Display"; font-weight: 900; src: url("../reels-fonts/InterDisplay-Black.otf") format("opentype"); }
+@font-face { font-family: "Inter Display"; font-weight: 700; src: url("../reels-fonts/InterDisplay-Bold.otf") format("opentype"); }
+@font-face { font-family: "Inter Display"; font-weight: 600; src: url("../reels-fonts/InterDisplay-SemiBold.otf") format("opentype"); }
+@font-face { font-family: "Inter Display"; font-weight: 500; src: url("../reels-fonts/InterDisplay-Medium.otf") format("opentype"); }
+@font-face { font-family: "Inter"; font-weight: 500; src: url("../reels-fonts/Inter-Medium.otf") format("opentype"); }
+@font-face { font-family: "Inter"; font-weight: 600; src: url("../reels-fonts/Inter-SemiBold.otf") format("opentype"); }
 
 :root {
   --cream: #ede9e1;

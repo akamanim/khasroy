@@ -1,51 +1,74 @@
 name: Reel render
 
-# Renders a reel plan to MP4 with the in-repo runtime (reels/). Khasroy will dispatch this with a
-# plan; it can also be run by hand with a plan file from reels/plans.
+# Every 5 minutes: take the next reel Khasroy queued, render it, put the MP4 into storage.
+# Run by hand with a plan file to render it into an artifact instead.
 on:
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       plan_path:
-        description: "Plan file in the repo (used when plan_json is empty)"
-        required: false
-        default: "reels/plans/iinna-demo.json"
-      plan_json:
-        description: "Plan JSON (overrides plan_path)"
+        description: "Plan file to render by hand (empty: take the next job from the queue)"
         required: false
         default: ""
-      job_id:
-        description: "Khasroy job id, used in the artifact name"
-        required: false
-        default: "manual"
 
 permissions:
   contents: read
+  id-token: write
+
+concurrency:
+  group: reel-render
+  cancel-in-progress: false
 
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Take a job
+        id: job
+        env:
+          PLAN_PATH: ${{ inputs.plan_path }}
+        run: |
+          if [ -n "$PLAN_PATH" ]; then
+            cp "$PLAN_PATH" plan.json
+            echo "mode=manual" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          id="$(reels/runner.sh claim)"
+          if [ -z "$id" ]; then
+            echo "Queue is empty."
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+          else
+            echo "Job $id"
+            echo "mode=job" >> "$GITHUB_OUTPUT"
+            echo "id=$id" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-python@v5
+        if: steps.job.outputs.mode != 'none'
         with:
           python-version: "3.12"
       - name: Install renderer
+        if: steps.job.outputs.mode != 'none'
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
           pip install -q playwright==1.56.0
           python -m playwright install --with-deps chromium
-      - name: Write plan
-        env:
-          PLAN_JSON: ${{ inputs.plan_json }}
-          PLAN_PATH: ${{ inputs.plan_path }}
-        run: |
-          if [ -n "$PLAN_JSON" ]; then printf '%s' "$PLAN_JSON" > plan.json; else cp "$PLAN_PATH" plan.json; fi
-          python -c "import json; json.load(open('plan.json'))"
       - name: Render
+        if: steps.job.outputs.mode != 'none'
         run: python reels/render.py plan.json reel.mp4
+      - name: Deliver
+        if: steps.job.outputs.mode == 'job'
+        run: |
+          reels/runner.sh upload "${{ steps.job.outputs.id }}" reel.mp4
+          reels/runner.sh finish "${{ steps.job.outputs.id }}" ok
+      - name: Report failure
+        if: failure() && steps.job.outputs.mode == 'job'
+        run: reels/runner.sh finish "${{ steps.job.outputs.id }}" failed "Сборка на GitHub не удалась (run ${{ github.run_id }})"
       - uses: actions/upload-artifact@v4
+        if: steps.job.outputs.mode == 'manual'
         with:
-          name: reel-${{ inputs.job_id }}
+          name: reel-${{ github.run_id }}
           path: reel.mp4
           retention-days: 14
