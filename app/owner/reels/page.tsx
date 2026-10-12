@@ -202,7 +202,7 @@ export default function ReelsStudio() {
 
   if (unauthorized) {
     return (
-      <main className={styles.page} style={{ display: "block", maxWidth: "none", padding: 0 }}>
+      <main className={styles.page} style={{ display: "block", maxWidth: "none", padding: 0, height: "100dvh", overflowY: "auto" }}>
         <div className={styles.gate}>
           <p>Рилсы доступны только владельцу.</p>
           <a className={styles.primary} href="/owner">Войти в консоли</a>
@@ -212,7 +212,7 @@ export default function ReelsStudio() {
   }
 
   return (
-    <main className={styles.page} style={{ display: "block", maxWidth: "none", padding: 0 }}>
+    <main className={styles.page} style={{ display: "block", maxWidth: "none", padding: 0, height: "100dvh", overflowY: "auto" }}>
       <header className={styles.top}>
         <a href="/owner" className={styles.back}><ArrowLeft size={16} /> Консоль</a>
         <h1><Clapperboard size={22} /> Рилсы ИИнны</h1>

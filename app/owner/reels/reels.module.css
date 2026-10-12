@@ -1,5 +1,8 @@
+/* The site keeps <body> fixed for the console; this page scrolls inside itself. */
 .page {
   min-height: 100vh;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   background: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(136, 83, 253, 0.12), transparent 70%), #06090f;
   color: #e6edf5;
   font-family: Manrope, Inter, system-ui, sans-serif;
