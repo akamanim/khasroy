@@ -3,7 +3,7 @@
 
     python3 reels/render.py plan.json out.mp4 [--fps 30] [--frames-at 0.5,2,4 --frames-dir dir]
 
-Opens reels/runtime/index.html in headless Chromium (Playwright), seeks every frame and pipes the
+Opens public/reels-runtime/index.html in headless Chromium (Playwright), seeks every frame and pipes the
 screenshots into ffmpeg. Same plan → same video. --frames-at saves stills instead, for quick checks.
 """
 import argparse
@@ -15,7 +15,8 @@ import sys
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent
-PAGE = (ROOT / "runtime" / "index.html").as_uri()
+# The runtime lives in public/ so the owner console can preview plans live with the same code.
+PAGE = (ROOT.parent / "public" / "reels-runtime" / "index.html").as_uri()
 
 
 def main() -> int:

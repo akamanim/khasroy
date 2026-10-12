@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { TOOLS, catalogForPrompt, checkPlan, wrapLines } from "../lib/reels/catalog.ts";
 
 // Catalog and renderer must list the same tools.
-const runtime = await readFile(new URL("../reels/runtime/tools.js", import.meta.url), "utf8");
+const runtime = await readFile(new URL("../public/reels-runtime/tools.js", import.meta.url), "utf8");
 const registered = [...runtime.matchAll(/R\("([a-z_]+)"/g)].map((m) => m[1]).sort();
 assert.deepEqual(TOOLS.map((t) => t.name).sort(), registered, "catalog and tools.js must match");
 

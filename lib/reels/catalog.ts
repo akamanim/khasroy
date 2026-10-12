@@ -1,5 +1,5 @@
 // Catalog of reel tools for Khasroy. The model never writes animation code: it picks tools from
-// this list and fills their parameters. The renderer (reels/runtime/tools.js) draws them.
+// this list and fills their parameters. The renderer (public/reels-runtime/tools.js) draws them.
 // Keep names and parameters in sync with tools.js — tests/reels.mjs checks that.
 
 export type ParamSpec =
