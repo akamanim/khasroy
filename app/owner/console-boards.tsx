@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Sparkles, X } from "lucide-react";
+import { FEATURES, FEATURE_STATUS, type FeatureStatus } from "@/lib/owner-features";
 import type { OwnerDashboard, ProviderStatus } from "@/lib/owner-dashboard";
 import { CloudBrowser } from "./cloud-browser";
 import styles from "./console.module.css";
@@ -144,11 +146,6 @@ const STATE_CLASS: Record<ProviderStatus["state"], string> = {
   unchecked: "muted",
 };
 
-const TASK_STATUS: Record<string, string> = {
-  waiting_for_compute: "ждёт ресурсов",
-  queued: "в очереди",
-  running: "в работе",
-};
 
 export function RightBoard({
   data,
@@ -163,6 +160,7 @@ export function RightBoard({
   coreState: string;
   onLogin: () => void;
 }) {
+  const [featuresOpen, setFeaturesOpen] = useState(false);
   const stateLabel = coreState === "thinking" ? "думает" : coreState === "responding" ? "отвечает" : coreState === "listening" ? "слушает" : "в покое";
   return (
     <div className={styles.board}>
@@ -171,6 +169,9 @@ export function RightBoard({
           <span className={styles.label}>Хасрой</span>
           <span className={coreState === "idle" ? styles.muted : styles.accent}>{stateLabel}</span>
         </header>
+        <button type="button" className={styles.featuresButton} onClick={() => setFeaturesOpen(true)}>
+          <Sparkles size={14} /> Все функции Хасроя
+        </button>
         {data ? (
           <div className={styles.list}>
             <div className={styles.listRow}><span>Модель</span><b>{data.model.replace(/^openai\//u, "")}</b></div>
@@ -192,24 +193,116 @@ export function RightBoard({
 
       <section className={styles.panel}>
         <header className={styles.panelHead}>
-          <span className={styles.label}>Задачи</span>
-          <span className={styles.muted}>{data ? `${data.tasks.length} в очереди` : ""}</span>
+          <span className={styles.label}>Изменения</span>
+          <a className={styles.link} href="https://github.com/akamanim/khasroy/pulls?q=is%3Amerged" target="_blank" rel="noopener noreferrer">все ›</a>
         </header>
-        {data && data.tasks.length ? (
-          <div className={styles.list}>
-            {data.tasks.map((t) => (
-              <div key={t.id} className={styles.listRow}>
-                <span><i className={`${styles.dot} ${styles.accent}`} />{t.kind.replace(/_/gu, " ")}</span>
-                <b className={styles.muted}>{TASK_STATUS[t.status] ?? t.status}</b>
-              </div>
+        {data?.changes?.length ? (
+          <ol className={styles.changes}>
+            {data.changes.map((c) => (
+              <li key={c.number}>
+                <a href={c.url} target="_blank" rel="noopener noreferrer">
+                  <time dateTime={c.mergedAt}>{changeDate(c.mergedAt)}</time>
+                  <b>{c.title}</b>
+                </a>
+                {c.points.length ? (
+                  <ul>
+                    {c.points.slice(0, 2).map((point) => <li key={point}>{point}</li>)}
+                  </ul>
+                ) : null}
+              </li>
             ))}
-          </div>
+          </ol>
         ) : (
-          <p className={styles.muted}>Фоновых задач сейчас нет.</p>
+          <p className={styles.muted}>{data ? "Список изменений не загрузился — GitHub не ответил." : loading ? "Загружаю…" : "Видно владельцу после входа."}</p>
         )}
       </section>
 
       <CloudBrowser unauthorized={unauthorized} onLogin={onLogin} />
+      {featuresOpen ? <FeaturesDialog skills={data?.skillList ?? null} onClose={() => setFeaturesOpen(false)} /> : null}
+    </div>
+  );
+}
+
+function changeDate(iso: string): string {
+  const date = new Date(iso);
+  const opts = { timeZone: "Asia/Bishkek" } as const;
+  const day = date.toLocaleDateString("ru-RU", { ...opts, day: "numeric", month: "short" });
+  const time = date.toLocaleTimeString("ru-RU", { ...opts, hour: "2-digit", minute: "2-digit" });
+  return `${day}, ${time}`;
+}
+
+const STATUS_CLASS: Record<FeatureStatus, string> = { verified: "ok", built: "accent", setup: "warn" };
+
+function FeaturesDialog({
+  skills,
+  onClose,
+}: {
+  skills: OwnerDashboard["skillList"] | null;
+  onClose: () => void;
+}) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeButton.current?.focus();
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const total = FEATURES.reduce((n, g) => n + g.items.length, 0);
+  return (
+    <div className={styles.dialogBackdrop} onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Все функции Хасроя" className={styles.dialog} onClick={(event) => event.stopPropagation()}>
+        <header className={styles.dialogHead}>
+          <div>
+            <h2>Что умеет Хасрой</h2>
+            <p className={styles.muted}>
+              {total} функций. <span className={styles.ok}>проверено</span> — работает на сайте и проверено;{" "}
+              <span className={styles.accent}>есть</span> — сделано, давно не перепроверялось;{" "}
+              <span className={styles.warn}>нужна настройка</span> — нужны ключи в настройках.
+            </p>
+          </div>
+          <button ref={closeButton} type="button" className={styles.iconButton} onClick={onClose} aria-label="Закрыть">
+            <X size={15} />
+          </button>
+        </header>
+        <div className={styles.dialogBody}>
+          {FEATURES.map((group) => (
+            <section key={group.title} className={styles.featureGroup}>
+              <h3>{group.title}</h3>
+              <ul>
+                {group.items.map((f) => (
+                  <li key={f.name}>
+                    <div className={styles.featureTop}>
+                      {f.href ? <a href={f.href}>{f.name}</a> : <b>{f.name}</b>}
+                      <span className={styles[STATUS_CLASS[f.status]]}>{FEATURE_STATUS[f.status]}</span>
+                    </div>
+                    <p>{f.what}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+          <section className={styles.featureGroup}>
+            <h3>Навыки из памяти</h3>
+            {skills === null ? (
+              <p className={styles.muted}>Список навыков виден владельцу после входа.</p>
+            ) : skills.length ? (
+              <ul>
+                {skills.map((skill) => (
+                  <li key={skill.name}>
+                    <div className={styles.featureTop}>
+                      <b>{skill.name}</b>
+                      <span className={skill.status === "verified" ? styles.ok : styles.muted}>{skill.status === "verified" ? "проверен" : "учит"}</span>
+                    </div>
+                    {skill.description ? <p>{skill.description}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className={styles.muted}>Навыков в памяти пока нет.</p>
+            )}
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

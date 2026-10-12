@@ -237,6 +237,73 @@
 .browserLarge .browserSteps { max-height: 40vh; }
 .browserLarge .browserAnswer { max-height: none; }
 
+/* Recent changes board */
+.changes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.changes > li { display: flex; flex-direction: column; gap: 3px; padding-top: 10px; border-top: 1px solid #141d2b; }
+.changes > li:first-child { padding-top: 0; border-top: 0; }
+.changes a { display: flex; flex-direction: column; gap: 2px; color: inherit; text-decoration: none; }
+.changes a:hover b { color: #cfe8ff; }
+.changes time { font-size: 11px; color: #6f7f92; }
+.changes b { font-size: 13px; font-weight: 600; line-height: 1.35; color: #e6edf5; }
+.changes ul { margin: 0; padding: 0 0 0 14px; font-size: 12px; line-height: 1.4; color: #8b98a8; }
+
+.featuresButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(159, 208, 255, 0.28);
+  background: rgba(159, 208, 255, 0.07);
+  color: #cfe8ff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.featuresButton:hover { background: rgba(159, 208, 255, 0.13); border-color: rgba(159, 208, 255, 0.45); }
+
+/* "Все функции" window */
+.dialogBackdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 5, 10, 0.72);
+  backdrop-filter: blur(8px);
+}
+.dialog {
+  width: min(860px, 100%);
+  max-height: min(86vh, 900px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  border: 1px solid #22314a;
+  background: #0b111b;
+  box-shadow: 0 30px 120px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.dialogHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 22px 14px; border-bottom: 1px solid #172031; }
+.dialogHead h2 { margin: 0 0 6px; font-size: 19px; font-weight: 700; }
+.dialogHead p { font-size: 12.5px; }
+.dialogBody { overflow-y: auto; padding: 8px 22px 22px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 26px; scrollbar-width: thin; }
+.featureGroup h3 { margin: 16px 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9fb0c3; }
+.featureGroup ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.featureGroup li p { margin: 2px 0 0; font-size: 12.5px; line-height: 1.45; color: #8b98a8; }
+.featureTop { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 13.5px; }
+.featureTop a { color: #cfe8ff; text-decoration: none; font-weight: 600; }
+.featureTop a:hover { text-decoration: underline; }
+.featureTop b { font-weight: 600; color: #e6edf5; }
+.featureTop span { flex: none; font-size: 11.5px; }
+@media (max-width: 720px) {
+  .dialogBackdrop { padding: 0; }
+  .dialog { max-height: 100vh; height: 100%; border-radius: 0; }
+  .dialogBody { grid-template-columns: minmax(0, 1fr); padding: 4px 16px 20px; }
+  .dialogHead { padding: 16px; }
+}
+
 /* Centre: chat over the cloud */
 .center {
   position: relative;
