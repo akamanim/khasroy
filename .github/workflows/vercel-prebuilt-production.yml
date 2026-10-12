@@ -121,4 +121,13 @@ jobs:
           echo "PREBUILT_OUTPUT_READY"
 
       - name: Deploy prebuilt output to production
-        run: npx --yes vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        shell: bash
+        run: |
+          set +e
+          npx --yes vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN" 2>&1 | tee /tmp/deploy.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            # Surface the reason as annotations: they stay readable when the log archive is not.
+            grep -v "$VERCEL_TOKEN" /tmp/deploy.log | tail -15 | while IFS= read -r line; do echo "::error::${line}"; done
+          fi
+          exit "$status"
