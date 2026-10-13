@@ -32,7 +32,11 @@ export type Analysis = {
   plan: { long: { entry: number; sl: number; tp: number }; short: { entry: number; sl: number; tp: number } };
   verdict: string;
   points: { tone: "plus" | "minus" | "note"; text: string }[];
+  /** Notes Khasroy pins to the chart, each with an arrow to a candle (t = 4h candle open, ms). */
+  callouts: Callout[];
 };
+
+export type Callout = { id: string; t: number; price: number; text: string; place: "above" | "below" | "left" };
 
 const pct = (a: number, b: number) => ((a - b) / b) * 100;
 const f = (n: number) => (Math.abs(n) >= 100 ? n.toFixed(1) : Math.abs(n) >= 1 ? n.toFixed(3) : n.toPrecision(4));
@@ -101,7 +105,20 @@ export function analyze(c4h: Candle[], price: number, funding: number | null = n
   }
   points.push({ tone: "note", text: `План, если будет покупка: вход ≈ ${f(plan.long.entry)}, стоп ${f(plan.long.sl)} (выходим с небольшим убытком), цель ${f(plan.long.tp)} (прибыль в 3 раза больше риска). Если продажа: вход ≈ ${f(plan.short.entry)}, стоп ${f(plan.short.sl)}, цель ${f(plan.short.tp)}.` });
 
+  let hiAt = n - CHANNEL;
+  let loAt = n - CHANNEL;
+  for (let k = n - CHANNEL; k < n; k++) {
+    if (c4h[k].h >= c4h[hiAt].h) hiAt = k;
+    if (c4h[k].l <= c4h[loAt].l) loAt = k;
+  }
+  const callouts: Callout[] = [
+    { id: "hi", t: c4h[hiAt].t, price: hi, place: "above", text: `Самая высокая цена за 16 дней: ${f(hi)}. Закроется 4-часовая свеча выше — Хасрой купит.` },
+    { id: "lo", t: c4h[loAt].t, price: lo, place: "below", text: `Самая низкая цена за 16 дней: ${f(lo)}. Закроется ниже — Хасрой продаст.` },
+    { id: "now", t: c4h[n - 1].t, price, place: "left", text: `Сейчас ${f(price)}. До покупки ${upPct.toFixed(1)}% вверх, до продажи ${downPct.toFixed(1)}% вниз.` },
+  ];
+
   return {
+    callouts,
     price,
     breakoutHigh: hi,
     breakoutLow: lo,
@@ -226,4 +243,105 @@ export function equityPath(trades: { time: number; r: number }[], start: number,
   }
   const wins = trades.filter((t) => t.r > 0).length;
   return { path, end: v, maxDrawdownPct: dd * 100, trades: trades.length, winRate: trades.length ? wins / trades.length : 0, totalR: trades.reduce((n, t) => n + t.r, 0) };
+}
+
+// ---------------------------------------------------------------------------------------------
+// trades on the chart: the "long / short position" boxes with Khasroy's comment
+
+export type ChartTrade = {
+  id: string;
+  side: Side;
+  /** Candle open times (ms): the signal candle, the entry and the exit (null while open). */
+  signalT: number;
+  entryT: number;
+  exitT: number | null;
+  entry: number;
+  sl: number;
+  tp: number;
+  exit: number | null;
+  status: "win" | "loss" | "open";
+  live: boolean;
+};
+
+/** The live rule on 4h candles (same simulator as the past check), plus the trade still open. */
+export function chartTrades(c: Candle[]): ChartTrade[] {
+  if (c.length < CHANNEL + 20) return [];
+  const rule = donchian(CHANNEL, STOP_ATR, { kind: "target", rr: RR });
+  const { signals } = rule.build(c);
+  const riskAt = new Map(signals.map((x) => [x.at, x.risk]));
+  const out: ChartTrade[] = [];
+  let free = 0;
+  for (const t of run(c, signals, rule.exit, 4)) {
+    const risk = riskAt.get(t.entryAt - 1) ?? 0;
+    const long = t.side === "long";
+    out.push({
+      id: `h${c[t.entryAt].t}`, side: t.side, signalT: c[t.entryAt - 1].t, entryT: c[t.entryAt].t, exitT: c[t.exitAt].t,
+      entry: t.entry, sl: long ? t.entry - risk : t.entry + risk, tp: long ? t.entry + RR * risk : t.entry - RR * risk,
+      exit: t.exit, status: t.r > 0 ? "win" : "loss", live: false,
+    });
+    free = t.exitAt + 1;
+  }
+  // The simulator stops at a trade that has not finished yet: show it as open.
+  const next = signals.find((x) => x.at >= free && x.at + 1 < c.length);
+  if (next) {
+    const long = next.side === "long";
+    const entry = c[next.at + 1].o;
+    out.push({
+      id: `h${c[next.at + 1].t}`, side: next.side, signalT: c[next.at].t, entryT: c[next.at + 1].t, exitT: null,
+      entry, sl: long ? entry - next.risk : entry + next.risk, tp: long ? entry + RR * next.risk : entry - RR * next.risk,
+      exit: null, status: "open", live: false,
+    });
+  }
+  return out;
+}
+
+/** A journal signal as a chart trade. */
+export function journalTrade(s: JournalSignal): ChartTrade {
+  const entryT = Math.floor(Date.parse(s.created_at) / 144e5) * 144e5;
+  return {
+    id: s.id, side: s.side, signalT: entryT - 144e5, entryT,
+    exitT: s.closed_at && s.status !== "open" ? Math.floor(Date.parse(s.closed_at) / 144e5) * 144e5 : null,
+    entry: s.entry, sl: s.sl, tp: s.tp,
+    exit: s.status === "win" ? s.tp : s.status === "loss" ? s.sl : null,
+    status: s.status === "win" ? "win" : s.status === "open" ? "open" : "loss",
+    live: true,
+  };
+}
+
+const dur = (ms: number) => { const h = Math.max(4, Math.round(ms / 36e5)); return h < 48 ? `${h} ч` : `${Math.round(h / 24)} дн.`; };
+
+/** Khasroy's words about a trade: why he went in, what he expects, and how it went. */
+export function tradeStory(c: Candle[], t: ChartTrade, price: number, now = Date.now()) {
+  const long = t.side === "long";
+  const i = c.findIndex((x) => x.t === t.signalT);
+  let why: string;
+  let whyShort = long ? "цена закрылась выше коридора 16 дней" : "цена закрылась ниже коридора 16 дней";
+  if (i >= CHANNEL) {
+    let hi = -Infinity;
+    let lo = Infinity;
+    for (let k = i - CHANNEL; k < i; k++) { hi = Math.max(hi, c[k].h); lo = Math.min(lo, c[k].l); }
+    const closes = c.slice(0, i + 1).map((x) => x.c);
+    const e50 = ema(closes, 50)[i];
+    const e200 = ema(closes, 200)[i];
+    const trend = e50 > e200 * 1.005 ? "up" : e50 < e200 * 0.995 ? "down" : "flat";
+    why = long
+      ? `4-часовая свеча закрылась на ${f(c[i].c)} — выше самой высокой цены за 16 дней (${f(hi)}). Покупатели пробили потолок, цена может пойти дальше вверх.`
+      : `4-часовая свеча закрылась на ${f(c[i].c)} — ниже самой низкой цены за 16 дней (${f(lo)}). Продавцы пробили пол, цена может пойти дальше вниз.`;
+    whyShort = `${long ? `пробила потолок 16 дней (${f(hi)})` : `пробила пол 16 дней (${f(lo)})`}${trend === (long ? "up" : "down") ? ", по течению рынка" : trend === "flat" ? "" : ", против течения"}`;
+    why += trend === (long ? "up" : "down") ? " Общее направление рынка такое же — сделка по течению." : trend === "flat" ? " Явного общего направления не было." : " Но общее направление рынка обратное — сделка против течения, риск выше.";
+  } else why = long ? "Цена закрылась выше коридора последних 16 дней — Хасрой покупает." : "Цена закрылась ниже коридора последних 16 дней — Хасрой продаёт.";
+  const tpPct = Math.abs(pct(t.tp, t.entry));
+  const slPct = Math.abs(pct(t.sl, t.entry));
+  const expect = `Ждёт ${long ? "рост" : "падение"} до ${f(t.tp)} (${long ? "+" : "−"}${tpPct.toFixed(1)}%). Если цена ${long ? "упадёт" : "вырастет"} до ${f(t.sl)} (${slPct.toFixed(1)}%), выйдет с маленьким убытком. Возможная прибыль в 3 раза больше риска.`;
+  let result: string;
+  let progress = 0;
+  if (t.status === "win") { result = `✅ Прогноз сбылся: через ${dur((t.exitT ?? now) - t.entryT)} цена дошла до цели.`; progress = 1; }
+  else if (t.status === "loss") { result = `❌ Не сбылось: через ${dur((t.exitT ?? now) - t.entryT)} цена ушла к стопу — небольшой убыток.`; progress = -1; }
+  else {
+    const move = long ? price - t.entry : t.entry - price;
+    progress = move >= 0 ? Math.min(1, move / Math.abs(t.tp - t.entry)) : Math.max(-1, move / Math.abs(t.entry - t.sl));
+    result = `⏳ Сделка идёт ${dur(now - t.entryT)}. Сейчас ${move >= 0 ? "+" : "−"}${Math.abs((move / t.entry) * 100).toFixed(2)}% от входа: ${move >= 0 ? `пройдено ${Math.round(progress * 100)}% пути до цели` : `до стопа осталось ${Math.round((1 + progress) * 100)}% пути`}.`;
+  }
+  const expectShort = `цель ${f(t.tp)} (${long ? "+" : "−"}${tpPct.toFixed(1)}%), стоп ${f(t.sl)} (${long ? "−" : "+"}${slPct.toFixed(1)}%)`;
+  return { why, whyShort, expect, expectShort, result, progress };
 }

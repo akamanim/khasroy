@@ -98,6 +98,19 @@ console.log("trading: ok");
   const rule = donchian(100, 1.5, { kind: "target", rr: 3 });
   assert.equal(h.length, run(series, rule.build(series).signals, rule.exit, 4).length);
   const e = equityPath(h, 200, 0.5);
+  // Chart trades: the same entries as the simulator, plus the still-open one; stories in plain words.
+  const { chartTrades, tradeStory } = await import("../lib/trading/analysis.ts");
+  const ct = chartTrades(series);
+  const closedCt = ct.filter((t) => t.status !== "open");
+  assert.deepEqual(closedCt.map((t) => t.entryT), h.map((t) => t.time));
+  assert.deepEqual(closedCt.map((t) => t.status), h.map((t) => (t.r > 0 ? "win" : "loss")));
+  for (const t of ct) {
+    assert.ok(t.side === "long" ? t.sl < t.entry && t.entry < t.tp : t.tp < t.entry && t.entry < t.sl);
+    const st = tradeStory(series, t, series[series.length - 1].c, series[series.length - 1].t);
+    assert.ok(st.why.length > 40 && st.expect.length > 40 && st.result.length > 10 && !/ATR|EMA/.test(st.why + st.expect));
+  }
+  assert.equal(a.callouts.length, 3);
+  assert.ok(a.callouts.every((x) => c4.some((k) => k.t === x.t)));
   assert.equal(e.trades, h.length);
   console.log("trading site: ok");
 }
