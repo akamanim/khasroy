@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isOwnerRequest } from "@/lib/owner-session";
 import { AllModelsLimitedError } from "@/lib/ai/limits";
-import { getReel, listReels, queueReel, saveReel, type Script } from "@/lib/reels/server";
+import { assetUploadUrl, getReel, listAssets, listReels, queueReel, saveReel, type Script } from "@/lib/reels/server";
 import { buildPlan, cleanScript, writeScript } from "@/lib/reels/writer";
 import { checkPlan } from "@/lib/reels/catalog";
 
@@ -23,6 +23,7 @@ export async function GET(request: Request) {
   try {
     const id = new URL(request.url).searchParams.get("id");
     if (id) return NextResponse.json({ job: await getReel(id) });
+    if (new URL(request.url).searchParams.has("assets")) return NextResponse.json({ assets: await listAssets() });
     return NextResponse.json({ jobs: await listReels() });
   } catch (error) {
     return failure(error);
@@ -63,6 +64,11 @@ export async function POST(request: Request) {
       case "render": {
         if (!id) return NextResponse.json({ error: "Нет ролика" }, { status: 400 });
         return NextResponse.json({ job: await queueReel(id) });
+      }
+      case "asset_url": {
+        const ext = typeof body.ext === "string" ? body.ext : "";
+        const name = typeof body.name === "string" ? body.name : "";
+        return NextResponse.json(await assetUploadUrl(ext, name));
       }
       case "save": {
         const script = body.script && typeof body.script === "object" ? (cleanScript(body.script as Record<string, unknown>) as Script) : undefined;

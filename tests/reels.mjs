@@ -136,3 +136,20 @@ assert.deepEqual(creative.plan.scenes[1].params.messages, ["Цена?", "Ест�
 assert.deepEqual(creative.plan.scenes[3].params.after, ["Ответ сразу"]);
 assert.equal(creative.plan.theme, "acid");
 console.log("reels creative: ok");
+
+// The storyboard maps plan scenes back to script scenes.
+{
+  const { planSources } = await import("../lib/reels/compose.ts");
+  const sc = cleanScript({ scenes: [{ kind: "надпись", text: "А" }, { kind: "товар", text: "без имени" }, { kind: "удар", text: "Да" }] });
+  const plan = scriptToPlan(sc, 1).plan;
+  assert.deepEqual(planSources(sc), [0, 2, -1]);
+  assert.equal(plan.scenes.length, 3);
+  const photo = scriptToPlan(cleanScript({ scenes: [{ kind: "фото", text: "Наш *цех*", image: "https://x.supabase.co/a.jpg" }] }), 2, { look: "paper", bpm: 100 });
+  assert.equal(photo.plan.scenes[0].tool, "photo");
+  assert.equal(photo.plan.scenes[0].params.variant, "card");
+  assert.equal(photo.plan.bpm, 100);
+  const track = checkPlan({ ...photo.plan, music: "track", track: "https://x.supabase.co/song.mp3", trackOffset: 12.5 });
+  assert.equal(track.plan.music, "track");
+  assert.equal(track.plan.trackOffset, 12.5);
+  console.log("reels sources/photo/track: ok");
+}

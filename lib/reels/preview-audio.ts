@@ -314,11 +314,28 @@ function sfx(name: string, length: number, r: Rng): Float32Array {
 const GAINS: Record<string, number> = { whoosh: 0.55, impact: 0.9, glitch: 0.45, pop: 0.5, click: 0.6, tick: 0.4, notify: 0.6, riser: 0.5, voice: 0.5 };
 
 /** Mono soundtrack samples at 22 050 Hz: music (unless style is "off") plus effects on the cues. */
-export function soundtrack(duration: number, cues: Cue[], opts: { style?: string; bpm?: number; seed?: number; outroAt?: number; music?: boolean }) {
+export function soundtrack(
+  duration: number,
+  cues: Cue[],
+  opts: { style?: string; bpm?: number; seed?: number; outroAt?: number; music?: boolean; track?: Float32Array },
+) {
   const style = opts.style && STYLES[opts.style] ? opts.style : "pulse";
   const bpm = opts.bpm || STYLES[style].bpm;
   const seed = opts.seed ?? 1;
-  const mix = opts.music === false ? new Float32Array(len(duration)) : music(duration, style, bpm, seed, opts.outroAt).map((v) => v * 0.75);
+  let mix: Float32Array;
+  if (opts.track && opts.track.length > SR) {
+    // The owner's track (already at 22 050 Hz, from the chosen offset): trimmed, faded out, levelled.
+    mix = new Float32Array(len(duration));
+    mix.set(opts.track.subarray(0, mix.length));
+    let peak = 1e-6;
+    for (const v of mix) peak = Math.max(peak, Math.abs(v));
+    const fade = Math.min(mix.length, len(1.2));
+    for (let i = 0; i < mix.length; i++) {
+      mix[i] = (mix[i] / peak) * 0.6;
+      if (i > mix.length - fade) mix[i] *= (mix.length - i) / fade;
+    }
+  } else if (opts.music === false) mix = new Float32Array(len(duration));
+  else mix = music(duration, style, bpm, seed, opts.outroAt).map((v) => v * 0.75);
   const r = rng(seed + 99);
   for (const c of cues) add(mix, sfx(c.sfx, c.len ?? 0.5, r), c.t, GAINS[c.sfx] ?? 0.5);
   if (opts.outroAt) add(mix, sfx("impact", 1, r), opts.outroAt, 0.8);
@@ -332,4 +349,37 @@ export function soundtrack(duration: number, cues: Cue[], opts: { style?: string
   }
   for (let i = 0; i < mix.length; i++) mix[i] = (mix[i] / peak) * 0.85;
   return { samples: mix, sampleRate: SR };
+}
+
+export const PREVIEW_RATE = SR;
+
+/**
+ * Tempo of a music track (mono samples): onset strength from the energy envelope, then the
+ * autocorrelation peak between 70 and 170 BPM. Good enough to snap cuts to the beat.
+ */
+export function estimateBpm(samples: Float32Array, rate: number): number {
+  const hop = Math.round(rate / 100);
+  const frames = Math.floor(samples.length / hop);
+  if (frames < 400) return 120;
+  const energy = new Float32Array(frames);
+  for (let f = 0; f < frames; f++) {
+    let e = 0;
+    for (let i = f * hop; i < (f + 1) * hop; i++) e += samples[i] * samples[i];
+    energy[f] = Math.log(1e-6 + e);
+  }
+  const onset = new Float32Array(frames);
+  for (let f = 1; f < frames; f++) onset[f] = Math.max(0, energy[f] - energy[f - 1]);
+  let best = 120;
+  let bestScore = -1;
+  for (let bpm = 70; bpm <= 170; bpm += 0.5) {
+    const lag = (60 / bpm) * 100;
+    let score = 0;
+    for (let f = 0; f + lag * 2 < frames; f++) {
+      const a = Math.round(f + lag);
+      const b = Math.round(f + lag * 2);
+      score += onset[f] * (onset[a] + 0.5 * onset[b]);
+    }
+    if (score > bestScore) { bestScore = score; best = bpm; }
+  }
+  return Math.round(best);
 }

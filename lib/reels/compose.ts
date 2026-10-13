@@ -17,6 +17,8 @@ export type ScriptScene = {
   question?: string;
   items?: string[];
   before?: string[];
+  /** The owner's own picture (https), for «фото», «товар», «экран». */
+  image?: string;
   name?: string;
   price?: string;
   section?: string;
@@ -48,6 +50,7 @@ export const KINDS: Record<string, { tool: string; hint: string }> = {
   "ночь": { tool: "night", hint: "часы бегут через ночь до рассвета: text («Пока вы *спите*»), label" },
   "смена слов": { tool: "swap", hint: "«ИИнна» и прокручивающиеся глаголы: text — начало, items — 2–5 слов" },
   "реакция": { tool: "burst", hint: "слово с салютом из сердечек и звёзд: text (1–2 слова), label" },
+  "фото": { tool: "photo", hint: "своё фото или скриншот владельца: image, text — надпись" },
   "концовка": { tool: "outro", hint: "логотип и призыв; text — призыв" },
 };
 
@@ -79,6 +82,8 @@ export function cleanScript(raw: Record<string, unknown>): Script {
       if (items?.length) scene.items = items;
       const before = Array.isArray(s.before) ? s.before.map((i) => str(i, 40)).filter(Boolean).slice(0, 3) : undefined;
       if (before?.length) scene.before = before;
+      const image = str(s.image, 600);
+      if (/^https:\/\/[^\s"'<>]+$/iu.test(image)) scene.image = image;
       for (const key of ["number", "label", "question", "name", "price", "section", "title", "body"] as const) {
         const v = str(s[key], 80);
         if (v) scene[key] = v;
@@ -142,7 +147,11 @@ export function pickStyle(script: Script, rand: () => number): string {
  * Turns the script into a plan by fixed rules and runs the plan checker over it. `seed` makes each
  * build look different (layouts, transitions, cameras, music) while staying reproducible.
  */
-export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts: { style?: string; look?: string } = {}): Checked {
+export function scriptToPlan(
+  script: Script,
+  seed = hashSeed(script.title),
+  opts: { style?: string; look?: string; bpm?: number; theme?: string; logo?: string } = {},
+): Checked {
   const rand = random(seed);
   const look = LOOKS.find((l) => l.id === opts.look) ?? LOOKS[seed % LOOKS.length];
   const pick = <T,>(items: T[], avoid?: T): T => {
@@ -152,7 +161,8 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
   };
   const auto = opts.look ? look.style : pickStyle(script, rand);
   const style = opts.style && STYLE_BPM[opts.style] ? opts.style : auto;
-  const bpm = STYLE_BPM[style];
+  // An own music track brings its own tempo; cuts snap to it.
+  const bpm = opts.bpm && opts.bpm >= 70 && opts.bpm <= 170 ? Math.round(opts.bpm) : STYLE_BPM[style];
   const beat = 60 / bpm;
   // Scene lengths snap to whole beats, so every cut lands on the music.
   const onBeat = (sec: number, minBeats: number) => Math.round(Math.max(minBeats, Math.round(sec / beat)) * beat * 100) / 100;
@@ -170,11 +180,7 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
   let lastTool = "";
 
   // Scenes that would come out empty are dropped instead of drawing a placeholder.
-  const list = script.scenes.filter((s) => {
-    if (s.kind === "товар") return Boolean(s.name);
-    if (["надпись", "удар", "сомнение"].includes(s.kind)) return Boolean(plain(s.text || s.what));
-    return true;
-  });
+  const list = keptScenes(script).map((i) => script.scenes[i]);
   const screens = list.filter((s) => s.kind === "экран").length;
   let screenNo = 0;
   if (!list.length || list[list.length - 1].kind !== "концовка") {
@@ -258,12 +264,12 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
         break;
       case "product":
         bg = pickBg(["cream", "black"]);
-        params = { headline: text, name: s.name || "Товар", price: s.price ?? "", caption: s.label ?? "" };
+        params = { headline: text, name: s.name || "Товар", price: s.price ?? "", caption: s.label ?? "", ...(s.image ? { image: s.image } : {}) };
         break;
       case "screen":
         bg = "black";
         screenNo += 1;
-        params = { title: s.section || plain(text), subtitle: s.label ?? "", step: `${String(screenNo).padStart(2, "0")} / ${String(screens).padStart(2, "0")}`, note: s.question ?? "" };
+        params = { title: s.section || plain(text), subtitle: s.label ?? "", step: `${String(screenNo).padStart(2, "0")} / ${String(screens).padStart(2, "0")}`, note: s.question ?? "", ...(s.image ? { image: s.image } : {}) };
         break;
       case "badge":
         bg = "cream";
@@ -301,12 +307,21 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
         bg = pickBg(["violet", "black"]);
         params = { text: plain(text) || "Заказ!", label: s.label ?? "", shape: pick(["mix", "heart", "star", "spark"]) };
         break;
+      case "photo":
+        bg = pickBg(["black", "cream"]);
+        params = {
+          image: s.image ?? "",
+          text,
+          label: s.label ?? "",
+          variant: { night: "phone", paper: "card", punch: "full", acid: pick(["full", "card"]), cinema: "full" }[look.id] ?? "full",
+        };
+        break;
       case "outro":
         bg = lastBg === "violet" ? "black" : "violet";
-        params = { brand: "ИИнна", cta: plain(text) || "Ссылка в профиле", line: s.label || "" };
+        params = { brand: "ИИнна", cta: plain(text) || "Ссылка в профиле", line: s.label || "", ...(opts.logo || s.image ? { logo: opts.logo || s.image } : {}) };
         break;
     }
-    if (["headline", "slam", "glitch", "counter", "chat", "choice", "list", "product", "outro", "typewriter", "compare", "ticker", "pile", "swap", "burst"].includes(tool)) params.bg = bg;
+    if (["headline", "slam", "glitch", "counter", "chat", "choice", "list", "product", "outro", "typewriter", "compare", "ticker", "pile", "swap", "burst", "photo"].includes(tool)) params.bg = bg;
     // Cuts for hard hits, varied moves for the rest, an iris into the ending.
     let transition = "cut";
     if (i > 0) {
@@ -321,7 +336,28 @@ export function scriptToPlan(script: Script, seed = hashSeed(script.title), opts
     const minBeats = tool === "slam" ? 2 : tool === "glitch" ? 3 : 4;
     scenes.push({ tool, duration: onBeat(s.seconds, minBeats), transition, camera: pick(look.cameras), params });
   });
-  return checkPlan({ title: script.title, scenes, style, bpm, seed, theme: look.theme });
+  return checkPlan({ title: script.title, scenes, style, bpm, seed, theme: opts.theme || look.theme });
+}
+
+/** Script scenes that become plan scenes (empty ones are dropped). */
+function keptScenes(script: Script): number[] {
+  const out: number[] = [];
+  script.scenes.forEach((s, i) => {
+    if (s.kind === "товар" && !s.name) return;
+    if (["надпись", "удар", "сомнение"].includes(s.kind) && !plain(s.text || s.what)) return;
+    out.push(i);
+  });
+  return out;
+}
+
+/**
+ * For each plan scene, the index of the script scene it came from (-1 for the ending added
+ * automatically). Lets the studio edit the script from the storyboard.
+ */
+export function planSources(script: Script): number[] {
+  const kept = keptScenes(script);
+  const last = kept.length ? script.scenes[kept[kept.length - 1]] : null;
+  return last && last.kind === "концовка" ? kept : [...kept, -1];
 }
 
 /** Stable seed from text, used when the caller does not pass one. */
