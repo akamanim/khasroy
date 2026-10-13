@@ -22,6 +22,10 @@ on:
         description: "Close look at the finalists (1) instead of the full search"
         required: false
         default: ""
+      interval:
+        description: "Candle interval to download (1h default; 1m for the minute tests)"
+        required: false
+        default: "1h"
       script:
         description: "research (default) or target (8-month $200→$600 search)"
         required: false
@@ -49,7 +53,7 @@ jobs:
           for sym in $SYMBOLS; do
             ym="$FROM"
             while [[ "$ym" < "$last" || "$ym" == "$last" ]]; do
-              url="https://data.binance.vision/data/futures/um/monthly/klines/$sym/1h/$sym-1h-$ym.zip"
+              url="https://data.binance.vision/data/futures/um/monthly/klines/$sym/${{ inputs.interval }}/$sym-${{ inputs.interval }}-$ym.zip"
               curl -sfL --retry 3 -o "data/z.zip" "$url" && unzip -oq data/z.zip -d data && rm -f data/z.zip || echo "::warning::no data $sym $ym"
               ym=$(date -u -d "$ym-01 +1 month" +%Y-%m)
             done
@@ -60,4 +64,5 @@ jobs:
           DATA_DIR: data
           SPLIT: ${{ inputs.split }}T00:00:00Z
           FOCUS: ${{ inputs.focus }}
+          INTERVAL: ${{ inputs.interval }}
         run: node --max-old-space-size=6000 --experimental-strip-types scripts/trading-${{ inputs.script || 'research' }}.mjs
