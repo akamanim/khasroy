@@ -81,8 +81,9 @@ def main() -> int:
         if plan.get("music", "on") != "off":
             from audio import soundtrack  # noqa: E402  (sibling module)
             outro = next((c["cut"] for c in cuts if c["tool"] == "outro"), None)
+            track = load_track(plan, duration) if plan.get("music") == "track" else None
             wav = soundtrack(duration, cues, style=plan.get("style", "pulse"), bpm=plan.get("bpm"),
-                             seed=int(plan.get("seed", 1)), outro_at=outro, path=args.out + ".wav")
+                             seed=int(plan.get("seed", 1)), outro_at=outro, path=args.out + ".wav", track=track)
             code = subprocess.call(["ffmpeg", "-v", "error", "-y", "-i", silent, "-i", wav, "-c:v", "copy", "-c:a", "aac",
                                     "-b:a", "192k", "-ar", "48000", "-af", "loudnorm=I=-14:TP=-1.5:LRA=9", "-shortest", "-movflags", "+faststart", args.out])
             pathlib.Path(wav).unlink(missing_ok=True)
@@ -91,6 +92,30 @@ def main() -> int:
             pathlib.Path(silent).rename(args.out)
         print(f"{args.out}: {frames} frames, {duration:.2f}s, {len(cues)} sound cues")
         return code
+
+
+def load_track(plan, duration):
+    """The owner's own music: downloaded and decoded with ffmpeg to mono 44.1 kHz, from the chosen offset."""
+    import tempfile
+    import urllib.request
+
+    import numpy as np
+
+    url = str(plan.get("track") or "")
+    if not url.startswith("https://"):
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = pathlib.Path(tmp) / "track"
+            with urllib.request.urlopen(url, timeout=60) as r:
+                src.write_bytes(r.read(80 * 1024 * 1024))
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(float(plan.get("trackOffset") or 0)), "-i", str(src),
+                                  "-t", f"{duration + 0.5:.2f}", "-ac", "1", "-ar", "44100", "-f", "f32le", "-"],
+                                 capture_output=True, check=True).stdout
+        return np.frombuffer(raw, dtype=np.float32).astype(np.float64)
+    except Exception as error:  # a broken track must not cost the whole video
+        print(f"track not used: {error}", file=sys.stderr)
+        return None
 
 
 if __name__ == "__main__":

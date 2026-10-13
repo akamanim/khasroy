@@ -16,6 +16,12 @@
       const plan = JSON.parse(decodeURIComponent(location.hash.slice(1)));
       Promise.all([...document.fonts].map((f) => f.load())).then(() => {
         const total = reel.load(plan);
+        // ?still=<seconds>: one frame for a storyboard thumbnail, no playback.
+        const still = new URLSearchParams(location.search).get("still");
+        if (still !== null) {
+          reel.seek(Math.min(total - 0.01, Math.max(0, Number(still) || 0)));
+          return;
+        }
         const t0 = performance.now();
         const loop = () => { reel.seek(((performance.now() - t0) / 1000) % total); requestAnimationFrame(loop); };
         loop();

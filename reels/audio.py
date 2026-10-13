@@ -271,10 +271,20 @@ def sfx(name: str, length: float, rng) -> np.ndarray:
 
 
 def soundtrack(duration: float, cues: list[dict], style: str = "pulse", bpm: float | None = None, seed: int = 1,
-               outro_at: float | None = None, path: str = "music.wav") -> str:
+               outro_at: float | None = None, path: str = "music.wav", track: np.ndarray | None = None) -> str:
     rng = np.random.default_rng(seed + 99)
     bpm = bpm or STYLES.get(style, STYLES["pulse"])["bpm"]
-    m = music(duration, style, bpm, seed, outro_at)
+    if track is not None and len(track) > SR:
+        # The owner's track instead of generated music: trimmed, faded out, at the level of the generated one.
+        n = int(duration * SR)
+        m = np.zeros(n)
+        m[: min(n, len(track))] = track[:n]
+        peak = np.max(np.abs(m)) or 1
+        m = m / peak * 0.8
+        fade = min(n, int(1.2 * SR))
+        m[-fade:] *= np.linspace(1, 0, fade)
+    else:
+        m = music(duration, style, bpm, seed, outro_at)
     fx = np.zeros_like(m)
     gains = {"whoosh": 0.55, "impact": 0.9, "glitch": 0.45, "pop": 0.5, "click": 0.6, "tick": 0.4, "notify": 0.6, "riser": 0.5, "voice": 0.5}
     for c in cues:

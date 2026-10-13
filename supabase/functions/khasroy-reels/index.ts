@@ -191,6 +191,47 @@ async function owner(action: string, body: Record<string, unknown>, ownerHash: s
     return json({ job: Array.isArray(rows) && rows[0] ? rows[0] : null });
   }
 
+  // Own material for reels: screenshots, product photos, a logo, a music track.
+  // The browser uploads straight to storage with a one-time signed URL; files live under the owner's folder.
+  if (action === "asset_url") {
+    const types: Record<string, string> = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp",
+      mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg",
+    };
+    const ext = text(body.ext, 5).toLowerCase();
+    if (!types[ext]) return json({ error: "bad_type" }, 400);
+    const kind = types[ext].startsWith("audio") ? "audio" : "image";
+    const name = text(body.name, 60).replace(/[^\p{L}\p{N} ._-]/gu, "").trim() || kind;
+    const path = `assets/${ownerHash.slice(0, 16)}/${kind}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext === "jpeg" ? "jpg" : ext}`;
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/upload/sign/${BUCKET}/${path}`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
+      body: "{}",
+    });
+    if (!res.ok) throw new Error(`sign ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const signed = (await res.json()) as { url: string };
+    return json({ uploadUrl: `${SUPABASE_URL}/storage/v1${signed.url}`, publicUrl: `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${path}`, kind, name, contentType: types[ext] });
+  }
+
+  if (action === "assets") {
+    const out: Array<{ url: string; kind: string; name: string; created_at: string }> = [];
+    for (const kind of ["image", "audio"]) {
+      const prefix = `assets/${ownerHash.slice(0, 16)}/${kind}`;
+      const res = await fetch(`${SUPABASE_URL}/storage/v1/object/list/${BUCKET}`, {
+        method: "POST",
+        headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
+        body: JSON.stringify({ prefix, limit: 60, sortBy: { column: "created_at", order: "desc" } }),
+      });
+      if (!res.ok) continue;
+      const files = (await res.json()) as Array<{ name: string; created_at: string; id: string | null }>;
+      for (const f of files) {
+        if (!f.id) continue;
+        out.push({ url: `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${prefix}/${f.name}`, kind, name: f.name, created_at: f.created_at });
+      }
+    }
+    return json({ assets: out });
+  }
+
   if (action === "list") {
     const rows = await (await db(`khasroy_reel_jobs?owner_hash=eq.${ownerHash}&select=${LIST_ROW}&order=updated_at.desc&limit=20`)).json();
     return json({ jobs: rows });
@@ -199,7 +240,7 @@ async function owner(action: string, body: Record<string, unknown>, ownerHash: s
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "GET") return json({ ok: true, service: "khasroy-reels", version: 1 });
+  if (request.method === "GET") return json({ ok: true, service: "khasroy-reels", version: 2 });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   try {
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;

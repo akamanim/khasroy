@@ -324,6 +324,22 @@ export const TOOLS: ToolSpec[] = [
     },
   },
   {
+    name: "photo",
+    shelf: "proof",
+    title: "Фото",
+    use: "Своё фото или скриншот владельца: на весь экран с медленным наездом, карточкой-снимком или в телефоне.",
+    duration: { min: 1.6, default: 2.8, max: 4.6 },
+    bg: ["black", "cream", "violet"],
+    params: {
+      image: { type: "url", hint: "фото (https)" },
+      text: { type: "text", max: 40, maxLines: 3, hint: "надпись; *слово* — акцент" },
+      label: { type: "text", max: 32, hint: "подпись" },
+      variant: { type: "enum", values: ["full", "card", "phone"], default: "full", hint: "на весь экран / карточка / в телефоне" },
+      focus: { type: "enum", values: ["center", "top", "bottom"], default: "center", hint: "какую часть фото держать в кадре" },
+      bg: BG(["black", "cream", "violet"], "black"),
+    },
+  },
+  {
     name: "outro",
     shelf: "brand",
     title: "Концовка",
@@ -334,6 +350,7 @@ export const TOOLS: ToolSpec[] = [
       brand: { type: "text", max: 10, hint: "название" },
       line: { type: "text", max: 36, hint: "строка под логотипом" },
       cta: { type: "text", max: 24, hint: "кнопка «Ссылка в профиле»" },
+      logo: { type: "url", hint: "логотип (https)" },
       bg: BG(["violet", "black", "cream"], "violet"),
     },
   },
@@ -365,7 +382,18 @@ export function catalogForPrompt(shelves?: Shelf[]): string {
 // Plan validation: the model makes mistakes; the checker fixes what it can and reports the rest.
 
 export type Scene = { tool: string; duration: number; transition: string; camera?: string; params: Record<string, unknown> };
-export type Plan = { title: string; scenes: Scene[]; style?: string; bpm?: number; seed?: number; music?: "on" | "off"; theme?: string };
+export type Plan = {
+  title: string;
+  scenes: Scene[];
+  style?: string;
+  bpm?: number;
+  seed?: number;
+  /** "track": the owner's own music file instead of the generated soundtrack. */
+  music?: "on" | "off" | "track";
+  track?: string;
+  trackOffset?: number;
+  theme?: string;
+};
 export type Checked = { plan: Plan; fixes: string[]; errors: string[]; seconds: number };
 
 /** Breaks a too-long line at spaces so it fits; keeps the model's own line breaks. */
@@ -519,6 +547,15 @@ export function checkPlan(raw: unknown): Checked {
   const seed = Number(input.seed);
   if (Number.isInteger(seed) && seed >= 0) plan.seed = seed % 1_000_000;
   if (input.music === "off") plan.music = "off";
+  if (input.music === "track") {
+    const track = typeof input.track === "string" ? input.track.trim() : "";
+    if (/^https:\/\/[^\s"'<>]+$/iu.test(track)) {
+      plan.music = "track";
+      plan.track = track;
+      const offset = Number(input.trackOffset);
+      if (Number.isFinite(offset) && offset > 0) plan.trackOffset = Math.min(600, Math.round(offset * 100) / 100);
+    } else fixes.push("музыка: ссылка на трек не подошла, оставил сгенерированную");
+  }
   if (typeof input.theme === "string" && (THEMES as readonly string[]).includes(input.theme)) plan.theme = input.theme;
   return { plan, fixes, errors, seconds };
 }

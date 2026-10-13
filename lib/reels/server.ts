@@ -56,3 +56,14 @@ export async function getReel(id: string): Promise<ReelJob | null> {
 export async function listReels(): Promise<ReelListItem[]> {
   return (await call<{ jobs: ReelListItem[] }>("list")).jobs ?? [];
 }
+
+export type ReelAsset = { url: string; kind: "image" | "audio"; name: string; created_at: string };
+
+/** A one-time signed URL the studio uploads an image or a music track to, straight from the browser. */
+export async function assetUploadUrl(ext: string, name: string): Promise<{ uploadUrl: string; publicUrl: string; kind: string; contentType: string }> {
+  return call("asset_url", { ext, name });
+}
+
+export async function listAssets(): Promise<ReelAsset[]> {
+  return (await call<{ assets: ReelAsset[] }>("assets")).assets ?? [];
+}

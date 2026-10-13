@@ -34,6 +34,7 @@
     night: () => [{ at: 0.2, sfx: "riser", len: 1.4 }, { at: 1.7, sfx: "notify" }],
     swap: (p) => Array.from({ length: Math.min(5, Array.isArray(p.words) ? p.words.length : 3) }, (_, i) => ({ at: 0.45 + i * 0.5, sfx: "tick" })),
     burst: () => [{ at: 0.3, sfx: "impact" }, { at: 0.45, sfx: "pop" }, { at: 0.6, sfx: "pop" }],
+    photo: (p) => [{ at: 0.05, sfx: p.variant === "card" ? "whoosh" : "riser", len: 0.6 }],
   };
   const R = (name, tool) =>
     window.reel.register(name, {
@@ -740,6 +741,8 @@
     build(p) {
       const node = el("div", null, { position: "absolute", inset: "0" });
       const name = String(p.brand || "ИИнна");
+      const logo = p.logo ? el("img", null, { position: "absolute", left: "50%", top: "420px", width: "220px", height: "220px", marginLeft: "-110px", objectFit: "contain", borderRadius: "40px" }) : null;
+      if (logo) { logo.src = String(p.logo); }
       const wrap = el("div", "display black", { position: "absolute", left: "0", right: "0", top: "640px", textAlign: "center", fontSize: px(Math.min(260, 900 / (name.length * 0.62))), textTransform: "none", letterSpacing: "-0.04em", whiteSpace: "nowrap" });
       const letters = Array.from(name).map((ch) => {
         const s = el("span", "word", null, esc(ch));
@@ -753,6 +756,7 @@
       if (line) node.appendChild(line);
       const cta = el("div", "pill", { position: "absolute", left: "50%", top: "1080px", padding: "34px 64px", fontSize: "44px", background: p.bg === "cream" ? "var(--ink)" : "#fff", color: p.bg === "cream" ? "#fff" : "var(--ink)", transform: "translateX(-50%)", whiteSpace: "nowrap" }, esc(p.cta || "Ссылка в профиле"));
       node.appendChild(cta);
+      if (logo) node.appendChild(logo);
       return {
         node,
         update(t) {
@@ -763,6 +767,7 @@
             s.style.opacity = String(clamp((t - 0.05 - i * 0.06) / 0.12));
           });
           if (line) line.style.opacity = String(prog(t, 0.6, 0.4) * 0.85);
+          if (logo) { const lp = prog(t, 0, 0.5, ease.back); logo.style.transform = `scale(${lp})`; logo.style.opacity = String(clamp(t / 0.15)); }
           const cp = prog(t, 0.8, 0.6, ease.spring);
           cta.style.opacity = String(prog(t, 0.8, 0.15));
           cta.style.transform = `translateX(-50%) translateY(${(1 - cp) * 40}px) scale(${lerp(0.85, 1, cp)})`;
@@ -1019,6 +1024,64 @@
             d.style.opacity = String(t > 0.32 + delay ? 1 : 0);
           });
           if (label) label.style.opacity = String(prog(t, 0.6, 0.3));
+        },
+      };
+    },
+  });
+
+  // 22. Photo — the owner's own picture: full screen with a slow zoom, a tilted print, or inside a phone.
+  R("photo", {
+    duration: 2.8,
+    bg: "black",
+    build(p) {
+      const node = el("div", null, { position: "absolute", inset: "0", overflow: "hidden" });
+      const variant = p.variant || "full";
+      const src = String(p.image || "");
+      const img = (fit) => src
+        ? `<img src="${esc(src)}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:${fit};object-position:${esc(p.focus || "center")}" />`
+        : `<div style="position:absolute;inset:0;display:grid;place-items:center;background:repeating-linear-gradient(45deg,#1b1b1f 0 24px,#222228 24px 48px);color:#666;font:600 34px Inter">фото</div>`;
+      let frame;
+      let device = null;
+      if (variant === "card") {
+        frame = el("div", null, { position: "absolute", left: "120px", right: "120px", top: "380px", height: "1060px", background: "#fff", padding: "28px 28px 140px", borderRadius: "18px", boxShadow: "0 50px 140px rgba(0,0,0,.45)" });
+        const inner = el("div", null, { position: "absolute", left: "28px", right: "28px", top: "28px", bottom: "140px", overflow: "hidden", borderRadius: "8px", background: "#ddd" }, img("cover"));
+        frame.appendChild(inner);
+        node.appendChild(frame);
+      } else if (variant === "phone") {
+        const content = el("div", null, { background: "#000" }, img("cover"));
+        device = phone(content, { top: 520 });
+        node.appendChild(device.node);
+      } else {
+        frame = el("div", null, { position: "absolute", inset: "-4%", transformOrigin: "50% 45%" }, img("cover"));
+        node.appendChild(frame);
+        node.appendChild(el("div", null, { position: "absolute", inset: "0", background: "linear-gradient(180deg, rgba(0,0,0,.35) 0%, transparent 30%, transparent 55%, rgba(0,0,0,.75) 100%)" }));
+      }
+      const text = String(p.text || "");
+      const head = text ? kinetic(text, "display black", {
+        position: "absolute", left: "80px", right: "80px",
+        ...(variant === "full" ? { bottom: "330px", color: "#fff" } : { top: "190px" }),
+        fontSize: px(headlineSize(text, variant === "full" ? 150 : 120)),
+      }) : null;
+      if (head) node.appendChild(head.block);
+      const label = p.label ? labelNode(p.label, variant === "card"
+        ? { position: "absolute", left: "0", right: "0", top: "1340px", textAlign: "center", color: "#222", zIndex: "2" }
+        : variant === "phone"
+          ? { position: "absolute", left: "84px", top: "400px", opacity: "0.85" }
+          : { position: "absolute", left: "84px", bottom: "270px", color: "#fff", opacity: "0.85" }) : null;
+      if (label) node.appendChild(label);
+      return {
+        node,
+        update(t, dur) {
+          if (variant === "full") {
+            const z = prog(t, 0, dur + 0.6, ease.linear);
+            frame.style.transform = `scale(${lerp(1.12, 1.0, z)}) translate(${lerp(-1.5, 1.5, z)}%, ${lerp(1, -1, z)}%)`;
+            frame.style.filter = t < 0.35 ? `brightness(${lerp(1.8, 1, t / 0.35)})` : "none";
+          } else if (variant === "card") {
+            const q = prog(t, 0.05, 0.7, ease.spring);
+            frame.style.transform = `translateY(${(1 - q) * 900}px) rotate(${lerp(-14, -3, q)}deg)`;
+          } else if (device) device.update(t, dur);
+          if (head) revealWords(head.words, t, variant === "full" ? 0.35 : 0.1, 0.09);
+          if (label) label.style.opacity = String(prog(t, 0.8, 0.4) * 0.9);
         },
       };
     },
