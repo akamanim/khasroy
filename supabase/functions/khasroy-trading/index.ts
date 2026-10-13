@@ -259,7 +259,10 @@ Deno.serve(async (req) => {
       // Public: shows whether Binance answers from here, nothing else.
       const t0 = Date.now();
       const c = await klines("BTCUSDT", "4h", 5).catch((e) => String(e));
-      return json({ ok: Array.isArray(c), ms: Date.now() - t0, sample: Array.isArray(c) ? c[c.length - 1] : c, telegram: Boolean(TG) });
+      // Which bot the token belongs to and whether messages are waiting (public facts about the bot).
+      const me = TG ? ((await tg("getMe", {}))?.result as { username?: string } | undefined) : undefined;
+      const hook = TG ? ((await tg("getWebhookInfo", {}))?.result as { url?: string; pending_update_count?: number } | undefined) : undefined;
+      return json({ ok: Array.isArray(c), ms: Date.now() - t0, sample: Array.isArray(c) ? c[c.length - 1] : c, telegram: Boolean(TG), bot: me?.username ?? null, webhook: Boolean(hook?.url), pending: hook?.pending_update_count ?? null });
     }
     const token = req.headers.get("x-khasroy-trading-token") ?? "";
     const check = await (await db("rpc/khasroy_trading_token_ok", { method: "POST", body: JSON.stringify({ token }) })).json();
