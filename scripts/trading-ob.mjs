@@ -34,7 +34,7 @@ const symbols = [...new Set(readdirSync(DATA_DIR).filter((f) => f.endsWith(".csv
 const h1 = Object.fromEntries(symbols.map((s) => [s, load(s)]));
 const frames = { "1h": { bars: h1, hours: 1 }, "4h": { bars: Object.fromEntries(symbols.map((s) => [s, aggregate(h1[s], 4, 3_600_000)])), hours: 4 } };
 
-function simulate(c, hours, { L, K, W, rr, trend }) {
+function simulate(c, hours, { L, K, W, rr, trend, fvg = false, vol = false, flip = false }) {
   const a = atr(c);
   const e200 = ema(c.map((x) => x.c), 200);
   const trades = [];
@@ -52,25 +52,40 @@ function simulate(c, hours, { L, K, W, rr, trend }) {
     if (ob < 0) continue;
     const move = bull ? c[i].c - c[ob].l : c[ob].h - c[i].c;
     if (move < K * a[i]) continue;
+    // "Good" order block: the impulse left a fair value gap (candle j-1 and j+1 do not overlap).
+    if (fvg) {
+      let gap = false;
+      for (let j = ob + 2; j <= i; j++) if (bull ? c[j - 2].h < c[j].l : c[j - 2].l > c[j].h) { gap = true; break; }
+      if (!gap) continue;
+    }
+    if (vol) {
+      let avg = 0;
+      for (let k = i - 20; k < i; k++) avg += c[k].v / 20;
+      let impulse = 0;
+      for (let k = ob + 1; k <= i; k++) impulse = Math.max(impulse, c[k].v);
+      if (impulse < 1.5 * avg) continue;
+    }
     const entry = bull ? c[ob].h : c[ob].l;
-    const stop = bull ? c[ob].l - 0.2 * a[i] : c[ob].h + 0.2 * a[i];
-    const R = Math.abs(entry - stop);
+    const R = Math.abs(entry - (bull ? c[ob].l - 0.2 * a[i] : c[ob].h + 0.2 * a[i]));
     if (!(R > 0)) continue;
-    const tp = bull ? entry + rr * R : entry - rr * R;
+    // Direction of the trade: with the impulse (bounce off the block) or flipped (through the block).
+    const up = flip ? !bull : bull;
+    const stop = up ? entry - R : entry + R;
+    const tp = up ? entry + rr * R : entry - rr * R;
     // Wait for the limit fill.
     let fill = -1;
     for (let k = i + 1; k < Math.min(c.length, i + 1 + W); k++) {
-      if (bull ? c[k].h >= tp : c[k].l <= tp) break;              // ran away first
+      if (bull ? c[k].h >= entry + rr * R : c[k].l <= entry - rr * R) break; // ran away first
       if (bull ? c[k].l <= entry : c[k].h >= entry) { fill = k; break; }
     }
     if (fill < 0) continue;
     let exitAt = -1, exitPrice = NaN, win = false;
     for (let k = fill; k < c.length; k++) {
-      if (bull ? c[k].l <= stop : c[k].h >= stop) { exitAt = k; exitPrice = bull ? Math.min(stop, c[k].o) : Math.max(stop, c[k].o); break; }
-      if (k > fill && (bull ? c[k].h >= tp : c[k].l <= tp)) { exitAt = k; exitPrice = tp; win = true; break; }
+      if (up ? c[k].l <= stop : c[k].h >= stop) { exitAt = k; exitPrice = up ? Math.min(stop, c[k].o) : Math.max(stop, c[k].o); break; }
+      if (k > fill && (up ? c[k].h >= tp : c[k].l <= tp)) { exitAt = k; exitPrice = tp; win = true; break; }
     }
     if (exitAt < 0) break;
-    const gross = bull ? exitPrice - entry : entry - exitPrice;
+    const gross = up ? exitPrice - entry : entry - exitPrice;
     const h = (exitAt - fill + 1) * hours;
     const fees = entry * FEE.maker + exitPrice * (win ? FEE.maker : FEE.taker + FEE.slip) + entry * FEE.funding8h * (h / 8);
     trades.push({ time: c[fill].t, r: (gross - fees) / R });
@@ -84,16 +99,22 @@ const st = (ts) => ({ n: ts.length, win: ts.length ? ts.filter((t) => t.r > 0).l
 function grow(ts, risk, start = 200) { let v = start, p = start, dd = 0; for (const t of ts) { v = Math.max(0, v + v * risk / 100 * t.r); p = Math.max(p, v); dd = Math.max(dd, 1 - v / p); } return { v, dd }; }
 
 const results = [];
-for (const tf of ["1h", "4h"]) for (const L of [20, 50]) for (const K of [1.5, 2.5]) for (const W of [12, 48]) for (const rr of [2, 3, 5]) for (const trend of [false, true]) {
+for (const flip of [false, true]) for (const tf of ["1h", "4h"]) for (const L of [20, 50]) for (const K of [1.5, 2.5]) for (const rr of [2, 3, 5]) for (const trend of [false, true]) for (const vol of [false, true]) {
+  const W = 48;
   const all = [];
-  for (const s of symbols) if (frames[tf].bars[s].length > 400) all.push(...simulate(frames[tf].bars[s], frames[tf].hours, { L, K, W, rr, trend }));
+  for (const s of symbols) if (frames[tf].bars[s].length > 400) all.push(...simulate(frames[tf].bars[s], frames[tf].hours, { L, K, W, rr, trend, fvg: true, vol, flip }));
   all.sort((a, b) => a.time - b.time);
-  results.push({ name: `${tf} OB L${L} K${K} W${W} 1:${rr}${trend ? " ema200" : ""}`, train: st(all.filter((t) => t.time < SPLIT)), test: st(all.filter((t) => t.time >= SPLIT)), y26: all.filter((t) => t.time >= Y2026), all });
+  results.push({ flip, name: `${flip ? "B-THROUGH" : "A-BOUNCE"} ${tf} OB+FVG L${L} K${K} 1:${rr}${trend ? " ema200" : ""}${vol ? " vol" : ""}`, train: st(all.filter((t) => t.time < SPLIT)), test: st(all.filter((t) => t.time >= SPLIT)), y26: all.filter((t) => t.time >= Y2026), all });
 }
 const f = (n, d = 2) => n.toFixed(d);
 const line = (r) => `${r.name} | TRAIN ${r.train.n}tr win${f(r.train.win * 100, 0)}% ${f(r.train.avg, 3)}R/tr ${f(r.train.total, 0)}R | HOLDOUT ${r.test.n}tr win${f(r.test.win * 100, 0)}% ${f(r.test.avg, 3)}R/tr ${f(r.test.total, 0)}R | 2026 $200@2%→${f(grow(r.y26, 2).v, 0)} dd${f(grow(r.y26, 2).dd * 100, 0)}%`;
 const ranked = [...results].filter((r) => r.train.n >= 80).sort((a, b) => b.train.avg - a.train.avg);
 const note = (t, ls) => console.log(`::notice title=${t}::${ls.join(" %0A")}`);
+for (const fl of [false, true]) {
+  const rs = results.filter((r) => r.flip === fl);
+  const rk = rs.filter((r) => r.train.n >= 60).sort((a, b) => b.train.avg - a.train.avg);
+  note(`${fl ? "B through the block" : "A bounce off the block"}: top 6 by training`, [`variants ${rs.length}, positive on train ${rs.filter((r) => r.train.total > 0).length}, on holdout ${rs.filter((r) => r.test.total > 0).length}, on both ${rs.filter((r) => r.train.total > 0 && r.test.total > 0).length}, median avg ${f(rk[Math.floor(rk.length / 2)]?.train.avg ?? NaN, 3)}R/tr`, ...rk.slice(0, 6).map(line)]);
+}
 note("setup", [`pairs ${symbols.join(" ")}`, `variants ${results.length}`, `positive on train: ${results.filter((r) => r.train.total > 0).length}, positive on holdout: ${results.filter((r) => r.test.total > 0).length}, positive on both: ${results.filter((r) => r.train.total > 0 && r.test.total > 0).length}`]);
 note("top 10 by training (honest pick)", ranked.slice(0, 10).map(line));
 note("worst 3 / median", [...ranked.slice(-3).map(line), `median train avg ${f(ranked[Math.floor(ranked.length / 2)].train.avg, 3)}R/tr`]);
