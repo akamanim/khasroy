@@ -35,6 +35,8 @@ export type Params = {
   hours: number[];
   /** Require the higher-timeframe bias to agree. */
   useBias: boolean;
+  /** Minutes per input candle (5 for 5m; 15 when the backtest groups candles into 15m). */
+  barMinutes: number;
 };
 
 export const DEFAULT_PARAMS: Params = {
@@ -51,6 +53,7 @@ export const DEFAULT_PARAMS: Params = {
   maxStopPct: 2.0,
   hours: [],
   useBias: true,
+  barMinutes: 5,
 };
 
 export type Setup = {
@@ -154,9 +157,10 @@ export function findSetups(c: Candle[], p: Params = DEFAULT_PARAMS, from = 0): S
   if (c.length < 100) return [];
   const a = atr(c);
   const { highs, lows } = swings(c, p.swingK);
-  const htf = aggregate(c, p.htfFactor);
+  const barMs = p.barMinutes * 60_000;
+  const htf = aggregate(c, p.htfFactor, barMs);
   const bias = htfBias(htf, p.swingKHtf);
-  const htfSize = p.htfFactor * 300_000;
+  const htfSize = p.htfFactor * barMs;
   const htfIndex = new Map(htf.map((x, i) => [x.t, i]));
   const biasAt = (i: number): Side | null => {
     // Only higher-timeframe bars that have fully closed before bar i.
