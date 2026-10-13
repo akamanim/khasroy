@@ -400,10 +400,10 @@ export default function TradingPage() {
           const on = t.id === selected?.id;
           out.boxes.push({ id: t.id, x1: Math.max(0, x1), x2: Math.min(w, x2), ye, yt, ys, side: t.side, status: t.status, live: t.live, on });
           if (on && story) {
-            const bw = 300;
-            const bh = 112;
-            const by = t.side === "long" ? Math.max(ys, ye) + 18 : Math.min(ys, ye) - 18 - bh;
-            out.tags.push({ id: t.id, kind: "trade", x: x1, y: ye, ax: x1, ay: ye, bx: clampX(x1 - 40, bw), by: clampY(by, bh), w: bw, text: "" });
+            const bw = 150;
+            const bh = 18;
+            const by = t.side === "long" ? Math.max(ys, ye) + 14 : Math.min(ys, ye) - 14 - bh;
+            out.tags.push({ id: t.id, kind: "trade", x: x1, y: ye, ax: x1, ay: ye, bx: clampX(x1 - 20, bw), by: clampY(by, bh), w: bw, text: "" });
           }
         }
       }
@@ -412,11 +412,11 @@ export default function TradingPage() {
           const x = c.id === "now" ? xOf(lastT) : xOf(c.t);
           const y = yOf(c.price);
           if (x === null || y === null || x < 0 || x > w) continue;
-          const bw = 220;
-          const bh = 54;
-          const bx = c.place === "left" ? x - bw - 70 : x - bw / 2 - 60;
-          const by = c.place === "above" ? y - bh - 46 : c.place === "below" ? y + 46 : y - bh / 2 - 50;
-          out.tags.push({ id: c.id, kind: "hint", x, y, ax: x, ay: y, bx: clampX(bx, bw), by: clampY(by, bh), w: bw, text: c.text });
+          const bw = c.id === "now" ? 190 : 120;
+          const bh = 18;
+          const bx = c.place === "left" ? x - bw - 40 : x - bw / 2;
+          const by = c.place === "above" ? y - bh - 22 : c.place === "below" ? y + 22 : y - bh - 26;
+          out.tags.push({ id: c.id, kind: "hint", x, y, ax: x, ay: y, bx: clampX(bx, bw), by: clampY(by, bh), w: bw, text: c.short });
         }
       }
       const key = JSON.stringify(out, (_, v) => (typeof v === "number" ? Math.round(v) : v));
@@ -512,7 +512,7 @@ export default function TradingPage() {
               <div className={styles.overlay}>
                 <svg width="100%" height="100%">
                   <defs>
-                    <marker id="kh-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <marker id="kh-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
                       <path d="M0,0 L10,5 L0,10 z" fill="#ffc44d" />
                     </marker>
                   </defs>
@@ -521,25 +521,23 @@ export default function TradingPage() {
                       <rect x={b.x1} y={Math.min(b.ye, b.yt)} width={b.x2 - b.x1} height={Math.abs(b.yt - b.ye)} fill="rgba(38,208,124,0.22)" stroke={b.on ? GREEN : "none"} strokeWidth="1" />
                       <rect x={b.x1} y={Math.min(b.ye, b.ys)} width={b.x2 - b.x1} height={Math.abs(b.ys - b.ye)} fill="rgba(255,84,104,0.22)" stroke={b.on ? RED : "none"} strokeWidth="1" />
                       <line x1={b.x1} x2={b.x2} y1={b.ye} y2={b.ye} stroke="#d9d4f5" strokeWidth={b.on ? 1.5 : 1} />
-                      <text x={b.x1 + 4} y={(b.side === "long" ? Math.min(b.ye, b.yt) : Math.max(b.ye, b.yt)) + (b.side === "long" ? -5 : 13)} fontSize="11" fontWeight="700" fill={b.status === "win" ? GREEN : b.status === "loss" ? RED : "#ffc44d"}>
+                      <text x={b.x1 + 4} y={(b.side === "long" ? Math.min(b.ye, b.yt) : Math.max(b.ye, b.yt)) + (b.side === "long" ? -5 : 13)} fontSize="9" fontWeight="700" fill={b.status === "win" ? GREEN : b.status === "loss" ? RED : "#ffc44d"}>
                         {b.side === "long" ? "ПОКУПКА" : "ПРОДАЖА"} {b.status === "win" ? "✓ цель" : b.status === "loss" ? "✗ стоп" : "⏳ идёт"}{b.live ? " · реальный сигнал" : ""}
                       </text>
                     </g>
                   ))}
                   {layout.tags.map((t) => (
-                    <line key={`a-${t.id}`} x1={t.bx + t.w / 2} y1={t.by + 20} x2={t.ax} y2={t.ay} stroke="#ffc44d" strokeWidth="1.3" markerEnd="url(#kh-arrow)" />
+                    <line key={`a-${t.id}`} x1={t.bx + t.w / 2} y1={t.by + 9} x2={t.ax} y2={t.ay} stroke="#ffc44d" strokeWidth="1" strokeOpacity="0.8" markerEnd="url(#kh-arrow)" />
                   ))}
                 </svg>
                 {layout.tags.map((t) =>
                   t.kind === "hint" ? (
-                    <div key={t.id} className={styles.note} style={{ left: t.bx, top: t.by, width: t.w }}>
-                      <b>Хасрой:</b> {t.text}
+                    <div key={t.id} className={styles.note} style={{ left: t.bx, top: t.by, maxWidth: t.w }} title={analysis?.callouts.find((c) => c.id === t.id)?.text}>
+                      {t.text}
                     </div>
                   ) : story && selected ? (
-                    <div key={t.id} className={`${styles.note} ${styles.noteTrade}`} style={{ left: t.bx, top: t.by, width: t.w }}>
-                      <b>{selected.side === "long" ? "Купил" : "Продал"}: </b>{story.whyShort}.
-                      <br /><b>Ждёт: </b>{story.expectShort}.
-                      <br /><span data-tone={selected.status}>{story.result}</span>
+                    <div key={t.id} className={`${styles.note} ${styles.noteTrade}`} style={{ left: t.bx, top: t.by, maxWidth: t.w }} data-tone={selected.status} title={`${story.why} ${story.expect} ${story.result}`}>
+                      {selected.side === "long" ? "купил" : "продал"} · {selected.status === "win" ? "✓ цель" : selected.status === "loss" ? "✗ стоп" : "⏳ идёт"} · подробно ниже
                     </div>
                   ) : null,
                 )}
