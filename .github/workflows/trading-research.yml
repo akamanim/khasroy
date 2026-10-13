@@ -1,0 +1,54 @@
+name: Trading research
+
+# Khasroy Trading: compares strategy families (trend breakouts, EMA cross, mean reversion,
+# volatility squeeze, cross-sectional momentum) on Binance USDⓈ-M futures 1h candles.
+# Ranked on training years only; the holdout years are reported once.
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Pairs, space separated"
+        required: false
+        default: "BTCUSDT ETHUSDT BNBUSDT SOLUSDT XRPUSDT DOGEUSDT ADAUSDT AVAXUSDT LINKUSDT LTCUSDT DOTUSDT TRXUSDT BCHUSDT ATOMUSDT"
+      from:
+        description: "First month (YYYY-MM)"
+        required: false
+        default: "2022-01"
+      split:
+        description: "Holdout starts (YYYY-MM-DD)"
+        required: false
+        default: "2025-01-01"
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download candles
+        env:
+          SYMBOLS: ${{ inputs.symbols }}
+          FROM: ${{ inputs.from }}
+        run: |
+          mkdir -p data
+          last=$(date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m)
+          for sym in $SYMBOLS; do
+            ym="$FROM"
+            while [[ "$ym" < "$last" || "$ym" == "$last" ]]; do
+              url="https://data.binance.vision/data/futures/um/monthly/klines/$sym/1h/$sym-1h-$ym.zip"
+              curl -sfL --retry 3 -o "data/z.zip" "$url" && unzip -oq data/z.zip -d data && rm -f data/z.zip || echo "::warning::no data $sym $ym"
+              ym=$(date -u -d "$ym-01 +1 month" +%Y-%m)
+            done
+          done
+          echo "files: $(ls data/*.csv | wc -l)"
+      - name: Research
+        env:
+          DATA_DIR: data
+          SPLIT: ${{ inputs.split }}T00:00:00Z
+        run: node --max-old-space-size=6000 --experimental-strip-types scripts/trading-research.mjs
