@@ -31,6 +31,9 @@ const toCandles = (raw: Raw[]): (Candle & { closed: boolean })[] => raw.map((k) 
 const short = (s: string) => s.replace("USDT", "");
 const decimals = (p: number) => (p >= 1000 ? 1 : p >= 10 ? 2 : p >= 1 ? 4 : p >= 0.1 ? 5 : 6);
 const fp = (p: number) => (Number.isFinite(p) ? p.toLocaleString("ru-RU", { minimumFractionDigits: decimals(p), maximumFractionDigits: decimals(p) }) : "—");
+const TV_INTERVAL: Record<string, string> = { "5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D" };
+/** Months covered by a balance path, rounded. */
+const months = (path: { t: number }[]) => Math.max(1, Math.round((path[path.length - 1].t - path[0].t) / (30 * 864e5)));
 const usd = (n: number) => `${n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const sign = (n: number, d = 2) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(d)}`;
 const TZ = -new Date().getTimezoneOffset() * 60; // show local time on the chart
@@ -87,6 +90,8 @@ export default function TradingPage() {
   const [now, setNow] = useState(() => Date.now());
   const [stream, setStream] = useState<"ws" | "poll" | "off">("off");
   const [chartReady, setChartReady] = useState(false);
+  /** "draw": TradingView chart with its drawing tools; "khasroy": our chart with Khasroy's levels. */
+  const [view, setView] = useState<"draw" | "khasroy">("draw");
 
   // ---------- market, journal, 4h history ----------
   const refreshMarket = useCallback(() => edge<{ pairs: Market[] }>({ action: "market" }).then((d) => setMarket(d.pairs)).catch((e) => setError(String(e.message || e))), []);
@@ -180,6 +185,42 @@ export default function TradingPage() {
     };
   }, []);
 
+  // ---------- TradingView chart (drawing tools) ----------
+  const tvBox = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = tvBox.current;
+    if (!el || view !== "draw") return;
+    el.innerHTML = "";
+    const inner = document.createElement("div");
+    inner.className = "tradingview-widget-container__widget";
+    inner.style.height = "100%";
+    inner.style.width = "100%";
+    el.appendChild(inner);
+    const s = document.createElement("script");
+    s.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    s.async = true;
+    s.type = "text/javascript";
+    s.innerHTML = JSON.stringify({
+      autosize: true,
+      symbol: `BINANCE:${symbol}.P`,
+      interval: TV_INTERVAL[frame] ?? "240",
+      timezone: "Asia/Bishkek",
+      theme: "dark",
+      style: "1",
+      locale: "ru",
+      backgroundColor: "#0d1017",
+      gridColor: "rgba(255,255,255,0.04)",
+      hide_side_toolbar: false,
+      allow_symbol_change: false,
+      withdateranges: true,
+      save_image: true,
+      calendar: false,
+      support_host: "https://www.tradingview.com",
+    });
+    el.appendChild(s);
+    return () => { el.innerHTML = ""; };
+  }, [symbol, frame, view]);
+
   const toBar = (k: Candle) => ({ time: k.t / 1000 + TZ, open: k.o, high: k.h, low: k.l, close: k.c });
   const toVol = (k: Candle) => ({ time: k.t / 1000 + TZ, value: k.v, color: k.c >= k.o ? "rgba(38,208,124,0.35)" : "rgba(255,84,104,0.35)" });
 
@@ -232,7 +273,7 @@ export default function TradingPage() {
           const out = [{ time: t, position: s.side === "long" ? "belowBar" : "aboveBar", color: s.side === "long" ? GREEN : RED, shape: s.side === "long" ? "arrowUp" : "arrowDown", text: s.side === "long" ? "LONG" : "SHORT" }];
           if (s.closed_at && s.status !== "open") {
             const tc = Math.floor(Date.parse(s.closed_at) / FRAME_MS[frame]) * FRAME_MS[frame] / 1000 + TZ;
-            out.push({ time: tc, position: "inBar", color: s.status === "win" ? GREEN : RED, shape: "circle", text: `${sign(s.r ?? 0)}R` });
+            out.push({ time: tc, position: "inBar", color: s.status === "win" ? GREEN : RED, shape: "circle", text: s.status === "win" ? "цель" : "стоп" });
           }
           return out;
         })
@@ -345,6 +386,10 @@ export default function TradingPage() {
         {/* ---------- center: chart and analysis ---------- */}
         <section className={styles.center}>
           <div className={styles.toolbar}>
+            <div className={styles.views}>
+              <button type="button" data-on={view === "draw" || undefined} onClick={() => setView("draw")} title="График TradingView: линии, уровни, фибо, заметки — панель инструментов слева">✏️ Рисовать</button>
+              <button type="button" data-on={view === "khasroy" || undefined} onClick={() => setView("khasroy")} title="Наш график: коридор Хасроя, сделки и планы на нём">Сигналы Хасроя</button>
+            </div>
             <div className={styles.symbol}>
               <b>{short(symbol)}<span>/USDT · Binance Futures</span></b>
               <strong data-up={(m?.change ?? 0) >= 0 || undefined}>{fp(price)}</strong>
@@ -353,40 +398,45 @@ export default function TradingPage() {
             <div className={styles.frames}>
               {FRAMES.map(([id, label]) => <button key={id} type="button" data-on={frame === id || undefined} onClick={() => setFrame(id)}>{label}</button>)}
             </div>
-            <div className={styles.toggles}>
-              <label><input type="checkbox" checked={show.channel} onChange={(e) => setShow({ ...show, channel: e.target.checked })} /> канал 100</label>
-              <label><input type="checkbox" checked={show.ema} onChange={(e) => setShow({ ...show, ema: e.target.checked })} /> EMA 50/200</label>
-              <label><input type="checkbox" checked={show.trades} onChange={(e) => setShow({ ...show, trades: e.target.checked })} /> сделки</label>
-              <span className={styles.live} data-state={stream}>{stream === "ws" ? "онлайн" : stream === "poll" ? "обновление 5 с" : "…"}</span>
-            </div>
+            {view === "khasroy" ? (
+              <div className={styles.toggles}>
+                <label title="Границы, за которыми Хасрой входит в сделку"><input type="checkbox" checked={show.channel} onChange={(e) => setShow({ ...show, channel: e.target.checked })} /> коридор</label>
+                <label title="Жёлтая — быстрое среднее, фиолетовая — медленное. Жёлтая выше — рынок растёт"><input type="checkbox" checked={show.ema} onChange={(e) => setShow({ ...show, ema: e.target.checked })} /> линии направления</label>
+                <label><input type="checkbox" checked={show.trades} onChange={(e) => setShow({ ...show, trades: e.target.checked })} /> сделки</label>
+                <span className={styles.live} data-state={stream}>{stream === "ws" ? "онлайн" : stream === "poll" ? "обновление 5 с" : "…"}</span>
+              </div>
+            ) : (
+              <span className={styles.hint}>инструменты рисования — на панели слева от графика</span>
+            )}
           </div>
-          <div className={styles.chart} ref={box} />
+          <div className={styles.chart} ref={tvBox} hidden={view !== "draw"} />
+          <div className={styles.chart} ref={box} hidden={view !== "khasroy"} />
 
           <div className={styles.lower}>
             <article className={styles.analysis}>
               <header>
                 <h2>Анализ Хасроя · {short(symbol)}</h2>
-                <span>по правилу: пробой 100 свечей 4ч, стоп 1,5 ATR, тейк 1:3</span>
+                <span>простыми словами, обновляется вживую</span>
               </header>
               {analysis ? (
                 <>
                   <p className={styles.verdict} data-side={analysis.nearest.side}>{analysis.verdict}</p>
                   <div className={styles.meter}>
-                    <span>SHORT {fp(analysis.breakoutLow)}</span>
+                    <span>продажа ниже {fp(analysis.breakoutLow)}</span>
                     <div className={styles.track}>
                       <i style={{ left: `${Math.max(0, Math.min(100, ((analysis.price - analysis.breakoutLow) / (analysis.breakoutHigh - analysis.breakoutLow)) * 100))}%` }} />
                     </div>
-                    <span>{fp(analysis.breakoutHigh)} LONG</span>
+                    <span>покупка выше {fp(analysis.breakoutHigh)}</span>
                   </div>
                   <ul className={styles.points}>
                     {analysis.points.map((p, i) => <li key={i} data-tone={p.tone}>{p.text}</li>)}
                   </ul>
                   <div className={styles.facts}>
-                    <div><small>Тренд 4ч</small><b data-tone={analysis.trend === "вверх" ? "up" : analysis.trend === "вниз" ? "down" : ""}>{analysis.trend}</b></div>
-                    <div><small>Волатильность</small><b>{analysis.volatility}</b></div>
-                    <div><small>ATR 4ч</small><b>{analysis.atrPct.toFixed(2)}%</b></div>
-                    <div><small>7 дней</small><b data-tone={analysis.change7d >= 0 ? "up" : "down"}>{sign(analysis.change7d)}%</b></div>
-                    <div><small>Фандинг</small><b>{analysis.funding === null ? "—" : `${sign(analysis.funding * 100, 4)}%`}</b></div>
+                    <div><small>Направление</small><b data-tone={analysis.trend === "вверх" ? "up" : analysis.trend === "вниз" ? "down" : ""}>{analysis.trend === "боковик" ? "на месте" : analysis.trend}</b></div>
+                    <div><small>Рынок движется</small><b>{analysis.volatility === "высокая" ? "резко" : analysis.volatility === "низкая" ? "спокойно" : "обычно"}</b></div>
+                    <div><small>Шаг цены за 4ч</small><b>~{analysis.atrPct.toFixed(1)}%</b></div>
+                    <div><small>За неделю</small><b data-tone={analysis.change7d >= 0 ? "up" : "down"}>{sign(analysis.change7d)}%</b></div>
+                    <div><small>Перевес</small><b>{analysis.funding === null ? "—" : analysis.funding > 0.0003 ? "покупатели" : analysis.funding < -0.0003 ? "продавцы" : "нет"}</b></div>
                   </div>
                 </>
               ) : (
@@ -396,25 +446,29 @@ export default function TradingPage() {
 
             <article className={styles.history}>
               <header>
-                <h2>Как было бы</h2>
-                <span>то же правило на 12 парах, ~250 дней</span>
+                <h2>Проверка на прошлом</h2>
+                <span>те же правила, 12 монет</span>
               </header>
               {history ? (
                 <>
+                  <p className={styles.explain}>
+                    Если бы Хасрой торговал по этим правилам последние ~{months(history.path)} мес., начав с {usd(start)} и рискуя {usd(start * risk / 100)} ({risk}%) в каждой сделке, сейчас было бы:
+                  </p>
                   <div className={styles.bigNum}>
-                    <small>{usd(start)} при риске {risk}% →</small>
+                    <small>{usd(start)} →</small>
                     <b data-up={history.end >= start || undefined}>{usd(history.end)}</b>
+                    <em data-up={history.end >= start || undefined}>{sign(history.end - start)}$</em>
                   </div>
                   <svg className={styles.spark} viewBox="0 0 300 54" preserveAspectRatio="none" aria-hidden>
                     <polyline points={spark(history.path)} fill="none" stroke={history.end >= start ? GREEN : RED} strokeWidth="1.6" />
                   </svg>
                   <div className={styles.miniStats}>
                     <span>{history.trades} сделок</span>
-                    <span>в плюс {(history.winRate * 100).toFixed(0)}%</span>
-                    <span>{sign(history.totalR, 1)}R</span>
-                    <span>просадка {history.maxDrawdownPct.toFixed(0)}%</span>
+                    <span>{Math.round(history.winRate * history.trades)} в плюс</span>
+                    <span>{history.trades - Math.round(history.winRate * history.trades)} в минус</span>
+                    <span>худшее падение −{history.maxDrawdownPct.toFixed(0)}%</span>
                   </div>
-                  <p className={styles.muted}>Это прошлое, а не обещание. Честная проверка 2022–2026: плюс каждый год, но небольшой.</p>
+                  <p className={styles.muted}>Почему плюсовых сделок мало: каждая удачная приносит в 3 раза больше, чем теряет неудачная. Поэтому хватает примерно 1 удачной из 4, чтобы быть в нуле. За последние месяцы рынок был неудобный — вышел небольшой минус; на 2022–2026 годах в целом был плюс каждый год. Это прошлое, а не обещание.</p>
                 </>
               ) : (
                 <p className={styles.muted}>Считаю по истории…</p>
@@ -430,7 +484,7 @@ export default function TradingPage() {
             <div className={styles.tiles}>
               <div><small>Закрыто</small><b>{wallet.closed}</b></div>
               <div><small>В плюс</small><b>{wallet.closed ? `${Math.round((wallet.wins / wallet.closed) * 100)}%` : "—"}</b></div>
-              <div><small>Итог</small><b data-up={wallet.totalR >= 0 || undefined}>{wallet.closed ? `${sign(wallet.totalR, 1)}R` : "—"}</b></div>
+              <div><small>Итог</small><b data-up={wallet.balance >= start || undefined}>{wallet.closed ? `${sign(wallet.balance - start)}$` : "—"}</b></div>
               <div><small>Открыто</small><b>{journal.filter((s) => s.status === "open").length}</b></div>
             </div>
             <ul className={styles.trades}>
@@ -439,12 +493,12 @@ export default function TradingPage() {
                   <span className={styles.tag} data-side={t.side}>{t.side === "long" ? "LONG" : "SHORT"}</span>
                   <span className={styles.tName}>{short(t.symbol)}<small>{new Date(t.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} · вход {fp(t.entry)}</small></span>
                   <span className={styles.tRes} data-state={t.open ? "open" : t.status}>
-                    {t.open ? "в работе" : t.status === "win" ? "тейк" : t.status === "loss" ? "стоп" : "время"}
+                    {t.open ? "в работе" : t.status === "win" ? "цель" : t.status === "loss" ? "стоп" : "время"}
                     <b data-up={t.pnl >= 0 || undefined}>{sign(t.pnl)}$</b>
                   </span>
                 </li>
               )) : (
-                <li className={styles.empty}>Хасрой пришлёт первый сигнал в Telegram, когда 4-часовая свеча закроется за границей канала. Ближе всех к пробою сейчас: {radar.filter((r) => r.a).sort((a, b) => (b.a?.nearest.closeness ?? 0) - (a.a?.nearest.closeness ?? 0)).slice(0, 3).map((r) => `${short(r.p)} (${r.a?.nearest.side === "long" ? "вверх" : "вниз"})`).join(", ") || "…"}.</li>
+                <li className={styles.empty}>Хасрой пришлёт первый сигнал в Telegram, когда 4-часовая свеча закроется за границей коридора. Ближе всех к пробою сейчас: {radar.filter((r) => r.a).sort((a, b) => (b.a?.nearest.closeness ?? 0) - (a.a?.nearest.closeness ?? 0)).slice(0, 3).map((r) => `${short(r.p)} (${r.a?.nearest.side === "long" ? "вверх" : "вниз"})`).join(", ") || "…"}.</li>
               )}
             </ul>
           </section>
@@ -462,7 +516,7 @@ export default function TradingPage() {
             <div className={styles.walletRows}>
               <div><span>Зафиксировано</span><b>{usd(wallet.balance)}</b></div>
               <div><span>Открытые позиции</span><b data-up={wallet.unrealized >= 0 || undefined}>{sign(wallet.unrealized)}$</b></div>
-              <div><span>Макс. просадка</span><b>{wallet.maxDrawdownPct.toFixed(1)}%</b></div>
+              <div><span>Худшее падение</span><b>{wallet.maxDrawdownPct.toFixed(1)}%</b></div>
             </div>
             <div className={styles.riskSeg}>
               {[0.5, 1].map((r) => <button key={r} type="button" data-on={risk === r || undefined} onClick={() => setRisk(r)}>риск {r}%</button>)}

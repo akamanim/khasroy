@@ -72,30 +72,34 @@ export function analyze(c4h: Candle[], price: number, funding: number | null = n
 
   const points: Analysis["points"] = [];
   const close = Math.min(distHighAtr, distLowAtr);
+  const upPct = pct(hi, price);
+  const downPct = pct(price, lo);
+  const nearPct = nearest.side === "long" ? upPct : downPct;
   let verdict: string;
-  if (price > hi) verdict = `Цена выше 100-свечного максимума ${f(hi)}. Если 4-часовая свеча закроется выше, будет сигнал LONG.`;
-  else if (price < lo) verdict = `Цена ниже 100-свечного минимума ${f(lo)}. Если 4-часовая свеча закроется ниже, будет сигнал SHORT.`;
-  else if (close < 1) verdict = `Цена у самой границы канала: до ${nearest.side === "long" ? "пробоя вверх" : "пробоя вниз"} меньше 1 ATR. Ждём закрытия свечи ${nearest.side === "long" ? `выше ${f(hi)}` : `ниже ${f(lo)}`}.`;
-  else if (close < 3) verdict = `Цена приближается к ${nearest.side === "long" ? "верхней" : "нижней"} границе канала (${close.toFixed(1)} ATR). Сигнала пока нет.`;
-  else verdict = `Цена внутри канала, до обеих границ далеко (вверх ${distHighAtr.toFixed(1)} ATR, вниз ${distLowAtr.toFixed(1)} ATR). Сигнала нет — ждём.`;
+  if (price > hi) verdict = `Цена вышла выше коридора (${f(hi)}). Если 4-часовая свеча так и закроется — Хасрой даст сигнал на покупку (LONG).`;
+  else if (price < lo) verdict = `Цена вышла ниже коридора (${f(lo)}). Если 4-часовая свеча так и закроется — Хасрой даст сигнал на продажу (SHORT).`;
+  else if (close < 1) verdict = `Почти сигнал! Цена в шаге от ${nearest.side === "long" ? `верха коридора (${f(hi)}) — может быть покупка` : `низа коридора (${f(lo)}) — может быть продажа`}. Ждём закрытия 4-часовой свечи.`;
+  else if (close < 3) verdict = `Сейчас не входим. Цена подходит к ${nearest.side === "long" ? `верху коридора — до ${f(hi)} осталось ${nearPct.toFixed(1)}%` : `низу коридора — до ${f(lo)} осталось ${nearPct.toFixed(1)}%`}.`;
+  else verdict = `Сейчас не входим — ждём. Цена ходит внутри коридора, до выхода далеко (вверх ${upPct.toFixed(1)}%, вниз ${downPct.toFixed(1)}%).`;
 
-  points.push({ tone: "note", text: `Канал 100 свечей 4H (≈16 дней): ${f(lo)} — ${f(hi)}. До верха ${pct(hi, price).toFixed(2)}%, до низа ${pct(price, lo).toFixed(2)}%.` });
-  if (trend === "вверх") points.push({ tone: nearest.side === "long" ? "plus" : "minus", text: `Тренд вверх: EMA50 ${f(e50)} выше EMA200 ${f(e200)}, цена над EMA50. Пробои по тренду в истории отрабатывали чаще.` });
-  else if (trend === "вниз") points.push({ tone: nearest.side === "short" ? "plus" : "minus", text: `Тренд вниз: EMA50 ${f(e50)} ниже EMA200 ${f(e200)}, цена под EMA50.` });
-  else points.push({ tone: "note", text: `Явного тренда нет: EMA50 и EMA200 рядом (${f(e50)} / ${f(e200)}). В боковике больше ложных пробоев.` });
+  points.push({ tone: "note", text: `Как работает Хасрой: последние ~16 дней цена ходила между ${f(lo)} и ${f(hi)} (это «коридор»). Сделка — только когда цена из него выходит: выше — покупка, ниже — продажа.` });
+  if (trend === "вверх") points.push({ tone: nearest.side === "long" ? "plus" : "minus", text: `Общее направление рынка — вверх. Покупки по такому течению в прошлом срабатывали чаще.` });
+  else if (trend === "вниз") points.push({ tone: nearest.side === "short" ? "plus" : "minus", text: `Общее направление рынка — вниз. Продажи по такому течению в прошлом срабатывали чаще.` });
+  else points.push({ tone: "note", text: `Явного направления нет, рынок топчется на месте. В такое время чаще бывают ложные выходы из коридора.` });
+  const stopPct = (risk / price) * 100;
   points.push({
     tone: volatility === "высокая" ? "minus" : "note",
-    text: `Волатильность ${volatility}: ATR ${f(a)} (${((a / price) * 100).toFixed(2)}% от цены). Стоп в сигнале — 1,5 ATR ≈ ${((risk / price) * 100).toFixed(2)}%.${volatility === "высокая" ? " Широкий стоп — меньше объём позиции при том же риске." : ""}`,
+    text: `Рынок двигается ${volatility === "высокая" ? "резко" : volatility === "низкая" ? "спокойно" : "как обычно"}: за 4 часа цена обычно проходит ~${((a / price) * 100).toFixed(1)}%. Поэтому защитный выход (стоп) будет примерно в ${stopPct.toFixed(1)}% от входа.${volatility === "высокая" ? " При резком рынке сумма сделки меньше, чтобы риск остался тем же." : ""}`,
   });
-  points.push({ tone: change7d > 0 ? (nearest.side === "long" ? "plus" : "note") : nearest.side === "short" ? "plus" : "note", text: `За 7 дней ${change7d >= 0 ? "+" : ""}${change7d.toFixed(2)}%.` });
+  points.push({ tone: change7d > 0 ? (nearest.side === "long" ? "plus" : "note") : nearest.side === "short" ? "plus" : "note", text: `За неделю цена ${change7d >= 0 ? "выросла" : "упала"} на ${Math.abs(change7d).toFixed(1)}%.` });
   if (funding !== null && Number.isFinite(funding)) {
     const fp = funding * 100;
     points.push({
       tone: Math.abs(fp) > 0.03 ? "minus" : "note",
-      text: `Фандинг ${fp >= 0 ? "+" : ""}${fp.toFixed(4)}% за 8 ч: ${fp > 0.03 ? "лонги переплачивают — рынок перегрет вверх" : fp < -0.03 ? "шорты переплачивают — рынок перегрет вниз" : "спокойный"}.`,
+      text: fp > 0.03 ? "Покупателей сейчас слишком много — они доплачивают продавцам. Такой перекос часто кончается откатом вниз." : fp < -0.03 ? "Продавцов сейчас слишком много — они доплачивают покупателям. Такой перекос часто кончается отскоком вверх." : "Перекоса между покупателями и продавцами нет — спокойно.",
     });
   }
-  points.push({ tone: "note", text: `Если будет LONG: вход ≈ ${f(plan.long.entry)}, стоп ${f(plan.long.sl)}, тейк ${f(plan.long.tp)}. Если SHORT: вход ≈ ${f(plan.short.entry)}, стоп ${f(plan.short.sl)}, тейк ${f(plan.short.tp)}.` });
+  points.push({ tone: "note", text: `План, если будет покупка: вход ≈ ${f(plan.long.entry)}, стоп ${f(plan.long.sl)} (выходим с небольшим убытком), цель ${f(plan.long.tp)} (прибыль в 3 раза больше риска). Если продажа: вход ≈ ${f(plan.short.entry)}, стоп ${f(plan.short.sl)}, цель ${f(plan.short.tp)}.` });
 
   return {
     price,
