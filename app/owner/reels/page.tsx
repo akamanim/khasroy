@@ -598,9 +598,16 @@ export default function ReelsStudio() {
     starts.forEach((s0, i) => { if (s0 <= t) k = i; });
     return k;
   };
+  const capture = (e: ReactPointerEvent<HTMLElement>) => {
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* pointer already gone: the drag still works while it stays over the strip */
+    }
+  };
   const onCellDown = (e: ReactPointerEvent<HTMLElement>, i: number, mode: "move" | "size") => {
     e.stopPropagation();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    capture(e);
     const src = sources[i];
     const start = mode === "size" && script && src >= 0 ? Number(script.scenes[src].seconds) || 2 : 0;
     dragRef.current = { mode, index: i, x0: e.clientX, moved: false, start };
@@ -636,7 +643,7 @@ export default function ReelsStudio() {
     setDropAt(null);
   };
   const onScrubDown = (e: ReactPointerEvent<HTMLElement>) => {
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    capture(e);
     dragRef.current = { mode: "scrub", index: 0, x0: e.clientX, moved: true, start: 0 };
     seek(xToTime(e.clientX));
   };

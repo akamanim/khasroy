@@ -60,7 +60,8 @@ export function usePlayer(plan: PlayerPlan | null, planKey: string) {
   const [loop, setLoop] = useState<[number, number] | null>(null);
 
   const audio = useRef<{ ctx?: AudioContext; buffer?: AudioBuffer; source?: AudioBufferSourceNode; samples?: Float32Array; gain?: GainNode }>({});
-  const clock = useRef({ startedAt: 0, offset: 0 });
+  // Start a little into the reel: at 0 s the first words are still on their way in.
+  const clock = useRef({ startedAt: 0, offset: 0.8 });
   const live = useRef({ playing: false, muted: false, time: 0, duration: 0, loop: null as [number, number] | null });
   live.current = { playing, muted, time, duration, loop };
 
