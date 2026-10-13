@@ -92,7 +92,7 @@ export default function TradingPage() {
   const [journal, setJournal] = useState<JournalSignal[]>([]);
   const [c4h, setC4h] = useState<Record<string, Candle[]>>({});
   const [live, setLive] = useState<{ price: number; at: number } | null>(null);
-  const [risk, setRisk] = useState(0.5);
+  const [risk, setRisk] = useState(2);
   const [start] = useState(200);
   const [error, setError] = useState("");
   const [now, setNow] = useState(() => Date.now());
@@ -676,9 +676,9 @@ export default function TradingPage() {
               <div><span>Худшее падение</span><b>{wallet.maxDrawdownPct.toFixed(1)}%</b></div>
             </div>
             <div className={styles.riskSeg}>
-              {[0.5, 1].map((r) => <button key={r} type="button" data-on={risk === r || undefined} onClick={() => setRisk(r)}>риск {r}%</button>)}
+              {[0.5, 1, 2].map((r) => <button key={r} type="button" data-on={risk === r || undefined} onClick={() => setRisk(r)}>риск {r}%</button>)}
             </div>
-            <p className={styles.muted}>Деньги вымышленные: так видно, что стало бы с {usd(start)} через неделю-две, прежде чем рисковать настоящими. Комиссии Binance учтены.</p>
+            <p className={styles.muted}>Деньги вымышленные. При риске 2% это тот же счёт, на котором Хасрой сейчас тренируется и о котором присылает отчёты в Telegram. Комиссии Binance учтены.</p>
           </section>
         </aside>
       </div>

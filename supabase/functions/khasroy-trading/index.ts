@@ -7,7 +7,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 //      (the rule that held up in the 2022–2026 research; rule.ts, checked against lib/trading/research.ts);
 //   3. sends each new signal with entry, stop, target and a position size for the chat's balance;
 //   4. follows every open signal on 1-hour candles and reports win / loss in R.
-// Signals only: nothing is ever traded from here.
+// Signals only: nothing is ever traded from here. The "paper account" below is a pretend $200 wallet
+// that takes every signal exactly as a live bot would (risk 2% of the balance, isolated margin x5)
+// and reports each entry and each close with statistics — a dress rehearsal before real money.
 
 import { breakout, type Candle } from "./rule.ts";
 
@@ -21,6 +23,21 @@ export const PAIRS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DO
 const RR = 3;
 const COSTS = { taker: 0.0005, maker: 0.0002, slippage: 0.0002 };
 const MAX_DAYS_OPEN = 30;
+
+// ---------- paper account ----------
+const PAPER = { start: 200, riskPct: 2, leverage: 5, maxOpen: 8, floor: 100 };
+type Position = { symbol: string; side: "long" | "short"; entry: number; sl: number; tp: number; qty: number; notional: number; margin: number; riskUsd: number; opened: string };
+type Paper = {
+  start: number; balance: number; peak: number; maxDd: number;
+  trades: number; wins: number; losses: number; pnl: number; fees: number;
+  streak: number; worstStreak: number; bestTrade: number; worstTrade: number;
+  positions: Record<string, Position>; halted: boolean; startedAt: string;
+};
+export const newPaper = (): Paper => ({ start: PAPER.start, balance: PAPER.start, peak: PAPER.start, maxDd: 0, trades: 0, wins: 0, losses: 0, pnl: 0, fees: 0, streak: 0, worstStreak: 0, bestTrade: 0, worstTrade: 0, positions: {}, halted: false, startedAt: new Date().toISOString() });
+const usd = (n: number) => `${n < 0 ? "−" : ""}$${Math.abs(n).toFixed(2)}`;
+const sgn = (n: number) => `${n >= 0 ? "+" : "−"}$${Math.abs(n).toFixed(2)}`;
+const durText = (ms: number) => { const h = Math.max(1, Math.round(ms / 36e5)); return h < 48 ? `${h} ч` : `${Math.round(h / 24)} дн.`; };
+function emaLast(x: number[], n: number) { const k = 2 / (n + 1); let e = x[0]; for (let i = 1; i < x.length; i++) e = x[i] * k + e * (1 - k); return e; }
 
 // The Khasroy Trading site reads market data and the journal straight from here.
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type", "access-control-allow-methods": "GET, POST, OPTIONS" };
@@ -97,12 +114,15 @@ function statsText(title: string, s: { n: number; wins: number; total: number; d
   return `<b>${title}</b>\nСделок: ${s.n} · в плюс: ${s.wins} (${fmt((s.wins / s.n) * 100, 0)}%)\nИтог: <b>${s.total >= 0 ? "+" : ""}${fmt(s.total, 1)}R</b> ≈ ${s.total >= 0 ? "+" : ""}${fmt(s.total * risk, 1)}% депозита при риске ${risk}%\nМакс. просадка: ${fmt(s.dd, 1)}R\n\nПо проверке на истории 2022–2026: ~28% сделок в плюс, в среднем +0,07R на сделку, серии до 20–29 убытков подряд.`;
 }
 
-const HELP = `<b>Хасрой Трейдинг</b> — сигналы по пробою 100-свечного канала на 4H (12 пар Binance Futures), стоп 1,5 ATR, тейк 1:3.
+const HELP = `<b>Хасрой Трейдинг</b> — торгует по пробою коридора последних 16 дней на 4-часовых свечах (12 монет Binance Futures), цель в 3 раза дальше стопа.
+
+Сейчас идёт тренировка: Хасрой сам входит в каждую сделку на вымышленные $200 с риском 2% и присылает отчёт при входе и при закрытии.
 
 Команды:
 /balance 200 — ваш депозит в USDT (для размера позиции)
 /risk 0.5 — риск на сделку в %
 /open — открытые сигналы
+/account — тренировочный счёт Хасроя ($200, риск 2%)
 /stats — статистика журнала
 /stop — не присылать сигналы, /start — снова присылать
 
@@ -124,7 +144,7 @@ async function readUpdates() {
     const existing = (await rows<Chat>(`khasroy_trading_chats?chat_id=eq.${chat}&select=*`))[0];
     if (cmd === "/start" || !existing) {
       await db("khasroy_trading_chats", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ chat_id: chat, name: m.chat.username || m.chat.first_name || null, active: true }) });
-      await send(chat, `${HELP}\n\nДепозит: ${existing?.balance ?? 200} USDT, риск ${existing?.risk_pct ?? 0.5}%. Сигналы приходят после закрытия 4-часовой свечи (01:00, 05:00, 09:00, 13:00, 17:00, 21:00 по Бишкеку).`);
+      await send(chat, `${HELP}\n\nХасрой проверяет рынок после закрытия каждой 4-часовой свечи: 02:00, 06:00, 10:00, 14:00, 18:00, 22:00 по Бишкеку.`);
       continue;
     }
     if (cmd === "/balance" && Number(arg) > 0) {
@@ -138,6 +158,8 @@ async function readUpdates() {
       await send(chat, "Сигналы выключены. /start — включить снова.");
     } else if (cmd === "/stats") {
       await send(chat, `${statsText("Весь журнал", await stats(), existing.risk_pct)}\n\n${statsText("За 30 дней", await stats(30), existing.risk_pct)}`);
+    } else if (cmd === "/account" || cmd === "/schet") {
+      await send(chat, paperStats(await getState<Paper | null>("paper", null) ?? newPaper()));
     } else if (cmd === "/open") {
       const open = await rows<Signal>(`khasroy_trading_signals?strategy=eq.${STRATEGY}&status=eq.open&select=*&order=created_at.asc`);
       await send(chat, open.length ? `<b>Открытые сигналы</b>\n${open.map((s) => `${s.side === "long" ? "🟢 LONG" : "🔴 SHORT"} ${pair(s.symbol)} · вход ${fmtP(+s.entry)} · стоп ${fmtP(+s.sl)} · тейк ${fmtP(+s.tp)}`).join("\n")}` : "Открытых сигналов нет.");
@@ -149,35 +171,108 @@ async function readUpdates() {
   return updates.length;
 }
 
-function signalText(s: Signal, chat: Chat) {
-  const risk = Math.abs(s.entry - s.sl);
-  const riskUsd = chat.balance * (chat.risk_pct / 100);
-  const qty = riskUsd / risk;
-  const notional = qty * s.entry;
-  const lev = Math.max(1, Math.ceil((notional / chat.balance) * 1.2));
-  const pct = (risk / s.entry) * 100;
-  return `${s.side === "long" ? "🟢 <b>LONG</b>" : "🔴 <b>SHORT</b>"} <b>${pair(s.symbol)}</b> · 4H пробой канала
-
-Вход: <b>${fmtP(+s.entry)}</b> (по рынку сейчас)
-Стоп: ${fmtP(+s.sl)} (${fmt(pct)}%)
-Тейк: ${fmtP(+s.tp)} (1:3)
-
-Под ваш депозит ${chat.balance} USDT и риск ${chat.risk_pct}% (−${fmt(riskUsd)} USDT при стопе):
-объём ≈ ${qty < 1 ? qty.toPrecision(3) : fmt(qty, qty < 100 ? 2 : 0)} ${s.symbol.replace("USDT", "")} ≈ ${fmt(notional, 0)} USDT, плечо от ×${lev}
-
-Ставьте стоп и тейк сразу при входе. Не финансовый совет.`;
-}
-
 async function broadcast(text: (chat: Chat) => string) {
   const chats = await rows<Chat>("khasroy_trading_chats?active=eq.true&select=*");
   for (const c of chats) await send(c.chat_id, text(c));
   return chats.length;
 }
 
+// ---------- paper account: entries and exits ----------
+export function paperOpen(p: Paper, s: Signal, reason: string): string {
+  const long = s.side === "long";
+  const stopDist = Math.abs(+s.entry - +s.sl);
+  const head = `${long ? "🟢" : "🔴"} <b>Хасрой ${long ? "купил" : "продал"} ${pair(s.symbol)}</b> · тренировочный счёт`;
+  const levels = `Вход: <b>${fmtP(+s.entry)}</b>\nСтоп: ${fmtP(+s.sl)} (${fmt((stopDist / +s.entry) * 100)}% от входа)\nЦель: ${fmtP(+s.tp)} (${fmt(((RR * stopDist) / +s.entry) * 100)}% от входа)`;
+  const open = Object.values(p.positions);
+  const used = open.reduce((n, x) => n + x.margin, 0);
+  let skip = "";
+  if (p.halted) skip = `Счёт упал до ${usd(PAPER.floor)} — Хасрой остановлен и новые сделки не открывает.`;
+  else if (open.length >= PAPER.maxOpen) skip = `Уже открыто ${open.length} сделок — это максимум, новую не открываю.`;
+  const riskUsd = p.balance * (PAPER.riskPct / 100);
+  const qty = riskUsd / stopDist;
+  const notional = qty * +s.entry;
+  const margin = notional / PAPER.leverage;
+  if (!skip && used + margin > p.balance) skip = `Не хватает свободных денег под залог (${usd(p.balance - used)} свободно, нужно ${usd(margin)}).`;
+  if (skip) return `${head}\n\n${levels}\n\n⚠️ ${skip}`;
+  p.positions[s.id] = { symbol: s.symbol, side: s.side, entry: +s.entry, sl: +s.sl, tp: +s.tp, qty, notional, margin, riskUsd, opened: s.created_at };
+  const coin = s.symbol.replace("USDT", "");
+  return `${head}
+
+<b>Почему:</b> ${reason}
+<b>Что ждёт:</b> ${long ? "рост" : "падение"} до цели. Если цена пойдёт против — выход по стопу с небольшим убытком. Прибыль в 3 раза больше риска.
+
+${levels}
+
+Размер: ${qty < 1 ? qty.toPrecision(3) : fmt(qty, qty < 100 ? 2 : 0)} ${coin} ≈ ${usd(notional)} · плечо ×${PAPER.leverage}, изолированная маржа (залог ${usd(margin)})
+При стопе: <b>${sgn(-riskUsd)}</b> · при цели: <b>${sgn(riskUsd * RR)}</b>
+
+Счёт: ${usd(p.balance)} · открыто сделок: ${Object.keys(p.positions).length}`;
+}
+
+export function paperStats(p: Paper): string {
+  const change = p.balance - p.start;
+  const open = Object.values(p.positions);
+  return `📊 <b>Статистика счёта</b>
+Счёт: <b>${usd(p.balance)}</b> (старт ${usd(p.start)}, ${sgn(change)}, ${change >= 0 ? "+" : "−"}${fmt(Math.abs(change / p.start) * 100, 1)}%)
+Сделок закрыто: ${p.trades} · в плюс: ${p.wins} · в минус: ${p.losses}${p.trades ? ` · попаданий ${fmt((p.wins / p.trades) * 100, 0)}%` : ""}
+Лучшая: ${sgn(p.bestTrade)} · худшая: ${sgn(p.worstTrade)}
+Комиссии Binance всего: ${usd(p.fees)}
+Самое большое падение от вершины: ${fmt(p.maxDd * 100, 1)}%
+Убытков подряд сейчас: ${p.streak} (рекорд ${p.worstStreak})
+Открыто сейчас: ${open.length ? open.map((x) => `${x.side === "long" ? "🟢" : "🔴"} ${x.symbol.replace("USDT", "")}`).join(" ") : "нет"}
+Торгует с ${new Date(p.startedAt).toLocaleDateString("ru-RU")}`;
+}
+
+export function paperClose(p: Paper, s: Signal): string | null {
+  const pos = p.positions[s.id];
+  if (!pos) return null;
+  delete p.positions[s.id];
+  const r = Number(s.r ?? 0);
+  const pnl = r * pos.riskUsd;
+  const exit = Number(s.exit_price ?? pos.entry);
+  const fees = pos.entry * pos.qty * (COSTS.taker + COSTS.slippage) + exit * pos.qty * (s.status === "win" ? COSTS.maker : COSTS.taker + COSTS.slippage);
+  p.balance += pnl;
+  p.pnl += pnl;
+  p.fees += fees;
+  p.trades++;
+  if (pnl > 0) { p.wins++; p.streak = 0; } else { p.losses++; p.streak++; p.worstStreak = Math.max(p.worstStreak, p.streak); }
+  p.bestTrade = Math.max(p.bestTrade, pnl);
+  p.worstTrade = Math.min(p.worstTrade, pnl);
+  p.peak = Math.max(p.peak, p.balance);
+  p.maxDd = Math.max(p.maxDd, 1 - p.balance / p.peak);
+  let halt = "";
+  if (!p.halted && p.balance <= PAPER.floor) { p.halted = true; halt = `\n\n⛔️ Счёт опустился до ${usd(p.balance)} — Хасрой остановился, как договаривались. Новые сделки не открываются, пока мы не разберём, что пошло не так.`; }
+  const head = s.status === "win" ? "✅ <b>Цель достигнута</b>" : s.status === "loss" ? "❌ <b>Сработал стоп</b>" : "⏹ <b>Закрыто по времени</b> (30 дней)";
+  const verdict = s.status === "win" ? "Прогноз сбылся." : s.status === "loss" ? "Прогноз не сбылся — вышли с небольшим убытком, как и планировали." : "Цена так и не дошла ни до цели, ни до стопа.";
+  return `${head} · ${pos.side === "long" ? "покупка" : "продажа"} ${pair(pos.symbol)}
+
+${verdict}
+Вход ${fmtP(pos.entry)} → выход ${fmtP(exit)} · сделка длилась ${durText(Date.now() - Date.parse(pos.opened))}
+Результат: <b>${sgn(pnl)}</b> (с учётом комиссии ${usd(fees)})
+
+${paperStats(p)}${halt}`;
+}
+
 // ---------- the scan ----------
 async function scan() {
   const report: Record<string, unknown> = {};
   report.updates = await readUpdates();
+
+  // 0) First run of the paper account: say hello.
+  if (!(await getState<Paper | null>("paper", null))) {
+    const fresh = newPaper();
+    await setState("paper", fresh);
+    await broadcast(() => `🤖 <b>Хасрой начал тренировку</b>
+
+Счёт: $${PAPER.start} (вымышленные деньги)
+Риск: ${PAPER.riskPct}% от счёта на сделку · плечо ×${PAPER.leverage}, изолированная маржа
+Не больше ${PAPER.maxOpen} сделок одновременно. Если счёт упадёт до $${PAPER.floor} — Хасрой остановится.
+
+Пришлю отчёт, когда войду в сделку (почему вошёл и что жду), и когда она закроется — с результатом и статистикой счёта.
+Проверяю рынок в 02:00, 06:00, 10:00, 14:00, 18:00, 22:00 по Бишкеку. Сигналы бывают не каждый день — это нормально.
+
+/account — статистика счёта в любой момент.`);
+  }
 
   // 1) Follow open signals on 1h candles.
   const open = await rows<Signal>(`khasroy_trading_signals?strategy=eq.${STRATEGY}&status=eq.open&select=*`);
@@ -204,14 +299,19 @@ async function scan() {
     }
   }
   if (closedNow.length) {
-    const total = await stats();
-    await broadcast((c) => closedNow.map((s) => `${s.status === "win" ? "✅ Тейк" : s.status === "loss" ? "❌ Стоп" : "⏹ Закрыт по времени"} · ${pair(s.symbol)} ${s.side.toUpperCase()} · ${(s.r ?? 0) >= 0 ? "+" : ""}${fmt(s.r ?? 0)}R (${(s.r ?? 0) >= 0 ? "+" : ""}${fmt((s.r ?? 0) * c.risk_pct)}% депозита)`).join("\n") + `\n\nЖурнал: ${total.n} сделок, ${total.total >= 0 ? "+" : ""}${fmt(total.total, 1)}R`);
+    const paper = await getState<Paper | null>("paper", null) ?? newPaper();
+    for (const s of closedNow) {
+      const text = paperClose(paper, s);
+      if (text) await broadcast(() => text);
+    }
+    await setState("paper", paper);
   }
   report.closed = closedNow.length;
 
   // 2) New 4h candle closed? Look for breakouts.
   const lastBar = await getState<Record<string, number>>("last_bar", {});
   const fresh: Signal[] = [];
+  const why = new Map<string, string>();
   const openSymbols = new Set(open.filter((s) => !closedNow.find((c) => c.id === s.id)).map((s) => s.symbol));
   for (const symbol of PAIRS) {
     try {
@@ -233,23 +333,38 @@ async function scan() {
       const tp = long ? entry + RR * risk : entry - RR * risk;
       const row = { strategy: STRATEGY, symbol, side: sig.side, candle_time: new Date(c[last].t).toISOString(), entry, sl, tp };
       const ins = await (await db("khasroy_trading_signals?on_conflict=strategy,symbol,candle_time", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify(row) })).json();
-      if (Array.isArray(ins) && ins[0]) fresh.push(ins[0] as Signal);
+      if (Array.isArray(ins) && ins[0]) {
+        fresh.push(ins[0] as Signal);
+        let hi = -Infinity, lo = Infinity;
+        for (let k = last - 100; k < last; k++) { hi = Math.max(hi, c[k].h); lo = Math.min(lo, c[k].l); }
+        const closes = c.map((x) => x.c);
+        const e50 = emaLast(closes, 50), e200 = emaLast(closes, 200);
+        const trend = e50 > e200 * 1.005 ? "up" : e50 < e200 * 0.995 ? "down" : "flat";
+        why.set((ins[0] as Signal).id, (long
+          ? `4-часовая свеча закрылась на ${fmtP(c[last].c)} — выше самой высокой цены за 16 дней (${fmtP(hi)}). Покупатели пробили потолок.`
+          : `4-часовая свеча закрылась на ${fmtP(c[last].c)} — ниже самой низкой цены за 16 дней (${fmtP(lo)}). Продавцы пробили пол.`)
+          + (trend === (long ? "up" : "down") ? " Общее направление рынка такое же — сделка по течению." : trend === "flat" ? " Явного общего направления нет." : " Общее направление обратное — сделка против течения, риск выше."));
+      }
     } catch (error) {
       console.error("scan", symbol, error);
       report[`error_${symbol}`] = String(error).slice(0, 160);
     }
   }
   await setState("last_bar", lastBar);
-  for (const s of fresh) await broadcast((c) => signalText(s, c));
+  const paper = await getState<Paper | null>("paper", null) ?? newPaper();
+  for (const s of fresh) {
+    const text = paperOpen(paper, s, why.get(s.id) ?? "");
+    await broadcast(() => text);
+  }
+  if (fresh.length) await setState("paper", paper);
   report.signals = fresh.map((s) => `${s.side} ${s.symbol}`);
 
   // 3) Weekly summary on Monday after the 01:00 UTC run... once a week.
   const week = Math.floor(Date.now() / (7 * 864e5));
   if ((await getState<number>("summary_week", 0)) !== week && new Date().getUTCDay() === 1) {
     await setState("summary_week", week);
-    const all = await stats();
-    const last7 = await stats(7);
-    await broadcast((c) => `📊 <b>Неделя Хасрой Трейдинг</b>\n\n${statsText("За 7 дней", last7, c.risk_pct)}\n\n${statsText("Весь журнал", all, c.risk_pct)}`);
+    const p = await getState<Paper | null>("paper", null) ?? newPaper();
+    await broadcast(() => `🗓 <b>Неделя Хасроя</b>\n\n${paperStats(p)}`);
   }
   return report;
 }
@@ -285,7 +400,8 @@ async function publicAction(body: Record<string, unknown>): Promise<Response | n
   }
   if (body.action === "journal") {
     const signals = await rows<Signal>(`khasroy_trading_signals?strategy=eq.${STRATEGY}&select=id,symbol,side,candle_time,entry,sl,tp,status,exit_price,r,closed_at,created_at&order=created_at.desc&limit=300`);
-    return json({ strategy: STRATEGY, pairs: PAIRS, signals, time: Date.now() }, 200, "public, max-age=20");
+    const paper = await getState<Paper | null>("paper", null);
+    return json({ strategy: STRATEGY, pairs: PAIRS, signals, paper: paper ? { start: paper.start, balance: paper.balance, trades: paper.trades, wins: paper.wins, losses: paper.losses, maxDd: paper.maxDd, open: Object.keys(paper.positions).length, startedAt: paper.startedAt, riskPct: PAPER.riskPct } : null, time: Date.now() }, 200, "public, max-age=20");
   }
   return null;
 }
