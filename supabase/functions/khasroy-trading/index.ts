@@ -22,9 +22,12 @@ const RR = 3;
 const COSTS = { taker: 0.0005, maker: 0.0002, slippage: 0.0002 };
 const MAX_DAYS_OPEN = 30;
 
-function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+// The Khasroy Trading site reads market data and the journal straight from here.
+const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type", "access-control-allow-methods": "GET, POST, OPTIONS" };
+function json(data: unknown, status = 200, cache = "no-store") {
+  return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": cache, ...CORS } });
 }
+const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"];
 
 async function db(path: string, init: RequestInit = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -251,10 +254,49 @@ async function scan() {
   return report;
 }
 
+// ---------- public read-only data for the site ----------
+async function publicAction(body: Record<string, unknown>): Promise<Response | null> {
+  if (body.action === "klines") {
+    // Candles for the chart, including the one still forming (flag "x": closed).
+    const symbol = String(body.symbol ?? "");
+    const interval = String(body.interval ?? "");
+    if (!PAIRS.includes(symbol) || !INTERVALS.includes(interval)) return json({ error: "bad_symbol_or_interval" }, 400);
+    const limit = Math.max(10, Math.min(1500, Number(body.limit) || 500));
+    const q = new URLSearchParams({ symbol, interval, limit: String(limit) });
+    if (Number(body.endTime) > 0) q.set("endTime", String(Number(body.endTime)));
+    const res = await fetch(`${FAPI}/fapi/v1/klines?${q}`);
+    if (!res.ok) return json({ error: `binance ${res.status}` }, 502);
+    const now = Date.now();
+    const data = ((await res.json()) as unknown[][]).map((k) => [Number(k[0]), Number(k[1]), Number(k[2]), Number(k[3]), Number(k[4]), Number(k[5]), Number(k[6]) < now ? 1 : 0]);
+    return json({ symbol, interval, candles: data }, 200, "public, max-age=5");
+  }
+  if (body.action === "market") {
+    // Price, 24h change and funding for the 12 pairs.
+    const [tick, prem] = await Promise.all([
+      fetch(`${FAPI}/fapi/v1/ticker/24hr`).then((r) => r.json()) as Promise<Array<Record<string, string>>>,
+      fetch(`${FAPI}/fapi/v1/premiumIndex`).then((r) => r.json()) as Promise<Array<Record<string, string | number>>>,
+    ]);
+    const out = PAIRS.map((symbol) => {
+      const t = tick.find((x) => x.symbol === symbol);
+      const p = prem.find((x) => x.symbol === symbol);
+      return { symbol, price: Number(t?.lastPrice), change: Number(t?.priceChangePercent), volume: Number(t?.quoteVolume), funding: Number(p?.lastFundingRate), nextFunding: Number(p?.nextFundingTime) };
+    });
+    return json({ pairs: out, time: Date.now() }, 200, "public, max-age=5");
+  }
+  if (body.action === "journal") {
+    const signals = await rows<Signal>(`khasroy_trading_signals?strategy=eq.${STRATEGY}&select=id,symbol,side,candle_time,entry,sl,tp,status,exit_price,r,closed_at,created_at&order=created_at.desc&limit=300`);
+    return json({ strategy: STRATEGY, pairs: PAIRS, signals, time: Date.now() }, 200, "public, max-age=20");
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (req.method === "GET") return json({ ok: true, service: "khasroy-trading", strategy: STRATEGY, telegram: Boolean(TG) });
   try {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    const pub = await publicAction(body);
+    if (pub) return pub;
     if (body.action === "probe") {
       // Public: shows whether Binance answers from here, nothing else.
       const t0 = Date.now();

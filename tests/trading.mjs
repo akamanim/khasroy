@@ -68,3 +68,35 @@ console.log("trading: ok");
   assert.ok(live.length > 20);
   console.log("trading live rule: ok");
 }
+
+// Site: analysis, paper wallet, history.
+{
+  const { analyze, paperWallet, historyTrades, equityPath } = await import("../lib/trading/analysis.ts");
+  const c4 = series.slice(0, 400);
+  const a = analyze(c4, c4[c4.length - 1].c, 0.0001);
+  assert.ok(a && a.breakoutHigh > a.breakoutLow && a.points.length >= 5 && a.verdict.length > 20);
+  const hi = Math.max(...c4.slice(-100).map((x) => x.h));
+  assert.equal(a.breakoutHigh, hi);
+  assert.ok(Math.abs(a.plan.long.tp - a.plan.long.entry - 3 * (a.plan.long.entry - a.plan.long.sl)) < 1e-9);
+
+  const sig = (id, status, r, created, closed, side = "long") => ({ id, symbol: "BTCUSDT", side, entry: 100, sl: 90, tp: 130, status, r, created_at: created, closed_at: closed });
+  const w = paperWallet([
+    sig("a", "win", 2.9, "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z"),
+    sig("b", "loss", -1.1, "2026-10-03T00:00:00Z", "2026-10-04T00:00:00Z"),
+    sig("c", "open", null, "2026-10-05T00:00:00Z", null),
+  ], 200, 1, { BTCUSDT: 105 });
+  const after1 = 200 + 2 * 2.9;           // risk $2 on $200
+  const after2 = after1 - after1 * 0.01 * 1.1;
+  assert.ok(Math.abs(w.balance - after2) < 1e-9);
+  assert.ok(Math.abs(w.unrealized - 0.5 * after2 * 0.01) < 1e-9, "open trade marked at +0.5R");
+  assert.equal(w.closed, 2);
+  assert.equal(w.wins, 1);
+
+  const h = historyTrades({ BTCUSDT: series });
+  const { donchian, run } = await import("../lib/trading/research.ts");
+  const rule = donchian(100, 1.5, { kind: "target", rr: 3 });
+  assert.equal(h.length, run(series, rule.build(series).signals, rule.exit, 4).length);
+  const e = equityPath(h, 200, 0.5);
+  assert.equal(e.trades, h.length);
+  console.log("trading site: ok");
+}
