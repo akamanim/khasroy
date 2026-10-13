@@ -1,0 +1,56 @@
+name: Trading backtest
+
+# Khasroy Trading: checks the Smart Money rules (lib/trading/smc.ts) on real Binance USDⓈ-M
+# futures 5m candles from data.binance.vision. Results go to the job summary and annotations.
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Pairs, space separated"
+        required: false
+        default: "BTCUSDT ETHUSDT SOLUSDT"
+      months:
+        description: "How many full months back"
+        required: false
+        default: "18"
+      variants:
+        description: "Rule variants as JSON (empty: the built-in set)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download candles
+        env:
+          SYMBOLS: ${{ inputs.symbols }}
+          MONTHS: ${{ inputs.months }}
+        run: |
+          mkdir -p data
+          for sym in $SYMBOLS; do
+            for back in $(seq "$MONTHS" -1 1); do
+              ym=$(date -u -d "$(date -u +%Y-%m-01) -$back month" +%Y-%m)
+              url="https://data.binance.vision/data/futures/um/monthly/klines/$sym/5m/$sym-5m-$ym.zip"
+              if curl -sfL --retry 3 -o "data/$sym-$ym.zip" "$url"; then
+                unzip -oq "data/$sym-$ym.zip" -d data && rm "data/$sym-$ym.zip"
+              else
+                echo "::warning::no data for $sym $ym"
+              fi
+            done
+          done
+          ls data | head -50
+          echo "files: $(ls data/*.csv | wc -l)"
+      - name: Backtest
+        env:
+          DATA_DIR: data
+          VARIANTS: ${{ inputs.variants }}
+        run: node --experimental-strip-types scripts/trading-backtest.mjs
