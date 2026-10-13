@@ -48,6 +48,13 @@ for (const tf of ["1h", "4h", "1d"]) {
   for (const n of [50, 120]) for (const exit of [{ kind: "target", rr: 3 }, { kind: "trail", atrMult: 3 }]) strategies.push({ tf, s: squeeze(n, 2, exit) });
 }
 
+// FOCUS=1: a close look at the finalists — year by year, pair by pair, at 1% and 0.5% risk.
+if (process.env.FOCUS) {
+  strategies.length = 0;
+  strategies.push({ tf: "4h", s: emaCross(50, 200, 2, { kind: "rule" }) });
+  strategies.push({ tf: "4h", s: donchian(100, 1.5, { kind: "target", rr: 5 }) });
+  strategies.push({ tf: "4h", s: donchian(100, 1.5, { kind: "target", rr: 3 }) });
+}
 const fmt = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : "∞");
 const results = [];
 for (const { tf, s } of strategies) {
@@ -65,6 +72,27 @@ for (const { tf, s } of strategies) {
   const train = stats(all.filter((t) => t.time < SPLIT), 200, 1, (SPLIT - t0) / 864e5);
   const test = stats(all.filter((t) => t.time >= SPLIT), 200, 1, (t1 - SPLIT) / 864e5);
   results.push({ name: `${tf} ${s.name}`, train, test, all });
+}
+
+if (process.env.FOCUS) {
+  const notes = [];
+  for (const r of results) {
+    const years = {};
+    for (const t of r.all) (years[new Date(t.time).getUTCFullYear()] ??= []).push(t);
+    const yearText = Object.entries(years).map(([y, ts]) => {
+      const st = stats(ts, 200, 1);
+      const half = stats(ts, 200, 0.5);
+      return `${y}: ${st.trades}tr win${fmt(st.winRate * 100, 0)}% ${fmt(st.totalR, 0)}R | 1%: $200→${fmt(st.balance, 0)} dd${fmt(st.maxDrawdownPct, 0)}% | 0.5%: →${fmt(half.balance, 0)} dd${fmt(half.maxDrawdownPct, 0)}% | streak ${st.longestLosing}`;
+    });
+    const pairs = {};
+    for (const t of r.all) (pairs[t.sym] ??= []).push(t);
+    const pairText = Object.entries(pairs).map(([p, ts]) => `${p.replace("USDT", "")} ${fmt(stats(ts).totalR, 0)}R`).join(", ");
+    const whole = stats(r.all, 200, 0.5);
+    const hold = stats(r.all.filter((t) => t.time >= SPLIT), 200, 0.5);
+    notes.push(`${r.name}`, ...yearText, `pairs: ${pairText}`, `whole period at 0.5%: $200→${fmt(whole.balance, 0)} dd${fmt(whole.maxDrawdownPct, 0)}%; holdout at 0.5%: →${fmt(hold.balance, 0)} dd${fmt(hold.maxDrawdownPct, 0)}%`, "");
+  }
+  console.log(`::notice title=focus::${notes.join(" %0A")}`);
+  process.exit(0);
 }
 
 // Rank on training only.
