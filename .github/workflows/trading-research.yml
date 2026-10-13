@@ -23,7 +23,7 @@ on:
         required: false
         default: ""
       script:
-        description: "research (default) or target (8-month $200→$600 search)"
+        description: "research (default), target (8-month search) or year (2026 replay)"
         required: false
         default: "research"
 
@@ -53,6 +53,15 @@ jobs:
               curl -sfL --retry 3 -o "data/z.zip" "$url" && unzip -oq data/z.zip -d data && rm -f data/z.zip || echo "::warning::no data $sym $ym"
               ym=$(date -u -d "$ym-01 +1 month" +%Y-%m)
             done
+          done
+          # This month so far, from the daily files.
+          m=$(date -u +%Y-%m); d=1
+          while [ "$(date -u -d "$m-01 +$((d-1)) day" +%Y-%m-%d)" \< "$(date -u +%Y-%m-%d)" ]; do
+            day=$(date -u -d "$m-01 +$((d-1)) day" +%Y-%m-%d)
+            for sym in $SYMBOLS; do
+              curl -sfL --retry 3 -o "data/z.zip" "https://data.binance.vision/data/futures/um/daily/klines/$sym/1h/$sym-1h-$day.zip" && unzip -oq data/z.zip -d data && rm -f data/z.zip || true
+            done
+            d=$((d+1))
           done
           echo "files: $(ls data/*.csv | wc -l)"
       - name: Research
