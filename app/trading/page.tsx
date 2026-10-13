@@ -6,7 +6,7 @@
 // function (Binance answers there); live candles stream straight from Binance when the browser can.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { analyze, equityPath, historyTrades, paperWallet, type JournalSignal } from "@/lib/trading/analysis";
+import { analyze, chartTrades, equityPath, historyTrades, journalTrade, paperWallet, tradeStory, type ChartTrade, type JournalSignal } from "@/lib/trading/analysis";
 import type { Candle } from "@/lib/trading/smc";
 import styles from "./trading.module.css";
 
@@ -51,13 +51,21 @@ type Series = {
   createPriceLine: (o: unknown) => unknown;
   removePriceLine: (l: unknown) => void;
   applyOptions: (o: unknown) => void;
+  priceToCoordinate: (p: number) => number | null;
 };
 type Chart = {
   addCandlestickSeries: (o: unknown) => Series;
   addHistogramSeries: (o: unknown) => Series;
   addLineSeries: (o: unknown) => Series;
-  priceScale: (id: string) => { applyOptions: (o: unknown) => void };
-  timeScale: () => { fitContent: () => void; scrollToRealTime: () => void; applyOptions: (o: unknown) => void };
+  priceScale: (id: string) => { applyOptions: (o: unknown) => void; width: () => number };
+  timeScale: () => {
+    fitContent: () => void;
+    scrollToRealTime: () => void;
+    applyOptions: (o: unknown) => void;
+    logicalToCoordinate: (l: number) => number | null;
+    setVisibleLogicalRange: (r: { from: number; to: number }) => void;
+  };
+  subscribeClick: (cb: (p: { time?: number }) => void) => void;
   applyOptions: (o: unknown) => void;
   remove: () => void;
 };
@@ -91,7 +99,9 @@ export default function TradingPage() {
   const [stream, setStream] = useState<"ws" | "poll" | "off">("off");
   const [chartReady, setChartReady] = useState(false);
   /** "draw": TradingView chart with its drawing tools; "khasroy": our chart with Khasroy's levels. */
-  const [view, setView] = useState<"draw" | "khasroy">("draw");
+  const [view, setView] = useState<"draw" | "khasroy">("khasroy");
+  const [picked, setPicked] = useState<string | null>(null);
+  const [notes, setNotes] = useState(true);
 
   // ---------- market, journal, 4h history ----------
   const refreshMarket = useCallback(() => edge<{ pairs: Market[] }>({ action: "market" }).then((d) => setMarket(d.pairs)).catch((e) => setError(String(e.message || e))), []);
@@ -143,7 +153,15 @@ export default function TradingPage() {
     const trades = historyTrades(c4h);
     return { ...equityPath(trades, start, risk), list: trades };
   }, [c4h, start, risk]);
-  const openHere = journal.filter((s) => s.symbol === symbol && s.status === "open");
+  /** Trades drawn on the chart: the rule replayed on this pair's 4h candles, plus real signals from the journal. */
+  const trades = useMemo<ChartTrade[]>(() => {
+    const hist = c4h[symbol] ? chartTrades(c4h[symbol]) : [];
+    const live = journal.filter((s) => s.symbol === symbol).map(journalTrade);
+    const liveT = new Set(live.map((t) => t.entryT));
+    return [...hist.filter((t) => !liveT.has(t.entryT)), ...live].sort((a, b) => a.entryT - b.entryT);
+  }, [c4h, symbol, journal]);
+  const selected = trades.find((t) => t.id === picked) ?? trades[trades.length - 1] ?? null;
+  const story = useMemo(() => (selected && c4h[symbol] && Number.isFinite(price) ? tradeStory(c4h[symbol], selected, price) : null), [selected, c4h, symbol, price]);
   const next4h = Math.ceil(now / FRAME_MS["4h"]) * FRAME_MS["4h"];
   const left = Math.max(0, next4h - now);
   const leftText = `${Math.floor(left / 3.6e6)}:${String(Math.floor((left % 3.6e6) / 6e4)).padStart(2, "0")}:${String(Math.floor((left % 6e4) / 1000)).padStart(2, "0")}`;
@@ -259,30 +277,7 @@ export default function TradingPage() {
       add(analysis.breakoutHigh, "rgba(38,208,124,0.7)", "пробой 4ч ↑", ch.lw.LineStyle.Dotted);
       add(analysis.breakoutLow, "rgba(255,84,104,0.7)", "пробой 4ч ↓", ch.lw.LineStyle.Dotted);
     }
-    if (show.trades) {
-      for (const s of openHere) {
-        add(s.entry, "#c9c4e6", `вход ${s.side === "long" ? "LONG" : "SHORT"}`, ch.lw.LineStyle.Solid);
-        add(s.sl, RED, "стоп");
-        add(s.tp, GREEN, "тейк");
-      }
-      const first = d[0].t;
-      const markers = journal
-        .filter((s) => s.symbol === symbol && Date.parse(s.created_at) >= first)
-        .flatMap((s) => {
-          const t = Math.floor(Date.parse(s.created_at) / FRAME_MS[frame]) * FRAME_MS[frame] / 1000 + TZ;
-          const out = [{ time: t, position: s.side === "long" ? "belowBar" : "aboveBar", color: s.side === "long" ? GREEN : RED, shape: s.side === "long" ? "arrowUp" : "arrowDown", text: s.side === "long" ? "LONG" : "SHORT" }];
-          if (s.closed_at && s.status !== "open") {
-            const tc = Math.floor(Date.parse(s.closed_at) / FRAME_MS[frame]) * FRAME_MS[frame] / 1000 + TZ;
-            out.push({ time: tc, position: "inBar", color: s.status === "win" ? GREEN : RED, shape: "circle", text: s.status === "win" ? "цель" : "стоп" });
-          }
-          return out;
-        })
-        .sort((a, b) => a.time - b.time);
-      // Markers must sit on bars that exist on this timeframe.
-      const times = new Set(d.map((x) => x.t / 1000 + TZ));
-      ch.candles.setMarkers?.(markers.filter((mk) => times.has(mk.time)));
-    } else ch.candles.setMarkers?.([]);
-  }, [analysis, frame, journal, openHere, show, symbol]);
+  }, [analysis, frame, show]);
 
   // Load candles for the pair and timeframe, then follow them live.
   useEffect(() => {
@@ -348,6 +343,106 @@ export default function TradingPage() {
   }, [symbol, frame, chartReady]);
   useEffect(() => { drawOverlays(); }, [drawOverlays]);
 
+  // Click on the chart: pick the trade under the cursor.
+  const tradesRef = useRef(trades);
+  tradesRef.current = trades;
+  const frameRef = useRef(frame);
+  frameRef.current = frame;
+  useEffect(() => {
+    const ch = chart.current;
+    if (!ch || !chartReady) return;
+    ch.c.subscribeClick((p) => {
+      if (typeof p.time !== "number") return;
+      const t = (p.time - TZ) * 1000;
+      const hit = [...tradesRef.current].reverse().find((x) => x.entryT - FRAME_MS[frameRef.current] <= t && t <= (x.exitT ?? Infinity) + FRAME_MS["4h"]);
+      if (hit) setPicked(hit.id);
+    });
+  }, [chartReady]);
+
+  /** Screen positions of the trade boxes and Khasroy's notes, recomputed while the chart moves. */
+  type Layout = {
+    w: number;
+    h: number;
+    boxes: { id: string; x1: number; x2: number; ye: number; yt: number; ys: number; side: string; status: string; live: boolean; on: boolean }[];
+    tags: { id: string; x: number; y: number; ax: number; ay: number; kind: "hint" | "trade"; text: string; bx: number; by: number; w: number }[];
+  };
+  const [layout, setLayout] = useState<Layout | null>(null);
+  useEffect(() => {
+    if (view !== "khasroy") return;
+    let raf = 0;
+    let last = "";
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const ch = chart.current;
+      const d = data.current;
+      const el = box.current;
+      if (!ch || !el || d.length < 2) return;
+      const fm = FRAME_MS[frame];
+      const ts = ch.c.timeScale();
+      const w = el.clientWidth - ch.c.priceScale("right").width();
+      const h = el.clientHeight - 28;
+      const lastT = d[d.length - 1].t;
+      const xOf = (t: number) => ts.logicalToCoordinate((Math.floor(t / fm) * fm - d[0].t) / fm);
+      const yOf = (p: number) => ch.candles.priceToCoordinate(p);
+      const out: Layout = { w, h, boxes: [], tags: [] };
+      const clampX = (x: number, bw: number) => Math.max(6, Math.min(w - bw - 6, x));
+      const clampY = (y: number, bh: number) => Math.max(6, Math.min(h - bh - 6, y));
+      if (show.trades) {
+        for (const t of trades) {
+          const x1 = xOf(t.entryT);
+          const x2raw = t.exitT === null ? xOf(Math.max(lastT, t.entryT) + 6 * Math.max(fm, FRAME_MS["1h"])) : xOf(t.exitT + FRAME_MS["4h"] - 1);
+          const ye = yOf(t.entry);
+          const yt = yOf(t.tp);
+          const ys = yOf(t.sl);
+          if (x1 === null || x2raw === null || ye === null || yt === null || ys === null) continue;
+          const x2 = Math.max(x2raw, x1 + 6);
+          if (x2 < 0 || x1 > w) continue;
+          const on = t.id === selected?.id;
+          out.boxes.push({ id: t.id, x1: Math.max(0, x1), x2: Math.min(w, x2), ye, yt, ys, side: t.side, status: t.status, live: t.live, on });
+          if (on && story) {
+            const bw = 300;
+            const bh = 112;
+            const by = t.side === "long" ? Math.max(ys, ye) + 18 : Math.min(ys, ye) - 18 - bh;
+            out.tags.push({ id: t.id, kind: "trade", x: x1, y: ye, ax: x1, ay: ye, bx: clampX(x1 - 40, bw), by: clampY(by, bh), w: bw, text: "" });
+          }
+        }
+      }
+      if (notes && analysis) {
+        for (const c of analysis.callouts) {
+          const x = c.id === "now" ? xOf(lastT) : xOf(c.t);
+          const y = yOf(c.price);
+          if (x === null || y === null || x < 0 || x > w) continue;
+          const bw = 220;
+          const bh = 54;
+          const bx = c.place === "left" ? x - bw - 70 : x - bw / 2 - 60;
+          const by = c.place === "above" ? y - bh - 46 : c.place === "below" ? y + 46 : y - bh / 2 - 50;
+          out.tags.push({ id: c.id, kind: "hint", x, y, ax: x, ay: y, bx: clampX(bx, bw), by: clampY(by, bh), w: bw, text: c.text });
+        }
+      }
+      const key = JSON.stringify(out, (_, v) => (typeof v === "number" ? Math.round(v) : v));
+      if (key !== last) {
+        last = key;
+        setLayout(out);
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [view, frame, trades, selected, story, analysis, notes, show.trades]);
+
+  /** Scroll the chart to a trade and select it. */
+  const goTo = (t: ChartTrade) => {
+    setPicked(t.id);
+    const ch = chart.current;
+    const d = data.current;
+    if (!ch || d.length < 2) return;
+    const fm = FRAME_MS[frame];
+    const from = (t.entryT - d[0].t) / fm;
+    const to = ((t.exitT ?? d[d.length - 1].t) - d[0].t) / fm;
+    const pad = Math.max(30, (to - from) * 0.6);
+    ch.c.timeScale().setVisibleLogicalRange({ from: from - pad, to: to + pad });
+  };
+  const selIndex = selected ? trades.findIndex((t) => t.id === selected.id) : -1;
+
   // ---------- render ----------
   const main = { display: "block", maxWidth: "none", height: "100dvh", overflowY: "auto", padding: 0 } as const;
   const walletChange = wallet.equity - start;
@@ -387,8 +482,8 @@ export default function TradingPage() {
         <section className={styles.center}>
           <div className={styles.toolbar}>
             <div className={styles.views}>
-              <button type="button" data-on={view === "draw" || undefined} onClick={() => setView("draw")} title="График TradingView: линии, уровни, фибо, заметки — панель инструментов слева">✏️ Рисовать</button>
-              <button type="button" data-on={view === "khasroy" || undefined} onClick={() => setView("khasroy")} title="Наш график: коридор Хасроя, сделки и планы на нём">Сигналы Хасроя</button>
+              <button type="button" data-on={view === "khasroy" || undefined} onClick={() => setView("khasroy")} title="Хасрой подписывает график и показывает свои сделки">График Хасроя</button>
+              <button type="button" data-on={view === "draw" || undefined} onClick={() => setView("draw")} title="График TradingView: линии, уровни, фибо, заметки — панель инструментов слева">✏️ Рисовать (TradingView)</button>
             </div>
             <div className={styles.symbol}>
               <b>{short(symbol)}<span>/USDT · Binance Futures</span></b>
@@ -403,6 +498,7 @@ export default function TradingPage() {
                 <label title="Границы, за которыми Хасрой входит в сделку"><input type="checkbox" checked={show.channel} onChange={(e) => setShow({ ...show, channel: e.target.checked })} /> коридор</label>
                 <label title="Жёлтая — быстрое среднее, фиолетовая — медленное. Жёлтая выше — рынок растёт"><input type="checkbox" checked={show.ema} onChange={(e) => setShow({ ...show, ema: e.target.checked })} /> линии направления</label>
                 <label><input type="checkbox" checked={show.trades} onChange={(e) => setShow({ ...show, trades: e.target.checked })} /> сделки</label>
+                <label><input type="checkbox" checked={notes} onChange={(e) => setNotes(e.target.checked)} /> подписи</label>
                 <span className={styles.live} data-state={stream}>{stream === "ws" ? "онлайн" : stream === "poll" ? "обновление 5 с" : "…"}</span>
               </div>
             ) : (
@@ -410,7 +506,70 @@ export default function TradingPage() {
             )}
           </div>
           <div className={styles.chart} ref={tvBox} hidden={view !== "draw"} />
-          <div className={styles.chart} ref={box} hidden={view !== "khasroy"} />
+          <div className={styles.chart} hidden={view !== "khasroy"}>
+            <div className={styles.fill} ref={box} />
+            {layout ? (
+              <div className={styles.overlay}>
+                <svg width="100%" height="100%">
+                  <defs>
+                    <marker id="kh-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                      <path d="M0,0 L10,5 L0,10 z" fill="#ffc44d" />
+                    </marker>
+                  </defs>
+                  {layout.boxes.map((b) => (
+                    <g key={b.id} opacity={b.on ? 1 : 0.45}>
+                      <rect x={b.x1} y={Math.min(b.ye, b.yt)} width={b.x2 - b.x1} height={Math.abs(b.yt - b.ye)} fill="rgba(38,208,124,0.22)" stroke={b.on ? GREEN : "none"} strokeWidth="1" />
+                      <rect x={b.x1} y={Math.min(b.ye, b.ys)} width={b.x2 - b.x1} height={Math.abs(b.ys - b.ye)} fill="rgba(255,84,104,0.22)" stroke={b.on ? RED : "none"} strokeWidth="1" />
+                      <line x1={b.x1} x2={b.x2} y1={b.ye} y2={b.ye} stroke="#d9d4f5" strokeWidth={b.on ? 1.5 : 1} />
+                      <text x={b.x1 + 4} y={(b.side === "long" ? Math.min(b.ye, b.yt) : Math.max(b.ye, b.yt)) + (b.side === "long" ? -5 : 13)} fontSize="11" fontWeight="700" fill={b.status === "win" ? GREEN : b.status === "loss" ? RED : "#ffc44d"}>
+                        {b.side === "long" ? "ПОКУПКА" : "ПРОДАЖА"} {b.status === "win" ? "✓ цель" : b.status === "loss" ? "✗ стоп" : "⏳ идёт"}{b.live ? " · реальный сигнал" : ""}
+                      </text>
+                    </g>
+                  ))}
+                  {layout.tags.map((t) => (
+                    <line key={`a-${t.id}`} x1={t.bx + t.w / 2} y1={t.by + 20} x2={t.ax} y2={t.ay} stroke="#ffc44d" strokeWidth="1.3" markerEnd="url(#kh-arrow)" />
+                  ))}
+                </svg>
+                {layout.tags.map((t) =>
+                  t.kind === "hint" ? (
+                    <div key={t.id} className={styles.note} style={{ left: t.bx, top: t.by, width: t.w }}>
+                      <b>Хасрой:</b> {t.text}
+                    </div>
+                  ) : story && selected ? (
+                    <div key={t.id} className={`${styles.note} ${styles.noteTrade}`} style={{ left: t.bx, top: t.by, width: t.w }}>
+                      <b>{selected.side === "long" ? "Купил" : "Продал"}: </b>{story.whyShort}.
+                      <br /><b>Ждёт: </b>{story.expectShort}.
+                      <br /><span data-tone={selected.status}>{story.result}</span>
+                    </div>
+                  ) : null,
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          {view === "khasroy" && selected && story ? (
+            <article className={styles.tradeCard}>
+              <header>
+                <h2>{selected.live ? "Сделка Хасроя" : "Сделка Хасроя · проверка на прошлом"} · {short(symbol)}</h2>
+                <span className={styles.tradeNav}>
+                  <button type="button" disabled={selIndex <= 0} onClick={() => goTo(trades[selIndex - 1])}>← раньше</button>
+                  <em>{selIndex + 1} из {trades.length}</em>
+                  <button type="button" disabled={selIndex >= trades.length - 1} onClick={() => goTo(trades[selIndex + 1])}>позже →</button>
+                </span>
+              </header>
+              <div className={styles.tradeBody}>
+                <p><b>{selected.side === "long" ? "Почему купил" : "Почему продал"}.</b> {story.why}</p>
+                <p><b>Что ждёт.</b> {story.expect}</p>
+                <p className={styles.tradeResult} data-tone={selected.status}>{story.result}</p>
+                <div className={styles.progress} data-tone={selected.status}>
+                  <span>стоп {fp(selected.sl)}</span>
+                  <div><i style={{ left: `${50 + story.progress * 50}%` }} /></div>
+                  <span>цель {fp(selected.tp)}</span>
+                </div>
+              </div>
+              <p className={styles.muted}>Нажмите на любую зелёно-красную коробку на графике — Хасрой расскажет про эту сделку. {selected.live ? "" : "Сделки с пометкой «проверка на прошлом» — как правило сработало бы, реальные сигналы подписаны «реальный сигнал»."}</p>
+            </article>
+          ) : null}
 
           <div className={styles.lower}>
             <article className={styles.analysis}>
