@@ -75,6 +75,7 @@ console.log("trading: ok");
   const c4 = series.slice(0, 400);
   const a = analyze(c4, c4[c4.length - 1].c, 0.0001);
   assert.ok(a && a.breakoutHigh > a.breakoutLow && a.points.length >= 5 && a.verdict.length > 20);
+  assert.ok(!/ATR|EMA/.test(a.verdict + a.points.map((p) => p.text).join(" ")), "plain words: no ATR/EMA jargon");
   const hi = Math.max(...c4.slice(-100).map((x) => x.h));
   assert.equal(a.breakoutHigh, hi);
   assert.ok(Math.abs(a.plan.long.tp - a.plan.long.entry - 3 * (a.plan.long.entry - a.plan.long.sl)) < 1e-9);
