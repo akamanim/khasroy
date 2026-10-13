@@ -53,3 +53,18 @@ assert.ok(full.length > 5, "random data still gives some setups");
 assert.deepEqual(prefix.map((s) => s.time), full.filter((s) => s.at < 4000 - DEFAULT_PARAMS.swingK).map((s) => s.time).slice(0, prefix.length));
 for (const s of full) assert.ok(s.side === "long" ? s.sl < s.entry : s.sl > s.entry);
 console.log("trading: ok");
+
+// The live rule in the edge function gives the same signals as the researched one.
+{
+  const { breakout } = await import("../supabase/functions/khasroy-trading/rule.ts");
+  const { donchian } = await import("../lib/trading/research.ts");
+  const research = donchian(100, 1.5, { kind: "target", rr: 3 }).build(series).signals;
+  const live = [];
+  for (let i = 0; i < series.length; i++) {
+    const s = breakout(series, i);
+    if (s) live.push({ at: i, side: s.side, risk: s.risk });
+  }
+  assert.deepEqual(live, research);
+  assert.ok(live.length > 20);
+  console.log("trading live rule: ok");
+}
