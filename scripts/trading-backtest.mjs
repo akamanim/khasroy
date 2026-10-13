@@ -3,7 +3,7 @@
 // Prints a summary table and writes it to the GitHub job summary and as annotations.
 import { readdirSync, readFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_PARAMS, findSetups, simulate, stats } from "../lib/trading/smc.ts";
+import { DEFAULT_PARAMS, aggregate, findSetups, simulate, stats } from "../lib/trading/smc.ts";
 
 const DATA_DIR = process.env.DATA_DIR || "data";
 const VARIANTS = (process.env.VARIANTS ? JSON.parse(process.env.VARIANTS) : null) ?? [
@@ -46,12 +46,14 @@ out(`| variant | RR | pair | trades | win% | avg R | total R | PF | max DD (R) |
 out(`|---|---|---|---|---|---|---|---|---|---|---|---|---|`);
 const best = [];
 for (const v of VARIANTS) {
-  const params = { ...DEFAULT_PARAMS, ...v };
-  for (const rr of [3, 5]) {
+  // tf: group 5m candles into larger ones (3 = 15m) before applying the rules.
+  const tf = v.tf ?? 1;
+  const params = { ...DEFAULT_PARAMS, barMinutes: 5 * tf, ...v };
+  for (const rr of v.rrs ?? [3, 5]) {
     const all = [];
     let days = 0;
     for (const s of symbols) {
-      const c = data[s];
+      const c = tf > 1 ? aggregate(data[s], tf) : data[s];
       const setups = findSetups(c, params);
       const trades = simulate(c, setups, rr, params);
       const d = (c[c.length - 1].t - c[0].t) / 86_400_000;
