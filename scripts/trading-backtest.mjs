@@ -104,10 +104,25 @@ for (const b of best) {
 }
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.slice(-best.length - 4).join("\n") + "\n");
 
-// Annotations stay readable through the API even when logs are not.
-for (const b of best) {
+// Annotations stay readable through the API even when logs are not. GitHub keeps only 10
+// notices per step, so the results go out as a few compact ones.
+const rowsText = best.map((b) => {
   const s = b.st;
-  console.log(`::notice title=${b.name}::trades ${s.trades} | win ${fmt(s.winRate * 100, 1)}% | avgR ${fmt(s.avgR, 3)} | totalR ${fmt(s.totalR, 1)} | PF ${fmt(s.profitFactor)} | DD ${fmt(s.maxDrawdownR, 1)}R/${fmt(s.maxDrawdownPct, 1)}% | streak ${s.longestLosing} | $200→${fmt(s.balance, 0)} | ${fmt(s.perDay, 2)}/day | last third: ${b.oos.trades} tr, win ${fmt(b.oos.winRate * 100, 1)}%, ${fmt(b.oos.totalR, 1)}R`);
+  return `${b.name} — ${s.trades} tr, win ${fmt(s.winRate * 100, 1)}%, avg ${fmt(s.avgR, 3)}R, total ${fmt(s.totalR, 1)}R, PF ${fmt(s.profitFactor)}, DD ${fmt(s.maxDrawdownR, 1)}R/${fmt(s.maxDrawdownPct, 1)}%, streak ${s.longestLosing}, $200→${fmt(s.balance, 0)}, ${fmt(s.perDay, 2)}/day; last third ${b.oos.trades} tr, win ${fmt(b.oos.winRate * 100, 1)}%, ${fmt(b.oos.totalR, 1)}R`;
+});
+for (let i = 0; i < rowsText.length; i += 6) console.log(`::notice title=results ${i / 6 + 1}::${rowsText.slice(i, i + 6).join(" %0A")}`);
+const perPair = [];
+for (const s of symbols) {
+  const c = data[s];
+  const v = VARIANTS[0];
+  const tf = v.tf ?? 1;
+  const params = { ...DEFAULT_PARAMS, barMinutes: 5 * tf, ...v };
+  const cc = tf > 1 ? aggregate(c, tf) : c;
+  for (const rr of v.rrs ?? [3, 5]) {
+    const st = stats(simulate(cc, findSetups(cc, params), rr, params), 200, 1, (c[c.length - 1].t - c[0].t) / 86_400_000);
+    perPair.push(`${s} 1:${rr} ${st.trades}tr ${fmt(st.winRate * 100, 0)}% ${fmt(st.totalR, 1)}R`);
+  }
 }
+console.log(`::notice title=per pair (${VARIANTS[0].name})::${perPair.join(" | ")}`);
 const monthsText = [...months].sort().map(([m, x]) => `${m}:${x.n}/${fmt((x.w / x.n) * 100, 0)}%/${fmt(x.r, 1)}R`).join(" ");
 console.log(`::notice title=by month ${top.name}::${monthsText}`);
