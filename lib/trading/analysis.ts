@@ -36,7 +36,7 @@ export type Analysis = {
   callouts: Callout[];
 };
 
-export type Callout = { id: string; t: number; price: number; text: string; place: "above" | "below" | "left" };
+export type Callout = { id: string; t: number; price: number; text: string; short: string; place: "above" | "below" | "left" };
 
 const pct = (a: number, b: number) => ((a - b) / b) * 100;
 const f = (n: number) => (Math.abs(n) >= 100 ? n.toFixed(1) : Math.abs(n) >= 1 ? n.toFixed(3) : n.toPrecision(4));
@@ -112,9 +112,9 @@ export function analyze(c4h: Candle[], price: number, funding: number | null = n
     if (c4h[k].l <= c4h[loAt].l) loAt = k;
   }
   const callouts: Callout[] = [
-    { id: "hi", t: c4h[hiAt].t, price: hi, place: "above", text: `Самая высокая цена за 16 дней: ${f(hi)}. Закроется 4-часовая свеча выше — Хасрой купит.` },
-    { id: "lo", t: c4h[loAt].t, price: lo, place: "below", text: `Самая низкая цена за 16 дней: ${f(lo)}. Закроется ниже — Хасрой продаст.` },
-    { id: "now", t: c4h[n - 1].t, price, place: "left", text: `Сейчас ${f(price)}. До покупки ${upPct.toFixed(1)}% вверх, до продажи ${downPct.toFixed(1)}% вниз.` },
+    { id: "hi", t: c4h[hiAt].t, price: hi, place: "above", short: `выше ${f(hi)} — покупка`, text: `Самая высокая цена за 16 дней: ${f(hi)}. Закроется 4-часовая свеча выше — Хасрой купит.` },
+    { id: "lo", t: c4h[loAt].t, price: lo, place: "below", short: `ниже ${f(lo)} — продажа`, text: `Самая низкая цена за 16 дней: ${f(lo)}. Закроется ниже — Хасрой продаст.` },
+    { id: "now", t: c4h[n - 1].t, price, place: "left", short: `↑${upPct.toFixed(1)}% до покупки · ↓${downPct.toFixed(1)}% до продажи`, text: `Сейчас ${f(price)}. До покупки ${upPct.toFixed(1)}% вверх, до продажи ${downPct.toFixed(1)}% вниз.` },
   ];
 
   return {
