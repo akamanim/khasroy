@@ -66,6 +66,7 @@ export const FEATURES: FeatureGroup[] = [
     title: "Контент",
     items: [
       { name: "Khasroy studia", what: "Студия рилсов ИИнны: Хасрой пишет сценарий, показывает три варианта в разных образах с музыкой, вы правите и утверждаете; видео из 21 вида сцен собирается на GitHub.", status: "built", href: "/owner/reels" },
+      { name: "Khasroy Trading", what: "Живой график Binance Futures, анализ по правилу пробоя 4ч, журнал сигналов, бумажный кошелёк $200 и сигналы в Telegram (@Khasroy_bot).", status: "built", href: "/trading" },
     ],
   },
   {

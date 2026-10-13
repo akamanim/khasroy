@@ -132,6 +132,18 @@ export function LeftBoard({
         <a className={styles.link} href="/owner/reels">Открыть ›</a>
       </section>
 
+      <section className={styles.panel}>
+        <header className={styles.panelHead}>
+          <span className={styles.label}>Khasroy Trading</span>
+          <span className={styles.ok}>● новое</span>
+        </header>
+        <p className={styles.muted}>Живой график Binance, анализ, журнал сигналов и бумажный кошелёк $200.</p>
+        <div className={styles.linkRow}>
+          <a className={styles.link} href="/trading" target="_blank" rel="noopener noreferrer">Открыть ›</a>
+          <a className={styles.link} href="https://t.me/Khasroy_bot" target="_blank" rel="noopener noreferrer">Telegram ›</a>
+        </div>
+      </section>
+
       <section className={`${styles.panel} ${styles.soon}`}>
         <header className={styles.panelHead}>
           <span className={styles.label}>Лендинги</span>
