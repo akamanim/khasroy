@@ -767,8 +767,8 @@ export default function ReelsStudio() {
       if (mod && e.code === "KeyY") { e.preventDefault(); k.redo(); return; }
       if (mod && e.code === "KeyS") { e.preventDefault(); k.save(); return; }
       if (e.key === "Escape") { k.esc(); return; }
-      const el = e.target as HTMLElement;
-      if (el.closest("input, textarea, select, [contenteditable]") || mod || e.altKey) return;
+      const el = e.target instanceof Element ? e.target : null;
+      if (el?.closest("input, textarea, select, [contenteditable]") || mod || e.altKey) return;
       if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         e.preventDefault();
         if (e.shiftKey) (e.key === "ArrowLeft" ? k.prev : k.next)();
