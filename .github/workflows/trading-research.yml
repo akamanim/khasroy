@@ -18,6 +18,10 @@ on:
         description: "Holdout starts (YYYY-MM-DD)"
         required: false
         default: "2025-01-01"
+      focus:
+        description: "Close look at the finalists (1) instead of the full search"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -51,4 +55,5 @@ jobs:
         env:
           DATA_DIR: data
           SPLIT: ${{ inputs.split }}T00:00:00Z
+          FOCUS: ${{ inputs.focus }}
         run: node --max-old-space-size=6000 --experimental-strip-types scripts/trading-research.mjs
