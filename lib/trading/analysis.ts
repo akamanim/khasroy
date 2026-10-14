@@ -219,14 +219,59 @@ export function paperWallet(signals: JournalSignal[], start: number, riskPct: nu
 // the same rule on recent history, for the "как было бы" panel
 
 /** Trades of the live rule on each pair's 4h candles, merged in time. */
-export function historyTrades(series: Record<string, Candle[]>): (RTrade & { symbol: string })[] {
+export function historyTrades(series: Record<string, Candle[]>): (RTrade & { symbol: string; exitTime: number })[] {
   const rule = donchian(CHANNEL, STOP_ATR, { kind: "target", rr: RR });
-  const out: (RTrade & { symbol: string })[] = [];
+  const out: (RTrade & { symbol: string; exitTime: number })[] = [];
   for (const [symbol, c] of Object.entries(series)) {
     if (c.length < CHANNEL + 20) continue;
-    for (const t of run(c, rule.build(c).signals, rule.exit, 4)) out.push({ ...t, symbol });
+    for (const t of run(c, rule.build(c).signals, rule.exit, 4)) out.push({ ...t, symbol, exitTime: c[t.exitAt].t });
   }
   return out.sort((a, b) => a.time - b.time);
+}
+
+/** One month of the pretend account, drawn as a candle: open/close balance, and the extremes in between. */
+export type MonthBar = { t: number; open: number; close: number; high: number; low: number; pnl: number; trades: number; wins: number; partial: boolean };
+
+/**
+ * Month-by-month balance of a pretend account that takes every trade entered on or after `fromMs`,
+ * risking `riskPct` of the current balance each time. A trade counts in the month it closes.
+ */
+export function monthlyEquity(trades: { time: number; exitTime: number; r: number }[], start: number, riskPct: number, fromMs: number, nowMs = Date.now()) {
+  const list = trades.filter((t) => t.time >= fromMs).sort((a, b) => a.exitTime - b.exitTime);
+  const first = new Date(fromMs);
+  const now = new Date(nowMs);
+  const bars: MonthBar[] = [];
+  let v = start;
+  let peak = start;
+  let dd = 0;
+  let wins = 0;
+  let i = 0;
+  let y = first.getUTCFullYear();
+  let mo = first.getUTCMonth();
+  while (y < now.getUTCFullYear() || (y === now.getUTCFullYear() && mo <= now.getUTCMonth())) {
+    const from = Date.UTC(y, mo, 1);
+    const to = Date.UTC(y, mo + 1, 1);
+    const open = v;
+    let high = v;
+    let low = v;
+    let n = 0;
+    let w = 0;
+    while (i < list.length && list[i].exitTime < to) {
+      v += v * (riskPct / 100) * list[i].r;
+      high = Math.max(high, v);
+      low = Math.min(low, v);
+      peak = Math.max(peak, v);
+      dd = Math.max(dd, (peak - v) / peak);
+      n++;
+      if (list[i].r > 0) w++;
+      i++;
+    }
+    wins += w;
+    bars.push({ t: from, open, close: v, high, low, pnl: v - open, trades: n, wins: w, partial: to > nowMs });
+    mo++;
+    if (mo > 11) { mo = 0; y++; }
+  }
+  return { bars, end: v, trades: list.length, wins, maxDrawdownPct: dd * 100 };
 }
 
 /** Balance path of a pretend account over the trades (risk % of the balance each time). */

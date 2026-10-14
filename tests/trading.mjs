@@ -98,6 +98,22 @@ console.log("trading: ok");
   const rule = donchian(100, 1.5, { kind: "target", rr: 3 });
   assert.equal(h.length, run(series, rule.build(series).signals, rule.exit, 4).length);
   const e = equityPath(h, 200, 0.5);
+  // Monthly candles: trades count in the month they close; trades entered before the start date are skipped.
+  const { monthlyEquity } = await import("../lib/trading/analysis.ts");
+  const D = (y, m, d) => Date.UTC(y, m, d);
+  const me = monthlyEquity([
+    { time: D(2026, 0, 5), exitTime: D(2026, 0, 6), r: 3 },
+    { time: D(2026, 0, 30), exitTime: D(2026, 1, 2), r: -1 },
+    { time: D(2026, 2, 3), exitTime: D(2026, 2, 4), r: 3 },
+    { time: D(2025, 11, 31), exitTime: D(2026, 0, 2), r: 3 },
+  ], 1000, 1.5, D(2026, 0, 1), D(2026, 2, 20));
+  assert.equal(me.bars.length, 3);
+  assert.ok(Math.abs(me.bars[0].close - 1045) < 1e-9, "Jan: +3R at 1.5% of $1000");
+  assert.ok(Math.abs(me.bars[1].close - 1045 * 0.985) < 1e-9, "Feb: the trade closed on 2 Feb counts in February");
+  assert.ok(Math.abs(me.end - 1045 * 0.985 * 1.045) < 1e-9);
+  assert.equal(me.trades, 3);
+  assert.ok(me.bars[2].partial && !me.bars[0].partial);
+  assert.ok(me.bars.every((b) => b.low <= Math.min(b.open, b.close) && b.high >= Math.max(b.open, b.close)));
   // Chart trades: the same entries as the simulator, plus the still-open one; stories in plain words.
   const { chartTrades, tradeStory } = await import("../lib/trading/analysis.ts");
   const ct = chartTrades(series);

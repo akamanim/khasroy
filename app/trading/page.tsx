@@ -6,7 +6,7 @@
 // function (Binance answers there); live candles stream straight from Binance when the browser can.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { analyze, chartTrades, equityPath, historyTrades, journalTrade, paperWallet, tradeStory, type ChartTrade, type JournalSignal } from "@/lib/trading/analysis";
+import { analyze, chartTrades, historyTrades, journalTrade, monthlyEquity, paperWallet, tradeStory, type ChartTrade, type JournalSignal, type MonthBar } from "@/lib/trading/analysis";
 import type { Candle } from "@/lib/trading/smc";
 import styles from "./trading.module.css";
 
@@ -32,11 +32,59 @@ const short = (s: string) => s.replace("USDT", "");
 const decimals = (p: number) => (p >= 1000 ? 1 : p >= 10 ? 2 : p >= 1 ? 4 : p >= 0.1 ? 5 : 6);
 const fp = (p: number) => (Number.isFinite(p) ? p.toLocaleString("ru-RU", { minimumFractionDigits: decimals(p), maximumFractionDigits: decimals(p) }) : "—");
 const TV_INTERVAL: Record<string, string> = { "5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D" };
-/** Months covered by a balance path, rounded. */
-const months = (path: { t: number }[]) => Math.max(1, Math.round((path[path.length - 1].t - path[0].t) / (30 * 864e5)));
 const usd = (n: number) => `${n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const sign = (n: number, d = 2) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(d)}`;
 const TZ = -new Date().getTimezoneOffset() * 60; // show local time on the chart
+
+/** Monthly history block: a pretend $1000 account from 1 January, risking 1.5% per trade. */
+const HIST_START = 1000;
+const HIST_RISK = 1.5;
+const MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+const usd0 = (n: number) => `${n < 0 ? "−" : ""}$${Math.abs(Math.round(n)).toLocaleString("ru-RU")}`;
+const signUsd0 = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(Math.round(n)).toLocaleString("ru-RU")}`;
+
+/** One candle per month: body = balance at the start and end of the month, thin line = its extremes. */
+function MonthCandles({ bars, start }: { bars: MonthBar[]; start: number }) {
+  const W = 640, H = 250, L = 54, R = 10, T = 26, B = 30;
+  const hi = Math.max(start, ...bars.map((b) => b.high));
+  const lo = Math.min(start, ...bars.map((b) => b.low));
+  const pad = (hi - lo) * 0.12 || 1;
+  const top = hi + pad, bottom = Math.max(0, lo - pad);
+  const y = (v: number) => T + ((top - v) / (top - bottom || 1)) * (H - T - B);
+  const slot = (W - L - R) / Math.max(bars.length, 1);
+  const bw = Math.min(34, slot * 0.58);
+  const ticks = [0, 1, 2, 3].map((k) => bottom + ((top - bottom) * k) / 3);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Баланс по месяцам: зелёная свеча — месяц в плюс, красная — в минус" style={{ width: "100%", height: "auto", display: "block" }}>
+      {ticks.map((v) => (
+        <g key={v}>
+          <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.06)" />
+          <text x={L - 8} y={y(v) + 3.5} textAnchor="end" fontSize="10.5" fill="#6b7286">{usd0(v)}</text>
+        </g>
+      ))}
+      <line x1={L} x2={W - R} y1={y(start)} y2={y(start)} stroke="#8b93a7" strokeDasharray="4 4" />
+      <text x={W - R} y={y(start) - 5} textAnchor="end" fontSize="10" fill="#8b93a7">старт {usd0(start)}</text>
+      {bars.map((b, i) => {
+        const up = b.close >= b.open;
+        const col = up ? GREEN : RED;
+        const cx = L + slot * i + slot / 2;
+        const yTop = y(Math.max(b.open, b.close));
+        const yBot = y(Math.min(b.open, b.close));
+        const label = b.trades ? `${signUsd0(b.pnl)}` : "0";
+        const m = new Date(b.t);
+        return (
+          <g key={b.t} opacity={b.partial ? 0.8 : 1}>
+            <title>{`${MONTHS[m.getUTCMonth()]}: ${usd(b.open)} → ${usd(b.close)} (${sign(b.pnl)}$), сделок ${b.trades}, в плюс ${b.wins}${b.partial ? " — месяц ещё идёт" : ""}`}</title>
+            <line x1={cx} x2={cx} y1={y(b.high)} y2={y(b.low)} stroke={col} strokeWidth="1.6" />
+            <rect x={cx - bw / 2} y={yTop} width={bw} height={Math.max(2, yBot - yTop)} rx="3" fill={col} fillOpacity={b.trades ? 0.92 : 0.4} stroke={b.partial ? "#fff" : "none"} strokeOpacity="0.6" strokeDasharray={b.partial ? "3 2" : undefined} />
+            <text x={cx} y={up ? y(b.high) - 6 : y(b.low) + 14} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={col}>{label}</text>
+            <text x={cx} y={H - 10} textAnchor="middle" fontSize="11" fill="#8b93a7">{MONTHS[m.getUTCMonth()]}{b.partial ? "·" : ""}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
 
 // lightweight-charts is loaded once from the CDN (TradingView's open-source chart library).
 type LW = {
@@ -148,11 +196,31 @@ export default function TradingPage() {
 
   const prices = useMemo(() => Object.fromEntries(market.map((x) => [x.symbol, x.price])), [market]);
   const wallet = useMemo(() => paperWallet(journal, start, risk, { ...prices, ...(live ? { [symbol]: live.price } : {}) }), [journal, start, risk, prices, live, symbol]);
+  // Monthly history needs candles from before 1 January (the 100-candle channel must warm up): two pages per pair.
+  const [deep, setDeep] = useState<Record<string, Candle[]>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      const out: Record<string, Candle[]> = {};
+      await Promise.all(PAIRS.map(async (p) => {
+        try {
+          const latest = toCandles((await edge<{ candles: Raw[] }>({ action: "klines", symbol: p, interval: "4h", limit: 1500 })).candles);
+          const older = toCandles((await edge<{ candles: Raw[] }>({ action: "klines", symbol: p, interval: "4h", limit: 700, endTime: latest[0].t - 1 })).candles);
+          out[p] = [...older, ...latest].filter((x) => x.closed);
+        } catch { /* one pair missing is fine */ }
+      }));
+      if (!cancelled) setDeep(out);
+    };
+    load();
+    const t = setInterval(load, 30 * 60_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
   const history = useMemo(() => {
-    if (Object.keys(c4h).length < 6) return null;
-    const trades = historyTrades(c4h);
-    return { ...equityPath(trades, start, risk), list: trades };
-  }, [c4h, start, risk]);
+    if (Object.keys(deep).length < 6) return null;
+    const trades = historyTrades(deep);
+    const from = Date.UTC(new Date().getUTCFullYear(), 0, 1);
+    return monthlyEquity(trades, HIST_START, HIST_RISK, from);
+  }, [deep]);
   /** Trades drawn on the chart: the rule replayed on this pair's 4h candles, plus real signals from the journal. */
   const trades = useMemo<ChartTrade[]>(() => {
     const hist = c4h[symbol] ? chartTrades(c4h[symbol]) : [];
@@ -603,29 +671,28 @@ export default function TradingPage() {
 
             <article className={styles.history}>
               <header>
-                <h2>Проверка на прошлом</h2>
-                <span>те же правила, 12 монет</span>
+                <h2>Если бы с 1 января</h2>
+                <span>{usd0(HIST_START)} · риск {String(HIST_RISK).replace(".", ",")}% · 12 монет</span>
               </header>
               {history ? (
                 <>
                   <p className={styles.explain}>
-                    Если бы Хасрой торговал по этим правилам последние ~{months(history.path)} мес., начав с {usd(start)} и рискуя {usd(start * risk / 100)} ({risk}%) в каждой сделке, сейчас было бы:
+                    Хасрой торгует по тем же правилам: каждая свеча — один месяц. Зелёная — месяц закончился в плюс, красная — в минус. Подписано, сколько долларов месяц принёс или отнял.
                   </p>
                   <div className={styles.bigNum}>
-                    <small>{usd(start)} →</small>
-                    <b data-up={history.end >= start || undefined}>{usd(history.end)}</b>
-                    <em data-up={history.end >= start || undefined}>{sign(history.end - start)}$</em>
+                    <small>{usd(HIST_START)} →</small>
+                    <b data-up={history.end >= HIST_START || undefined}>{usd(history.end)}</b>
+                    <em data-up={history.end >= HIST_START || undefined}>{sign(history.end - HIST_START)}$ ({sign(((history.end - HIST_START) / HIST_START) * 100, 1)}%)</em>
                   </div>
-                  <svg className={styles.spark} viewBox="0 0 300 54" preserveAspectRatio="none" aria-hidden>
-                    <polyline points={spark(history.path)} fill="none" stroke={history.end >= start ? GREEN : RED} strokeWidth="1.6" />
-                  </svg>
+                  <MonthCandles bars={history.bars} start={HIST_START} />
                   <div className={styles.miniStats}>
+                    <span>{history.bars.filter((b) => b.pnl > 0).length} мес. в плюс · {history.bars.filter((b) => b.pnl < 0).length} в минус</span>
                     <span>{history.trades} сделок</span>
-                    <span>{Math.round(history.winRate * history.trades)} в плюс</span>
-                    <span>{history.trades - Math.round(history.winRate * history.trades)} в минус</span>
+                    <span>{history.wins} в плюс</span>
+                    <span>{history.trades - history.wins} в минус</span>
                     <span>худшее падение −{history.maxDrawdownPct.toFixed(0)}%</span>
                   </div>
-                  <p className={styles.muted}>Почему плюсовых сделок мало: каждая удачная приносит в 3 раза больше, чем теряет неудачная. Поэтому хватает примерно 1 удачной из 4, чтобы быть в нуле. За последние месяцы рынок был неудобный — вышел небольшой минус; на 2022–2026 годах в целом был плюс каждый год. Это прошлое, а не обещание.</p>
+                  <p className={styles.muted}>Плюсовых сделок меньше, чем минусовых: каждая удачная приносит втрое больше, чем теряет неудачная, поэтому хватает примерно одной из четырёх. Последняя свеча с точкой — текущий месяц, он ещё идёт. Комиссии Binance учтены. Это прошлое, а не обещание.</p>
                 </>
               ) : (
                 <p className={styles.muted}>Считаю по истории…</p>
