@@ -163,3 +163,17 @@
   .facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .toggles { flex-wrap: wrap; }
 }
+
+/* drawing toolbar (floating, TradingView-style) */
+.drawBar { position: absolute; z-index: 6; top: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; max-width: calc(100% - 20px); overflow-x: auto; padding: 6px 8px; border-radius: 12px; background: rgba(28, 31, 38, 0.96); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); scrollbar-width: none; }
+.drawBar::-webkit-scrollbar { display: none; }
+.drawBar button { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border: 0; border-radius: 8px; background: transparent; color: #d7dbe6; cursor: pointer; font-size: 15px; }
+.drawBar button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); }
+.drawBar button[data-on] { background: rgba(255, 196, 77, 0.22); color: var(--gold); }
+.drawBar button:disabled { opacity: 0.3; cursor: default; }
+.drawGrip { flex: none; padding: 0 6px 0 2px; color: #5b6070; font-size: 16px; user-select: none; }
+.drawSep { flex: none; width: 1px; height: 24px; margin: 0 4px; background: rgba(255, 255, 255, 0.12); }
+.drawLayer { position: absolute; top: 0; left: 0; z-index: 4; pointer-events: none; overflow: hidden; }
+.drawLayer svg { position: absolute; inset: 0; overflow: hidden; }
+.drawText { position: absolute; width: 160px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--gold); background: rgba(16, 20, 29, 0.95); color: var(--text); font-size: 13px; pointer-events: auto; outline: none; }
+.drawHint { position: absolute; left: 50%; bottom: 36px; transform: translateX(-50%); padding: 4px 10px; border-radius: 999px; background: rgba(16, 20, 29, 0.85); color: var(--soft); font-size: 11px; pointer-events: none; white-space: nowrap; }

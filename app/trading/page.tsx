@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { analyze, chartTrades, historyTrades, journalTrade, monthlyEquity, paperWallet, tradeStory, type ChartTrade, type JournalSignal, type MonthBar } from "@/lib/trading/analysis";
 import type { Candle } from "@/lib/trading/smc";
+import DrawingTools, { type DrawChartApi } from "./DrawingTools";
 import styles from "./trading.module.css";
 
 const EDGE = "https://kebzlrmzbygxwfubnykq.supabase.co/functions/v1/khasroy-trading";
@@ -100,6 +101,7 @@ type Series = {
   removePriceLine: (l: unknown) => void;
   applyOptions: (o: unknown) => void;
   priceToCoordinate: (p: number) => number | null;
+  coordinateToPrice: (y: number) => number | null;
 };
 type Chart = {
   addCandlestickSeries: (o: unknown) => Series;
@@ -111,6 +113,7 @@ type Chart = {
     scrollToRealTime: () => void;
     applyOptions: (o: unknown) => void;
     logicalToCoordinate: (l: number) => number | null;
+    coordinateToLogical: (x: number) => number | null;
     setVisibleLogicalRange: (r: { from: number; to: number }) => void;
   };
   subscribeClick: (cb: (p: { time?: number }) => void) => void;
@@ -306,6 +309,25 @@ export default function TradingPage() {
     el.appendChild(s);
     return () => { el.innerHTML = ""; };
   }, [symbol, frame, view]);
+
+  /** Coordinate bridge for the drawing tools: candle-grid index and price to pixels and back. */
+  const drawApi = useCallback((): DrawChartApi | null => {
+    const ch = chart.current;
+    const el = box.current;
+    const d = data.current;
+    if (!ch || !el || !d.length) return null;
+    const ts = ch.c.timeScale();
+    return {
+      width: Math.max(0, el.clientWidth - ch.c.priceScale("right").width()),
+      height: Math.max(0, el.clientHeight - 28),
+      toX: (l) => ts.logicalToCoordinate(l),
+      toY: (p) => ch.candles.priceToCoordinate(p),
+      fromX: (x) => ts.coordinateToLogical(x),
+      fromY: (y) => ch.candles.coordinateToPrice(y),
+      ref: d[d.length - 1].c,
+    };
+  }, []);
+  const drawFirst = useCallback(() => data.current[0]?.t, []);
 
   const toBar = (k: Candle) => ({ time: k.t / 1000 + TZ, open: k.o, high: k.h, low: k.l, close: k.c });
   const toVol = (k: Candle) => ({ time: k.t / 1000 + TZ, value: k.v, color: k.c >= k.o ? "rgba(38,208,124,0.35)" : "rgba(255,84,104,0.35)" });
@@ -576,6 +598,7 @@ export default function TradingPage() {
           <div className={styles.chart} ref={tvBox} hidden={view !== "draw"} />
           <div className={styles.chart} hidden={view !== "khasroy"}>
             <div className={styles.fill} ref={box} />
+            {view === "khasroy" && chartReady ? <DrawingTools symbol={symbol} frameMs={FRAME_MS[frame]} first={drawFirst} api={drawApi} /> : null}
             {layout ? (
               <div className={styles.overlay}>
                 <svg width="100%" height="100%">
