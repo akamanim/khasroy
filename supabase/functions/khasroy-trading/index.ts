@@ -25,7 +25,7 @@ const COSTS = { taker: 0.0005, maker: 0.0002, slippage: 0.0002 };
 const MAX_DAYS_OPEN = 30;
 
 // ---------- paper account ----------
-const PAPER = { start: 200, riskPct: 2, leverage: 5, maxOpen: 8, floor: 100 };
+const PAPER = { start: 200, riskPct: 2, leverage: 5, maxOpen: 8, maxSameSide: 3, floor: 100 };
 type Position = { symbol: string; side: "long" | "short"; entry: number; sl: number; tp: number; qty: number; notional: number; margin: number; riskUsd: number; opened: string };
 type Paper = {
   start: number; balance: number; peak: number; maxDd: number;
@@ -187,6 +187,7 @@ export function paperOpen(p: Paper, s: Signal, reason: string): string {
   const used = open.reduce((n, x) => n + x.margin, 0);
   let skip = "";
   if (p.halted) skip = `Счёт упал до ${usd(PAPER.floor)} — Хасрой остановлен и новые сделки не открывает.`;
+  else if (open.filter((x) => x.side === s.side).length >= PAPER.maxSameSide) skip = `Уже открыто ${PAPER.maxSameSide} сделок в ту же сторону — монеты ходят вместе, это почти одна и та же ставка. Новую не открываю.`;
   else if (open.length >= PAPER.maxOpen) skip = `Уже открыто ${open.length} сделок — это максимум, новую не открываю.`;
   const riskUsd = p.balance * (PAPER.riskPct / 100);
   const qty = riskUsd / stopDist;
@@ -266,7 +267,7 @@ async function scan() {
 
 Счёт: $${PAPER.start} (вымышленные деньги)
 Риск: ${PAPER.riskPct}% от счёта на сделку · плечо ×${PAPER.leverage}, изолированная маржа
-Не больше ${PAPER.maxOpen} сделок одновременно. Если счёт упадёт до $${PAPER.floor} — Хасрой остановится.
+Не больше ${PAPER.maxOpen} сделок одновременно и не больше ${PAPER.maxSameSide} в одну сторону (монеты ходят вместе). Если счёт упадёт до $${PAPER.floor} — Хасрой остановится.
 
 Пришлю отчёт, когда войду в сделку (почему вошёл и что жду), и когда она закроется — с результатом и статистикой счёта.
 Проверяю рынок в 02:00, 06:00, 10:00, 14:00, 18:00, 22:00 по Бишкеку. Сигналы бывают не каждый день — это нормально.
